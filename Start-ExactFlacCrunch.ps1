@@ -43,6 +43,16 @@ function Format-Bytes {
     '{0:N2} {1}' -f $v, $units[$i]
 }
 
+function Format-Elapsed {
+    param([Parameter(Mandatory)][TimeSpan]$Elapsed)
+
+    if ($Elapsed.Ticks -lt 0) { $Elapsed = [TimeSpan]::Zero }
+    if ($Elapsed.Days -gt 0) {
+        return ('{0}d {1:00}:{2:00}:{3:00}' -f $Elapsed.Days, $Elapsed.Hours, $Elapsed.Minutes, $Elapsed.Seconds)
+    }
+    return ('{0:00}:{1:00}:{2:00}' -f [int]$Elapsed.TotalHours, $Elapsed.Minutes, $Elapsed.Seconds)
+}
+
 function Get-SafeName {
     param(
         [Parameter(Mandatory)][string]$Value,
@@ -341,6 +351,7 @@ function Get-StatusColor {
         'OK' { return 'Green' }
         'RETRY' { return 'Yellow' }
         'FAIL' { return 'Red' }
+        'WAIT' { return 'DarkGray' }
         default { return 'White' }
     }
 }
@@ -364,6 +375,7 @@ function Format-VerificationText {
 function Render-InteractiveUi {
     param(
         [Parameter(Mandatory)][string]$AlbumName,
+        [Parameter(Mandatory)][DateTime]$RunStartedUtc,
         [Parameter(Mandatory)][int]$Processed,
         [Parameter(Mandatory)][int]$TotalFiles,
         [Parameter(Mandatory)][int]$Failed,
@@ -413,8 +425,13 @@ function Render-InteractiveUi {
 
     $script:__uiRowsWritten = 0
 
+    $elapsed = [DateTime]::UtcNow - $RunStartedUtc
+    if ($elapsed.Ticks -lt 0) { $elapsed = [TimeSpan]::Zero }
+    $elapsedText = Format-Elapsed -Elapsed $elapsed
+
     Write-UiLine -Text ("Exact Flac Cruncher | {0}" -f $AlbumName) -Color Cyan
-    Write-UiLine -Text ("Progress {0}/{1} | Failed {2} | Saved {3} | Queue {4} | Active {5}/{6}" -f $Processed, $TotalFiles, $Failed, (Format-Bytes $TotalSavedBytes), $QueueCount, $activeCount, $Workers.Count) -Color White
+    Write-UiLine -Text ("Progress {0}/{1} | Failed {2} | Elapsed {3} | Queue {4} | Active {5}/{6}" -f $Processed, $TotalFiles, $Failed, $elapsedText, $QueueCount, $activeCount, $Workers.Count) -Color White
+    Write-UiLine -Text ("TOTAL SAVED: {0}" -f (Format-Bytes $TotalSavedBytes)) -Color Green
     if ([string]::IsNullOrWhiteSpace($Banner)) {
         Write-UiLine -Text "Ctrl+C: Cancel safely. Will clean up temp files and restore original files on exit." -Color DarkGray
     }
@@ -423,7 +440,7 @@ function Render-InteractiveUi {
     }
     Write-UiLine -Text ("-" * $width) -Color DarkGray
 
-    $fixedRows = 12
+    $fixedRows = 13
     $remainingRows = [Math]::Max(6, $maxRows - $fixedRows)
     $workerRows = [Math]::Min($Workers.Count, [Math]::Max(4, [int][Math]::Floor($remainingRows * 0.45)))
     $eventRows = [Math]::Max(4, $remainingRows - $workerRows)
@@ -693,7 +710,9 @@ if (-not $flacCmd -or -not $metaflacCmd) { throw "'flac' and/or 'metaflac' not f
 
 $albumName = $rootItem.Name
 $safeAlbumName = Get-SafeName -Value $albumName
-$runStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+$runStartedLocal = Get-Date
+$runStartedUtc = $runStartedLocal.ToUniversalTime()
+$runStamp = $runStartedLocal.ToString('yyyyMMdd-HHmmss-fff')
 if ([string]::IsNullOrWhiteSpace($LogFolder)) {
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     if ([string]::IsNullOrWhiteSpace($desktopPath)) {
@@ -717,7 +736,7 @@ Exact Flac Cruncher v20250225.codex5.3
 Target: $RootFolder
 Log Root: $LogFolder
 Run Logs: $runLogDir
-Started: $(Get-Date -Format o)
+Started: $($runStartedLocal.ToString('o'))
 ===================================================================
 "@ | Out-File -LiteralPath $logFile -Encoding UTF8
 
@@ -887,6 +906,22 @@ $compressionResults = [System.Collections.Generic.List[object]]::new()
 $failedResults = [System.Collections.Generic.List[object]]::new()
 
 $recentEvents = [System.Collections.Generic.List[object]]::new()
+for ($i = 1; $i -le 25; $i++) {
+    $recentEvents.Add([PSCustomObject]@{
+            Time           = '--:--:--'
+            Status         = 'WAIT'
+            File           = '(waiting for first result)'
+            Attempt        = '-'
+            EmbeddedHash   = 'N/A'
+            CalcBeforeHash = 'N/A'
+            CalcAfterHash  = 'N/A'
+            Verification   = 'N/A'
+            BeforeAfter    = 'N/A'
+            Saved          = 'N/A'
+            CompressionPct = 'N/A'
+            Detail         = 'Pending'
+        }) | Out-Null
+}
 
 $workers = for ($i = 0; $i -lt $maxWorkers; $i++) {
     [PSCustomObject]@{
@@ -950,6 +985,7 @@ try {
             if ($uiDirty -or $sizeChanged -or (($nowUtc - $lastUiFrameUtc) -ge $uiFrameInterval)) {
                 $lastUiRenderRows = Render-InteractiveUi `
                     -AlbumName $albumName `
+                    -RunStartedUtc $runStartedUtc `
                     -Processed $processed `
                     -TotalFiles $totalFiles `
                     -Failed $failed `
@@ -974,6 +1010,7 @@ try {
             if ($interactive) {
                 $lastUiRenderRows = Render-InteractiveUi `
                     -AlbumName $albumName `
+                    -RunStartedUtc $runStartedUtc `
                     -Processed $processed `
                     -TotalFiles $totalFiles `
                     -Failed $failed `
@@ -1303,7 +1340,8 @@ try {
             $nowUtc = [DateTime]::UtcNow
             if (($nowUtc - $lastStatusUtc) -ge $statusInterval) {
                 $lastStatusUtc = $nowUtc
-                Write-Host ("Progress: {0}/{1}  Failed: {2}  Saved: {3}" -f $processed, $totalFiles, $failed, (Format-Bytes $totalSavedBytes))
+                $elapsedText = Format-Elapsed -Elapsed ($nowUtc - $runStartedUtc)
+                Write-Host ("Progress: {0}/{1}  Failed: {2}  Elapsed: {3}  Saved: {4}" -f $processed, $totalFiles, $failed, $elapsedText, (Format-Bytes $totalSavedBytes))
             }
         }
 
@@ -1324,19 +1362,19 @@ $topCompression = @(
     $compressionResults |
     Where-Object { $_.SavedBytes -gt 0 } |
     Sort-Object -Property SavedBytes -Descending |
-    Select-Object -First 5
+    Select-Object -First 3
 )
-$maxCompression = $null
-if ($topCompression.Count -gt 0) { $maxCompression = $topCompression[0] }
-
-$maxCompressionLine = "Max Single-File Save : N/A"
-if ($null -ne $maxCompression) {
-    $maxCompressionLine = "Max Single-File Save : {0} ({1:N2}%) | {2}" -f (Format-Bytes $maxCompression.SavedBytes), $maxCompression.SavedPct, $maxCompression.Path
-}
 
 $successful = [Math]::Max(0, ($processed - $failed))
 $pending = [Math]::Max(0, ($totalFiles - $processed))
 $failedListPath = Join-Path -Path $runLogDir -ChildPath ("failed-files_{0}.log" -f $runStamp)
+$finishedLocal = Get-Date
+$totalElapsed = $finishedLocal.ToUniversalTime() - $runStartedUtc
+if ($totalElapsed.Ticks -lt 0) { $totalElapsed = [TimeSpan]::Zero }
+$totalElapsedText = Format-Elapsed -Elapsed $totalElapsed
+$overallReductionPct = if ($totalOriginalBytes -gt 0) { [Math]::Round((($totalSavedBytes / [double]$totalOriginalBytes) * 100.0), 2) } else { 0.0 }
+$successRatePct = if ($totalFiles -gt 0) { [Math]::Round((($successful / [double]$totalFiles) * 100.0), 2) } else { 0.0 }
+$avgSavedPerSuccessBytes = if ($successful -gt 0) { [long][Math]::Round(($totalSavedBytes / [double]$successful), 0) } else { 0L }
 
 $failedLines = [System.Collections.Generic.List[string]]::new()
 $failedLines.Add("Exact Flac Cruncher - Failed Files") | Out-Null
@@ -1374,12 +1412,14 @@ $summaryLines.Add(("Failed Files         : {0}" -f $failed)) | Out-Null
 $summaryLines.Add(("Pending Files        : {0}" -f $pending)) | Out-Null
 $summaryLines.Add(("Total Files Found    : {0}" -f $totalFiles)) | Out-Null
 $summaryLines.Add(("Total Attempts       : {0}" -f $conversionAttempts)) | Out-Null
+$summaryLines.Add(("Success Rate         : {0:N2}%" -f $successRatePct)) | Out-Null
+$summaryLines.Add(("Total Script Time    : {0}" -f $totalElapsedText)) | Out-Null
 $summaryLines.Add(("Total Original Size  : {0}" -f (Format-Bytes $totalOriginalBytes))) | Out-Null
 $summaryLines.Add(("Total New Size       : {0}" -f (Format-Bytes $totalNewBytes))) | Out-Null
-$summaryLines.Add(("Total Space Saved    : {0}" -f (Format-Bytes $totalSavedBytes))) | Out-Null
+$summaryLines.Add(("TOTAL SPACE SAVED    : *** {0} ({1:N2}% of original) ***" -f (Format-Bytes $totalSavedBytes), $overallReductionPct)) | Out-Null
+$summaryLines.Add(("Avg Saved / Success  : {0}" -f (Format-Bytes $avgSavedPerSuccessBytes))) | Out-Null
 $summaryLines.Add(("Failed File Log      : {0}" -f $failedListPath)) | Out-Null
-$summaryLines.Add($maxCompressionLine) | Out-Null
-$summaryLines.Add("Top 5 Compression    :") | Out-Null
+$summaryLines.Add("Top 3 Compression    :") | Out-Null
 
 if ($topCompression.Count -eq 0) {
     $summaryLines.Add("  (No successful file conversions)") | Out-Null
@@ -1392,7 +1432,7 @@ else {
     }
 }
 
-$summaryLines.Add(("Finished             : {0}" -f (Get-Date -Format o))) | Out-Null
+$summaryLines.Add(("Finished             : {0}" -f ($finishedLocal.ToString('o')))) | Out-Null
 $summaryLines.Add("Logs                 : $runLogDir") | Out-Null
 $summaryLines.Add("===================================================================") | Out-Null
 
@@ -1407,9 +1447,10 @@ else {
     Write-Host "JOB COMPLETE"
 }
 Write-Host ("Processed: {0}/{1}  Success: {2}  Failed: {3}  Pending: {4}" -f $processed, $totalFiles, $successful, $failed, $pending)
-Write-Host ("Saved: {0}" -f (Format-Bytes $totalSavedBytes))
-Write-Host $maxCompressionLine
-Write-Host "Top 5 Compression:"
+Write-Host ("Elapsed: {0}" -f $totalElapsedText)
+Write-Host ("TOTAL SAVED: {0} ({1:N2}% of original)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct) -ForegroundColor Green
+Write-Host ("Success Rate: {0:N2}%  Avg Saved/Success: {1}" -f $successRatePct, (Format-Bytes $avgSavedPerSuccessBytes))
+Write-Host "Top 3 Compression:"
 if ($topCompression.Count -eq 0) {
     Write-Host "  (No successful file conversions)"
 }
