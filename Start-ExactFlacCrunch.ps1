@@ -137,6 +137,33 @@ function Try-GetFlacMd5 {
     }
 }
 
+function Set-FlacMd5IfMissing {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedMd5,
+        [Parameter(Mandatory)][string]$NullHash
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedMd5)) { return $false }
+
+    $current = Try-GetFlacMd5 -Path $Path
+    if (-not [string]::IsNullOrWhiteSpace($current) -and ($current -ne $NullHash)) {
+        return ($current -eq $ExpectedMd5)
+    }
+
+    try {
+        # Only write when MD5 is absent; keep existing valid embedded values unchanged.
+        $null = (& metaflac --set-md5sum=$ExpectedMd5 -- $Path 2>$null)
+    }
+    catch {
+        return $false
+    }
+
+    $after = Try-GetFlacMd5 -Path $Path
+    if ([string]::IsNullOrWhiteSpace($after)) { return $false }
+    return ($after -eq $ExpectedMd5)
+}
+
 function Normalize-FileSecurity {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -180,32 +207,456 @@ function Normalize-FileSecurity {
 # ----------------------------
 
 function Read-FlacProgress {
-    param([Parameter(Mandatory)][string]$ErrLogPath)
+    param(
+        [Parameter(Mandatory)][string]$ErrLogPath,
+        [hashtable]$Cache
+    )
 
-    if (-not (Test-Path -LiteralPath $ErrLogPath)) { return @{ Pct = 0; Ratio = 'N/A' } }
+    $default = @{ Pct = 0; Ratio = 'N/A' }
+    if (-not (Test-Path -LiteralPath $ErrLogPath)) { return $default }
+
+    $cacheKey = $ErrLogPath.ToLowerInvariant()
+    $entry = $null
+    if ($null -ne $Cache -and $Cache.ContainsKey($cacheKey)) { $entry = $Cache[$cacheKey] }
 
     try {
+        $fi = Get-Item -LiteralPath $ErrLogPath -ErrorAction Stop
+        $length = [long]$fi.Length
+
+        if ($null -ne $entry -and $entry.Length -eq $length) {
+            return @{ Pct = $entry.Pct; Ratio = $entry.Ratio }
+        }
+
+        $tailSize = 24576L
+        $startOffset = [Math]::Max(0L, $length - $tailSize)
+        $raw = ''
+
         $fs = [System.IO.FileStream]::new($ErrLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
         try {
+            [void]$fs.Seek($startOffset, [System.IO.SeekOrigin]::Begin)
             $sr = [System.IO.StreamReader]::new($fs)
             try {
                 $raw = $sr.ReadToEnd()
-                $matches = [regex]::Matches($raw, '(\d{1,3})% complete, ratio=([0-9.]+)')
-                if ($matches.Count -gt 0) {
-                    $m = $matches[$matches.Count - 1]
-                    $pct = [int]$m.Groups[1].Value
-                    if ($pct -lt 0) { $pct = 0 }
-                    if ($pct -gt 100) { $pct = 100 }
-                    return @{ Pct = $pct; Ratio = $m.Groups[2].Value }
-                }
             }
             finally { $sr.Dispose() }
         }
         finally { $fs.Dispose() }
+
+        $pct = if ($null -ne $entry) { [int]$entry.Pct } else { 0 }
+        $ratio = if ($null -ne $entry) { [string]$entry.Ratio } else { 'N/A' }
+
+        $matches = [regex]::Matches($raw, '(\d{1,3})% complete, ratio=([0-9.]+)')
+        if ($matches.Count -gt 0) {
+            $m = $matches[$matches.Count - 1]
+            $pct = [int]$m.Groups[1].Value
+            if ($pct -lt 0) { $pct = 0 }
+            if ($pct -gt 100) { $pct = 100 }
+            $ratio = $m.Groups[2].Value
+        }
+
+        if ($null -ne $Cache) {
+            $Cache[$cacheKey] = [PSCustomObject]@{
+                Length = $length
+                Pct    = $pct
+                Ratio  = $ratio
+            }
+        }
+
+        return @{ Pct = $pct; Ratio = $ratio }
+    }
+    catch {
+        if ($null -ne $entry) { return @{ Pct = $entry.Pct; Ratio = $entry.Ratio } }
+        return $default
+    }
+}
+
+function Format-HashForUi {
+    param(
+        [AllowNull()][string]$Hash,
+        [Parameter(Mandatory)][string]$NullHash
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Hash)) { return 'N/A' }
+    if ($Hash -eq $NullHash) { return 'NULL-EMBEDDED' }
+    $h = $Hash.ToLowerInvariant()
+    if ($h.Length -le 20) { return $h }
+    return ('{0}...{1}' -f $h.Substring(0, 10), $h.Substring($h.Length - 6))
+}
+
+function Truncate-Text {
+    param(
+        [AllowNull()][string]$Text,
+        [Parameter(Mandatory)][int]$Width
+    )
+
+    if ($Width -lt 1) { return '' }
+    if ($null -eq $Text) { $Text = '' }
+    if ($Text.Length -le $Width) { return $Text }
+    if ($Width -le 3) { return $Text.Substring(0, $Width) }
+    return ($Text.Substring(0, $Width - 3) + '...')
+}
+
+function Get-CompressionColor {
+    param([AllowNull()][string]$CompressionPct)
+
+    if ([string]::IsNullOrWhiteSpace($CompressionPct) -or $CompressionPct -eq 'N/A') {
+        return 'DarkGray'
+    }
+
+    $valueText = $CompressionPct.Trim().TrimEnd('%')
+    [double]$value = 0
+    if (-not [double]::TryParse($valueText, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$value)) {
+        return 'DarkGray'
+    }
+
+    # Positive-only gradient: more compression => stronger "good" color, no warning colors.
+    if ($value -ge 5.0) { return 'White' }           # Outstanding
+    if ($value -ge 3.0) { return 'Green' }           # Very good
+    if ($value -gt 1.0) { return 'Cyan' }            # Good
+    if ($value -gt 0.0) { return 'DarkCyan' }        # Any gain is positive
+    if ($value -eq 0.0) { return 'DarkGray' }        # No change
+    return 'DarkGray'                                # Expansion / worse result
+}
+
+function Get-StatusColor {
+    param([AllowNull()][string]$Status)
+    switch ($Status) {
+        'OK' { return 'Green' }
+        'RETRY' { return 'Yellow' }
+        'FAIL' { return 'Red' }
+        default { return 'White' }
+    }
+}
+
+function Get-VerificationColor {
+    param([AllowNull()][string]$Verification)
+
+    if ([string]::IsNullOrWhiteSpace($Verification)) { return 'DarkGray' }
+    if ($Verification -like 'PASS*') { return 'Green' }
+    if ($Verification -like 'FAIL*') { return 'Red' }
+    return 'Yellow'
+}
+
+function Format-VerificationText {
+    param([AllowNull()][string]$Verification)
+
+    if ([string]::IsNullOrWhiteSpace($Verification)) { return 'N/A' }
+    return $Verification
+}
+
+function Render-InteractiveUi {
+    param(
+        [Parameter(Mandatory)][string]$AlbumName,
+        [Parameter(Mandatory)][int]$Processed,
+        [Parameter(Mandatory)][int]$TotalFiles,
+        [Parameter(Mandatory)][int]$Failed,
+        [Parameter(Mandatory)][long]$TotalSavedBytes,
+        [Parameter(Mandatory)][int]$QueueCount,
+        [Parameter(Mandatory)][int]$MaxAttemptsPerFile,
+        [Parameter(Mandatory)][object[]]$Workers,
+        [AllowNull()][System.Collections.Generic.List[object]]$RecentEvents,
+        [Parameter(Mandatory)][hashtable]$ProgressCache,
+        [int]$PreviousRows = 0,
+        [switch]$ForceClear,
+        [string]$Banner = ''
+    )
+
+    $width = 120
+    $height = 30
+    try {
+        $width = [Math]::Max(100, [Console]::WindowWidth - 1)
+        $height = [Math]::Max(24, [Console]::WindowHeight)
     }
     catch { }
 
-    return @{ Pct = 0; Ratio = 'N/A' }
+    $maxRows = [Math]::Max(18, $height - 1)
+    if ($ForceClear) {
+        try { Clear-Host } catch { }
+    }
+
+    try { [Console]::SetCursorPosition(0, 0) } catch { }
+
+    if ($null -eq $RecentEvents) {
+        $RecentEvents = [System.Collections.Generic.List[object]]::new()
+    }
+
+    $activeWorkers = @($Workers | Where-Object { $_.Job -ne $null })
+    $activeCount = $activeWorkers.Count
+
+    $rowsWritten = 0
+    function Write-UiLine {
+        param(
+            [AllowNull()][string]$Text = '',
+            [ConsoleColor]$Color = [ConsoleColor]::Gray
+        )
+        $content = Truncate-Text -Text $Text -Width $width
+        Write-Host $content.PadRight($width) -ForegroundColor $Color
+        $script:__uiRowsWritten++
+    }
+
+    $script:__uiRowsWritten = 0
+
+    Write-UiLine -Text ("Exact Flac Cruncher | {0}" -f $AlbumName) -Color Cyan
+    Write-UiLine -Text ("Progress {0}/{1} | Failed {2} | Saved {3} | Queue {4} | Active {5}/{6}" -f $Processed, $TotalFiles, $Failed, (Format-Bytes $TotalSavedBytes), $QueueCount, $activeCount, $Workers.Count) -Color White
+    if ([string]::IsNullOrWhiteSpace($Banner)) {
+        Write-UiLine -Text "Ctrl+C: Cancel safely. Will clean up temp files and restore original files on exit." -Color DarkGray
+    }
+    else {
+        Write-UiLine -Text $Banner -Color Yellow
+    }
+    Write-UiLine -Text ("-" * $width) -Color DarkGray
+
+    $fixedRows = 12
+    $remainingRows = [Math]::Max(6, $maxRows - $fixedRows)
+    $workerRows = [Math]::Min($Workers.Count, [Math]::Max(4, [int][Math]::Floor($remainingRows * 0.45)))
+    $eventRows = [Math]::Max(4, $remainingRows - $workerRows)
+
+    $wCore = 6
+    $wState = 7
+    $wTry = 5
+    $wPct = 5
+    $wRatio = 8
+    $wBar = 22
+    $workerFixed = $wCore + $wState + $wTry + $wPct + $wRatio + $wBar
+    $workerSep = 6
+    $wFile = [Math]::Max(18, $width - ($workerFixed + $workerSep))
+
+    Write-UiLine -Text "Workers" -Color Cyan
+    Write-UiLine -Text (('Core'.PadRight($wCore) + '|' +
+            'State'.PadRight($wState) + '|' +
+            'Try'.PadRight($wTry) + '|' +
+            'Pct'.PadRight($wPct) + '|' +
+            'Ratio'.PadRight($wRatio) + '|' +
+            'Progress'.PadRight($wBar) + '|' +
+            'File'.PadRight($wFile))) -Color DarkCyan
+
+    for ($i = 0; $i -lt $workerRows; $i++) {
+        if ($i -ge $Workers.Count) {
+            Write-UiLine -Text '' -Color DarkGray
+            continue
+        }
+
+        $w = $Workers[$i]
+        if ($null -eq $w.Job) {
+            $line = (("C{0:D2}" -f $w.Id).PadRight($wCore) + '|' +
+                'IDLE'.PadRight($wState) + '|' +
+                '-'.PadRight($wTry) + '|' +
+                '-'.PadRight($wPct) + '|' +
+                '-'.PadRight($wRatio) + '|' +
+                ''.PadRight($wBar) + '|' +
+                ''.PadRight($wFile))
+            Write-UiLine -Text $line -Color DarkGray
+            continue
+        }
+
+        $p = Read-FlacProgress -ErrLogPath $w.Job.ErrLog -Cache $ProgressCache
+        $pct = [int]$p.Pct
+        $ratio = [string]$p.Ratio
+        if ($ratio -eq 'N/A') { $ratio = '-' }
+        $attempt = ("{0}/{1}" -f $w.Job.Attempt, $MaxAttemptsPerFile)
+
+        $barLen = [Math]::Max(8, $wBar - 2)
+        $fill = [int][Math]::Floor(($pct / 100.0) * $barLen)
+        if ($fill -lt 0) { $fill = 0 }
+        if ($fill -gt $barLen) { $fill = $barLen }
+        $bar = ('[' + ('#' * $fill).PadRight($barLen, '.') + ']')
+        $name = Truncate-Text -Text $w.Job.Name -Width $wFile
+
+        $line = (("C{0:D2}" -f $w.Id).PadRight($wCore) + '|' +
+            'BUSY'.PadRight($wState) + '|' +
+            $attempt.PadRight($wTry) + '|' +
+            ("{0,3}%" -f $pct).PadRight($wPct) + '|' +
+            $ratio.PadRight($wRatio) + '|' +
+            $bar.PadRight($wBar) + '|' +
+            $name.PadRight($wFile))
+        $lineColor = if ($pct -ge 100) { 'Green' } else { 'White' }
+        Write-UiLine -Text $line -Color $lineColor
+    }
+
+    if ($Workers.Count -gt $workerRows) {
+        Write-UiLine -Text ("... {0} more workers not shown (resize taller to view)." -f ($Workers.Count - $workerRows)) -Color DarkGray
+    }
+    else {
+        Write-UiLine -Text ("-" * $width) -Color DarkGray
+    }
+
+    $wTime = 8
+    $wStat = 6
+    $wTry2 = 7
+    $wComp = 13
+    $wSaved = 12
+    $wHash = 10
+    $eventFixed = $wTime + $wStat + $wTry2 + $wComp + $wSaved + $wHash
+    $eventSep = 7
+    $wTextTotal = [Math]::Max(34, $width - ($eventFixed + $eventSep))
+    $wFile = [int][Math]::Floor($wTextTotal * 0.62)
+    if ($wFile -lt 18) { $wFile = 18 }
+    if ($wFile -gt ($wTextTotal - 12)) { $wFile = $wTextTotal - 12 }
+    $wDetail = $wTextTotal - $wFile
+
+    Write-UiLine -Text "Recent Results (latest first)" -Color Cyan
+    Write-UiLine -Text (('Time'.PadRight($wTime) + '|' +
+            'Status'.PadRight($wStat) + '|' +
+            'Attempt'.PadRight($wTry2) + '|' +
+            'Compression %'.PadRight($wComp) + '|' +
+            'Saved'.PadRight($wSaved) + '|' +
+            'Verify'.PadRight($wHash) + '|' +
+            'File'.PadRight($wFile) + '|' +
+            'Detail'.PadRight($wDetail))) -Color DarkCyan
+
+    $rowsToPrint = [Math]::Min($eventRows, $RecentEvents.Count)
+    for ($i = 0; $i -lt $rowsToPrint; $i++) {
+        $row = $RecentEvents[$i]
+        $statusColor = Get-StatusColor -Status $row.Status
+        $cmpColor = Get-CompressionColor -CompressionPct $row.CompressionPct
+        $savedColor = $cmpColor
+        $verificationDisplay = Format-VerificationText -Verification ([string]$row.Verification)
+        $verificationColor = Get-VerificationColor -Verification $row.Verification
+        $fileText = Truncate-Text -Text ([string]$row.File) -Width $wFile
+        $detailText = Truncate-Text -Text ([string]$row.Detail) -Width $wDetail
+
+        Write-Host ([string]$row.Time).PadRight($wTime) -NoNewline -ForegroundColor DarkGray
+        Write-Host '|' -NoNewline -ForegroundColor DarkGray
+        Write-Host ([string]$row.Status).PadRight($wStat) -NoNewline -ForegroundColor $statusColor
+        Write-Host '|' -NoNewline -ForegroundColor DarkGray
+        Write-Host ([string]$row.Attempt).PadRight($wTry2) -NoNewline -ForegroundColor Gray
+        Write-Host '|' -NoNewline -ForegroundColor DarkGray
+        Write-Host ([string]$row.CompressionPct).PadRight($wComp) -NoNewline -ForegroundColor $cmpColor
+        Write-Host '|' -NoNewline -ForegroundColor DarkGray
+        Write-Host ([string]$row.Saved).PadRight($wSaved) -NoNewline -ForegroundColor $savedColor
+        Write-Host '|' -NoNewline -ForegroundColor DarkGray
+        Write-Host (Truncate-Text -Text $verificationDisplay -Width $wHash).PadRight($wHash) -NoNewline -ForegroundColor $verificationColor
+        Write-Host '|' -NoNewline -ForegroundColor DarkGray
+        Write-Host $fileText.PadRight($wFile) -NoNewline -ForegroundColor Gray
+        Write-Host '|' -NoNewline -ForegroundColor DarkGray
+        Write-Host $detailText.PadRight($wDetail) -ForegroundColor DarkGray
+        $script:__uiRowsWritten++
+    }
+
+    for ($i = $rowsToPrint; $i -lt $eventRows; $i++) {
+        Write-UiLine -Text '' -Color DarkGray
+    }
+
+    $rowsWritten = $script:__uiRowsWritten
+    $targetRows = [Math]::Max($rowsWritten, $PreviousRows)
+    for ($i = $rowsWritten; $i -lt $targetRows; $i++) {
+        Write-Host ''.PadRight($width)
+    }
+
+    return [Math]::Min($maxRows, $targetRows)
+}
+
+function Wrap-CellText {
+    param(
+        [AllowNull()][string]$Text,
+        [Parameter(Mandatory)][int]$Width
+    )
+
+    if ($Width -lt 1) { return @('') }
+    if ($null -eq $Text -or $Text -eq '') { return @('') }
+
+    $chunks = [System.Collections.Generic.List[string]]::new()
+    $remaining = $Text
+
+    while ($remaining.Length -gt $Width) {
+        $take = $Width
+        $slice = $remaining.Substring(0, $take)
+        $lastSpace = $slice.LastIndexOf(' ')
+        if ($lastSpace -ge 1) {
+            $chunks.Add($remaining.Substring(0, $lastSpace))
+            $remaining = $remaining.Substring($lastSpace + 1)
+        }
+        else {
+            $chunks.Add($slice)
+            $remaining = $remaining.Substring($take)
+        }
+    }
+
+    $chunks.Add($remaining)
+    return , $chunks.ToArray()
+}
+
+function Push-RecentEvent {
+    param(
+        [Parameter(Mandatory)][object]$List,
+        [ValidateSet('OK', 'RETRY', 'FAIL')][string]$Status,
+        [Parameter(Mandatory)][string]$File,
+        [Parameter(Mandatory)][string]$Attempt,
+        [string]$EmbeddedHash = 'N/A',
+        [string]$CalculatedBeforeHash = 'N/A',
+        [string]$CalculatedAfterHash = 'N/A',
+        [string]$Verification = 'N/A',
+        [string]$BeforeAfter = 'N/A',
+        [string]$Saved = 'N/A',
+        [string]$CompressionPct = 'N/A',
+        [string]$Detail = ''
+    )
+
+    if ($null -eq $List) { throw "Push-RecentEvent: event list is null." }
+    if (-not ($List -is [System.Collections.Generic.List[object]])) {
+        throw ("Push-RecentEvent: expected List[object], got {0}" -f $List.GetType().FullName)
+    }
+
+    $List.Insert(0, [PSCustomObject]@{
+            Time           = (Get-Date).ToString('HH:mm:ss')
+            Status         = $Status
+            File           = $File
+            Attempt        = $Attempt
+            EmbeddedHash   = $EmbeddedHash
+            CalcBeforeHash = $CalculatedBeforeHash
+            CalcAfterHash  = $CalculatedAfterHash
+            Verification   = $Verification
+            BeforeAfter    = $BeforeAfter
+            Saved          = $Saved
+            CompressionPct = $CompressionPct
+            Detail         = $Detail
+        })
+
+    if ($List.Count -gt 25) { $List.RemoveRange(25, $List.Count - 25) }
+}
+
+function Stop-ActiveJobsAndCleanup {
+    param([Parameter(Mandatory)][object[]]$Workers)
+
+    [int]$killed = 0
+    [int]$tmpDeleted = 0
+
+    foreach ($w in $Workers) {
+        if ($null -eq $w.Job) { continue }
+        $job = $w.Job
+
+        try {
+            if ($null -ne $job.Proc -and -not $job.Proc.HasExited) {
+                try {
+                    $job.Proc.Kill($true)
+                }
+                catch {
+                    try { Stop-Process -Id $job.Proc.Id -Force -ErrorAction Stop } catch { }
+                }
+                $killed++
+            }
+        }
+        catch { }
+
+        # Original files are only replaced after successful hash-chain verification.
+        # On cancellation, delete temp artifacts so originals remain intact.
+        if (-not [string]::IsNullOrWhiteSpace($job.Temp) -and (Test-Path -LiteralPath $job.Temp)) {
+            Safe-RemoveFile -Path $job.Temp
+            $tmpDeleted++
+        }
+
+        try {
+            if ($null -ne $job.Proc) { $job.Proc.Dispose() }
+        }
+        catch { }
+
+        $w.Job = $null
+    }
+
+    return [PSCustomObject]@{
+        Killed      = $killed
+        TempDeleted = $tmpDeleted
+    }
 }
 
 # Avoid touching $IsWindows (automatic var in PowerShell 7)
@@ -289,6 +740,77 @@ function Set-SingleCoreAffinity {
     }
 }
 
+function Try-GetDecodedAudioMd5 {
+    param(
+        [Parameter(Mandatory)][string]$FlacExePath,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    function Invoke-FlacHashFromStdout {
+        param(
+            [Parameter(Mandatory)][string]$ExePath,
+            [Parameter(Mandatory)][string]$Args
+        )
+
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $ExePath
+        $psi.Arguments = $Args
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $proc = [System.Diagnostics.Process]::new()
+        $proc.StartInfo = $psi
+        $null = $proc.Start()
+
+        $md5 = [System.Security.Cryptography.MD5]::Create()
+        try {
+            $buffer = New-Object byte[] 65536
+            $stream = $proc.StandardOutput.BaseStream
+
+            while ($true) {
+                $read = $stream.Read($buffer, 0, $buffer.Length)
+                if ($read -le 0) { break }
+                $null = $md5.TransformBlock($buffer, 0, $read, $buffer, 0)
+            }
+
+            $empty = [byte[]]::new(0)
+            $null = $md5.TransformFinalBlock($empty, 0, 0)
+
+            $stderr = $proc.StandardError.ReadToEnd()
+            $proc.WaitForExit()
+            if ($proc.ExitCode -ne 0) { return $null }
+
+            return ([BitConverter]::ToString($md5.Hash)).Replace('-', '').ToLowerInvariant()
+        }
+        finally {
+            $md5.Dispose()
+            $proc.Dispose()
+        }
+    }
+
+    try {
+        $quotedPath = Quote-WinArg $Path
+
+        # Prefer raw PCM hashing; use older-flac-compatible flags (-s instead of --totally-silent).
+        $rawArgVariants = @(
+            ("-d -c -s --force-raw-format --endian=little --sign=signed -- " + $quotedPath),
+            ("-d -c -s --force-raw-format -- " + $quotedPath)
+        )
+
+        foreach ($args in $rawArgVariants) {
+            $h = Invoke-FlacHashFromStdout -ExePath $FlacExePath -Args $args
+            if (-not [string]::IsNullOrWhiteSpace($h)) { return $h }
+        }
+    }
+    catch {
+        # Fall through to null return.
+    }
+
+    return $null
+}
+
 # ----------------------------
 # Cleanup stale .tmp (conservative)
 # Delete *.tmp only if same-base .flac exists (track.tmp <-> track.flac)
@@ -346,7 +868,7 @@ $nullHash = '00000000000000000000000000000000'
 
 $compressionResults = [System.Collections.Generic.List[object]]::new()
 
-$recent = [System.Collections.Generic.List[string]]::new()
+$recentEvents = [System.Collections.Generic.List[object]]::new()
 
 $workers = for ($i = 0; $i -lt $maxWorkers; $i++) {
     [PSCustomObject]@{
@@ -361,12 +883,99 @@ if ($interactive) {
     try { [Console]::CursorVisible = $false; Clear-Host } catch { $interactive = $false }
 }
 
+$script:CancelRequested = $false
+$restoreTreatControlCAsInput = $null
+if ($interactive) {
+    try {
+        $restoreTreatControlCAsInput = [Console]::TreatControlCAsInput
+        [Console]::TreatControlCAsInput = $true
+    }
+    catch {
+        $restoreTreatControlCAsInput = $null
+    }
+}
+
 # Non-interactive throttled status output
 $lastStatusUtc = [DateTime]::UtcNow
 $statusInterval = [TimeSpan]::FromSeconds(10)
+$runCanceled = $false
+$progressCache = @{}
+$lastUiFrameUtc = [DateTime]::MinValue
+$uiFrameInterval = [TimeSpan]::FromMilliseconds(250)
+$lastUiRenderRows = 0
+$lastUiSizeKey = ''
+$uiBanner = ''
+$uiDirty = $interactive
 
 try {
     while ($queue.Count -gt 0 -or (@($workers | Where-Object { $_.Job -ne $null }).Count -gt 0)) {
+        if ($interactive -and -not $script:CancelRequested) {
+            try {
+                while ([Console]::KeyAvailable) {
+                    $key = [Console]::ReadKey($true)
+                    if ((($key.Modifiers -band [ConsoleModifiers]::Control) -ne 0) -and $key.Key -eq [ConsoleKey]::C) {
+                        $script:CancelRequested = $true
+                        break
+                    }
+                }
+            }
+            catch { }
+        }
+
+        if ($interactive) {
+            $nowUtc = [DateTime]::UtcNow
+            $sizeKey = ''
+            try { $sizeKey = '{0}x{1}' -f [Console]::WindowWidth, [Console]::WindowHeight } catch { }
+            $sizeChanged = ($sizeKey -ne $lastUiSizeKey)
+            if ($sizeChanged) { $lastUiSizeKey = $sizeKey }
+
+            if ($uiDirty -or $sizeChanged -or (($nowUtc - $lastUiFrameUtc) -ge $uiFrameInterval)) {
+                $lastUiRenderRows = Render-InteractiveUi `
+                    -AlbumName $albumName `
+                    -Processed $processed `
+                    -TotalFiles $totalFiles `
+                    -Failed $failed `
+                    -TotalSavedBytes $totalSavedBytes `
+                    -QueueCount $queue.Count `
+                    -MaxAttemptsPerFile $maxAttemptsPerFile `
+                    -Workers @($workers) `
+                    -RecentEvents $recentEvents `
+                    -ProgressCache $progressCache `
+                    -PreviousRows $lastUiRenderRows `
+                    -ForceClear:$sizeChanged `
+                    -Banner $uiBanner
+                $lastUiFrameUtc = $nowUtc
+                $uiDirty = $false
+            }
+        }
+
+        if ($script:CancelRequested) {
+            $runCanceled = $true
+            $uiBanner = "Cancellation requested... stopping active jobs and cleaning temp files."
+            $uiDirty = $true
+            if ($interactive) {
+                $lastUiRenderRows = Render-InteractiveUi `
+                    -AlbumName $albumName `
+                    -Processed $processed `
+                    -TotalFiles $totalFiles `
+                    -Failed $failed `
+                    -TotalSavedBytes $totalSavedBytes `
+                    -QueueCount $queue.Count `
+                    -MaxAttemptsPerFile $maxAttemptsPerFile `
+                    -Workers @($workers) `
+                    -RecentEvents $recentEvents `
+                    -ProgressCache $progressCache `
+                    -PreviousRows $lastUiRenderRows `
+                    -Banner $uiBanner
+            }
+            Write-RunLog -Level WARN -Message "Cancellation requested by user (Ctrl+C)."
+
+            $cancelResult = Stop-ActiveJobsAndCleanup -Workers @($workers)
+            $queue.Clear()
+
+            Write-RunLog -Level WARN -Message ("Cancellation cleanup complete | ProcessesStopped: {0} | TempFilesDeleted: {1}" -f $cancelResult.Killed, $cancelResult.TempDeleted)
+            break
+        }
 
         foreach ($w in $workers) {
 
@@ -383,17 +992,42 @@ try {
                         try { $errText = (Get-Content -LiteralPath $job.ErrLog -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
                     }
 
-                    $postHash = $null
+                    $postCalcHash = $null
                     $finalized = $false
                     $failureReason = $null
                     $newSize = 0
                     $saved = 0
 
                     if ($exitCode -eq 0 -and (Test-Path -LiteralPath $job.Temp)) {
-                        $postHash = Try-GetFlacMd5 -Path $job.Temp
+                        if ([string]::IsNullOrWhiteSpace($job.PreCalcHash)) {
+                            $job.PreCalcHash = Try-GetDecodedAudioMd5 -FlacExePath $flacCmd.Source -Path $job.Original
+                        }
+                        $postCalcHash = Try-GetDecodedAudioMd5 -FlacExePath $flacCmd.Source -Path $job.Temp
                         $hashOK = $false
-                        if ($null -ne $postHash) {
-                            if ($job.PreHash -eq $nullHash -or $job.PreHash -eq $postHash) { $hashOK = $true }
+                        $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
+                        $calcBeforeOk = -not [string]::IsNullOrWhiteSpace($job.PreCalcHash)
+                        $calcAfterOk = -not [string]::IsNullOrWhiteSpace($postCalcHash)
+                        $calcMatch = $calcBeforeOk -and $calcAfterOk -and ($job.PreCalcHash -eq $postCalcHash)
+
+                        if ($calcMatch) {
+                            if ($embeddedPresent) {
+                                if (($job.EmbeddedHash -eq $job.PreCalcHash) -and ($job.EmbeddedHash -eq $postCalcHash)) {
+                                    $hashOK = $true
+                                }
+                            }
+                            else {
+                                $hashOK = $true
+                            }
+                        }
+
+                        if ($hashOK) {
+                            if (-not $embeddedPresent) {
+                                $md5Embedded = Set-FlacMd5IfMissing -Path $job.Temp -ExpectedMd5 $postCalcHash -NullHash $nullHash
+                                if (-not $md5Embedded) {
+                                    $failureReason = "Could not embed MD5 into output FLAC"
+                                    $hashOK = $false
+                                }
+                            }
                         }
 
                         if ($hashOK) {
@@ -407,9 +1041,7 @@ try {
                                     Move-Item -LiteralPath $job.Temp -Destination $job.Original -Force
                                     $replaced = $true
                                 }
-                                catch {
-                                    Start-Sleep -Milliseconds 200
-                                }
+                                catch { }
                             }
 
                             if ($replaced) {
@@ -430,7 +1062,8 @@ try {
 
                                 $savedPct = 0.0
                                 if ($job.OrigSize -gt 0) {
-                                    $savedPct = [Math]::Round((($saved / [double]$job.OrigSize) * 100.0), 2)
+                                    $savedPctRaw = [Math]::Round((($saved / [double]$job.OrigSize) * 100.0), 2)
+                                    $savedPct = [Math]::Max(0.0, $savedPctRaw)
                                 }
                                 $compressionResults.Add([PSCustomObject]@{
                                         Path       = $job.Original
@@ -440,11 +1073,21 @@ try {
                                         NewBytes   = $newSize
                                     }) | Out-Null
 
-                                $hashNote = if ($job.PreHash -eq $nullHash) { 'EMBEDDED' } else { 'MATCH' }
-                                $msg = "[OK] $($job.Name) | Attempt $($job.Attempt)/$maxAttemptsPerFile | Hash $hashNote | Saved $(Format-Bytes $saved)"
-                                $recent.Insert(0, $msg)
+                                $verification = if ($job.EmbeddedHash -eq $nullHash) { 'PASS/NEW' } else { 'PASS' }
+                                Push-RecentEvent -List $recentEvents `
+                                    -Status 'OK' `
+                                    -File $job.Name `
+                                    -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
+                                    -EmbeddedHash (Format-HashForUi -Hash $job.EmbeddedHash -NullHash $nullHash) `
+                                    -CalculatedBeforeHash (Format-HashForUi -Hash $job.PreCalcHash -NullHash $nullHash) `
+                                    -CalculatedAfterHash (Format-HashForUi -Hash $postCalcHash -NullHash $nullHash) `
+                                    -Verification $verification `
+                                    -BeforeAfter ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) `
+                                    -Saved (Format-Bytes $saved) `
+                                    -CompressionPct ("{0:N2}%" -f $savedPct) `
+                                    -Detail 'Replaced original'
 
-                                Write-RunLog -Level SUCCESS -Message ("File: {0} | Attempt: {1}/{2} | Hash: {3}->{4} | Size: {5}->{6} | Saved: {7}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $job.PreHash, $postHash, (Format-Bytes $job.OrigSize), (Format-Bytes $newSize), (Format-Bytes $saved))
+                                Write-RunLog -Level SUCCESS -Message ("File: {0} | Attempt: {1}/{2} | Embedded: {3} | CalcPre: {4} | CalcPost: {5} | Verification: {6} | Size: {7}->{8} | Saved: {9} ({10:N2}%)" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-Bytes $job.OrigSize), (Format-Bytes $newSize), (Format-Bytes $saved), $savedPct)
                                 $finalized = $true
                             }
                             else {
@@ -452,7 +1095,15 @@ try {
                             }
                         }
                         else {
-                            $failureReason = "Hash mismatch/unreadable"
+                            if (-not $calcBeforeOk -or -not $calcAfterOk) {
+                                $failureReason = "Could not calculate decoded-audio hash (pre or post)"
+                            }
+                            elseif ($embeddedPresent) {
+                                $failureReason = "3-hash check failed (embedded/pre/post mismatch)"
+                            }
+                            else {
+                                $failureReason = "2-hash calc check failed (no embedded hash present)"
+                            }
                         }
                     }
                     else {
@@ -476,21 +1127,61 @@ try {
                                     Attempts = $nextAttempt
                                 })
 
-                            $msg = "[RETRY] $($job.Name) | Attempt $($job.Attempt)/$maxAttemptsPerFile failed: $failureReason"
-                            $recent.Insert(0, $msg)
-                            Write-RunLog -Level WARN -Message ("Retrying | File: {0} | NextAttempt: {1}/{2} | Reason: {3} | STDERR: {4} | ErrLog: {5} | OutLog: {6}" -f $job.Original, $nextAttempt, $maxAttemptsPerFile, $failureReason, $errText, $job.ErrLog, $job.OutLog)
+                            $verification = 'FAIL-INCOMPLETE'
+                            if (-not [string]::IsNullOrWhiteSpace($job.PreCalcHash) -and -not [string]::IsNullOrWhiteSpace($postCalcHash)) {
+                                if ($job.EmbeddedHash -eq $nullHash) {
+                                    $verification = if ($job.PreCalcHash -eq $postCalcHash) { 'PASS-AUDIO' } else { 'FAIL-AUDIO' }
+                                }
+                                else {
+                                    $verification = if (($job.EmbeddedHash -eq $job.PreCalcHash) -and ($job.EmbeddedHash -eq $postCalcHash)) { 'PASS-3WAY' } else { 'FAIL-3WAY' }
+                                }
+                            }
+                            $beforeAfter = if ($newSize -gt 0) { ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) } else { ("{0} -> N/A" -f (Format-Bytes $job.OrigSize)) }
+                            Push-RecentEvent -List $recentEvents `
+                                -Status 'RETRY' `
+                                -File $job.Name `
+                                -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
+                                -EmbeddedHash (Format-HashForUi -Hash $job.EmbeddedHash -NullHash $nullHash) `
+                                -CalculatedBeforeHash (Format-HashForUi -Hash $job.PreCalcHash -NullHash $nullHash) `
+                                -CalculatedAfterHash (Format-HashForUi -Hash $postCalcHash -NullHash $nullHash) `
+                                -Verification $verification `
+                                -BeforeAfter $beforeAfter `
+                                -Saved 'N/A' `
+                                -CompressionPct 'N/A' `
+                                -Detail $failureReason
+                            Write-RunLog -Level WARN -Message ("Retrying | File: {0} | NextAttempt: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8} | ErrLog: {9} | OutLog: {10}" -f $job.Original, $nextAttempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, $errText, $job.ErrLog, $job.OutLog)
                         }
                         else {
                             $failed++
                             $processed++
-                            $msg = "[FAIL] $($job.Name) | Attempt $($job.Attempt)/$maxAttemptsPerFile | $failureReason"
-                            $recent.Insert(0, $msg)
-                            Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | STDERR: {4} | ErrLog: {5} | OutLog: {6}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $errText, $job.ErrLog, $job.OutLog)
+                            $verification = 'FAIL-INCOMPLETE'
+                            if (-not [string]::IsNullOrWhiteSpace($job.PreCalcHash) -and -not [string]::IsNullOrWhiteSpace($postCalcHash)) {
+                                if ($job.EmbeddedHash -eq $nullHash) {
+                                    $verification = if ($job.PreCalcHash -eq $postCalcHash) { 'PASS-AUDIO' } else { 'FAIL-AUDIO' }
+                                }
+                                else {
+                                    $verification = if (($job.EmbeddedHash -eq $job.PreCalcHash) -and ($job.EmbeddedHash -eq $postCalcHash)) { 'PASS-3WAY' } else { 'FAIL-3WAY' }
+                                }
+                            }
+                            $beforeAfter = if ($newSize -gt 0) { ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) } else { ("{0} -> N/A" -f (Format-Bytes $job.OrigSize)) }
+                            Push-RecentEvent -List $recentEvents `
+                                -Status 'FAIL' `
+                                -File $job.Name `
+                                -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
+                                -EmbeddedHash (Format-HashForUi -Hash $job.EmbeddedHash -NullHash $nullHash) `
+                                -CalculatedBeforeHash (Format-HashForUi -Hash $job.PreCalcHash -NullHash $nullHash) `
+                                -CalculatedAfterHash (Format-HashForUi -Hash $postCalcHash -NullHash $nullHash) `
+                                -Verification $verification `
+                                -BeforeAfter $beforeAfter `
+                                -Saved 'N/A' `
+                                -CompressionPct 'N/A' `
+                                -Detail $failureReason
+                            Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8} | ErrLog: {9} | OutLog: {10}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, $errText, $job.ErrLog, $job.OutLog)
                         }
                     }
 
-                    if ($recent.Count -gt 30) { $recent.RemoveRange(30, $recent.Count - 30) }
                     $w.Job = $null
+                    $uiDirty = $true
                 }
             }
 
@@ -516,8 +1207,9 @@ try {
                 $origItem = Get-Item -LiteralPath $original -Force
                 $origAcl = $null
                 try { $origAcl = Get-Acl -LiteralPath $original } catch { }
-                $preHash = Try-GetFlacMd5 -Path $original
-                if ($null -eq $preHash) { $preHash = $nullHash }
+                $embeddedHash = Try-GetFlacMd5 -Path $original
+                if ($null -eq $embeddedHash) { $embeddedHash = $nullHash }
+                $preCalcHash = $null
 
                 # Build ONE properly-quoted ArgumentList string; include "--" to end options.
                 # We restore timestamps and ACL ourselves after replacement.
@@ -546,64 +1238,19 @@ try {
                     FileId            = $queueItem.FileId
                     Name              = $queueItem.Name
                     Attempt           = $queueItem.Attempts
-                    PreHash           = $preHash
+                    EmbeddedHash      = $embeddedHash
+                    PreCalcHash       = $preCalcHash
                     OrigSize          = $origItem.Length
                     OrigAcl           = $origAcl
                     OrigCreationUtc   = $origItem.CreationTimeUtc
                     OrigLastWriteUtc  = $origItem.LastWriteTimeUtc
                     OrigLastAccessUtc = $origItem.LastAccessTimeUtc
                 }
+                $uiDirty = $true
             }
         }
 
-        # UI / Status
-        if ($interactive) {
-            $width = 120
-            try { $width = [Math]::Max(80, [Math]::Min([Console]::WindowWidth - 1, 140)) } catch { }
-
-            [Console]::SetCursorPosition(0, 0)
-            Write-Host ("Exact Flac Cruncher | {0}" -f $albumName).PadRight($width)
-            Write-Host ("Progress: {0}/{1}  Failed: {2}  Saved: {3}" -f $processed, $totalFiles, $failed, (Format-Bytes $totalSavedBytes)).PadRight($width)
-            Write-Host ("-" * $width)
-
-            foreach ($w in $workers) {
-                if ($null -eq $w.Job) {
-                    Write-Host ("Core {0:D2}: IDLE" -f $w.Id).PadRight($width)
-                }
-                else {
-                    $p = Read-FlacProgress -ErrLogPath $w.Job.ErrLog
-                    $pct = [int]$p.Pct
-                    $ratio = $p.Ratio
-
-                    $name = $w.Job.Name
-                    if ($name.Length -gt 60) { $name = $name.Substring(0, 57) + "..." }
-
-                    $barLen = 24
-                    $fill = [int][Math]::Floor(($pct / 100.0) * $barLen)
-                    if ($fill -lt 0) { $fill = 0 }
-                    if ($fill -gt $barLen) { $fill = $barLen }
-                    $bar = ("#" * $fill).PadRight($barLen, '.')
-
-                    Write-Host ("Core {0:D2}: [{1}] {2,3}%  r={3}  a={4}/{5}  {6}" -f $w.Id, $bar, $pct, $ratio, $w.Job.Attempt, $maxAttemptsPerFile, $name).PadRight($width)
-                }
-            }
-
-            Write-Host ("-" * $width)
-            $linesAvail = 8
-            try { $linesAvail = [Math]::Max(3, [Math]::Min(12, [Console]::WindowHeight - ($workers.Count + 6))) } catch { }
-
-            for ($i = 0; $i -lt $linesAvail; $i++) {
-                if ($i -lt $recent.Count) {
-                    $s = $recent[$i]
-                    if ($s.Length -gt $width) { $s = $s.Substring(0, $width) }
-                    Write-Host $s.PadRight($width)
-                }
-                else {
-                    Write-Host ("".PadRight($width))
-                }
-            }
-        }
-        else {
+        if (-not $interactive) {
             $nowUtc = [DateTime]::UtcNow
             if (($nowUtc - $lastStatusUtc) -ge $statusInterval) {
                 $lastStatusUtc = $nowUtc
@@ -611,10 +1258,13 @@ try {
             }
         }
 
-        Start-Sleep -Milliseconds 150
+        Start-Sleep -Milliseconds 75
     }
 }
 finally {
+    if ($interactive -and $null -ne $restoreTreatControlCAsInput) {
+        try { [Console]::TreatControlCAsInput = $restoreTreatControlCAsInput } catch { }
+    }
     if ($interactive) {
         try { [Console]::CursorVisible = $true } catch { }
     }
@@ -667,7 +1317,12 @@ $summaryText = [string]::Join([Environment]::NewLine, $summaryLines)
 $summaryText | Out-File -LiteralPath $logFile -Append -Encoding UTF8
 
 Write-Host ""
-Write-Host "JOB COMPLETE"
+if ($runCanceled) {
+    Write-Host "JOB CANCELED" -ForegroundColor Yellow
+}
+else {
+    Write-Host "JOB COMPLETE"
+}
 Write-Host ("Saved: {0}" -f (Format-Bytes $totalSavedBytes))
 Write-Host $maxCompressionLine
 Write-Host "Top 5 Compression:"
