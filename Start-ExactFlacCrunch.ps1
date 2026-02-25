@@ -218,12 +218,28 @@ function Read-FlacProgress {
     $cacheKey = $ErrLogPath.ToLowerInvariant()
     $entry = $null
     if ($null -ne $Cache -and $Cache.ContainsKey($cacheKey)) { $entry = $Cache[$cacheKey] }
+    $nowUtc = [DateTime]::UtcNow
+
+    if ($null -ne $entry) {
+        $hasNextRead = $entry.PSObject.Properties.Name -contains 'NextReadUtc'
+        if ($hasNextRead -and ($entry.NextReadUtc -gt $nowUtc)) {
+            return @{ Pct = $entry.Pct; Ratio = $entry.Ratio }
+        }
+    }
 
     try {
         $fi = Get-Item -LiteralPath $ErrLogPath -ErrorAction Stop
         $length = [long]$fi.Length
 
         if ($null -ne $entry -and $entry.Length -eq $length) {
+            if ($null -ne $Cache) {
+                $Cache[$cacheKey] = [PSCustomObject]@{
+                    Length      = $length
+                    Pct         = $entry.Pct
+                    Ratio       = $entry.Ratio
+                    NextReadUtc = $nowUtc.AddMilliseconds(700)
+                }
+            }
             return @{ Pct = $entry.Pct; Ratio = $entry.Ratio }
         }
 
@@ -256,9 +272,10 @@ function Read-FlacProgress {
 
         if ($null -ne $Cache) {
             $Cache[$cacheKey] = [PSCustomObject]@{
-                Length = $length
-                Pct    = $pct
-                Ratio  = $ratio
+                Length      = $length
+                Pct         = $pct
+                Ratio       = $ratio
+                NextReadUtc = $nowUtc.AddMilliseconds(700)
             }
         }
 
@@ -999,12 +1016,18 @@ try {
                     $saved = 0
 
                     if ($exitCode -eq 0 -and (Test-Path -LiteralPath $job.Temp)) {
+                        $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
                         if ([string]::IsNullOrWhiteSpace($job.PreCalcHash)) {
-                            $job.PreCalcHash = Try-GetDecodedAudioMd5 -FlacExePath $flacCmd.Source -Path $job.Original
+                            if ($embeddedPresent) {
+                                # Embedded stream MD5 is already the decoded-audio checksum for the source file.
+                                $job.PreCalcHash = $job.EmbeddedHash
+                            }
+                            else {
+                                $job.PreCalcHash = Try-GetDecodedAudioMd5 -FlacExePath $flacCmd.Source -Path $job.Original
+                            }
                         }
                         $postCalcHash = Try-GetDecodedAudioMd5 -FlacExePath $flacCmd.Source -Path $job.Temp
                         $hashOK = $false
-                        $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
                         $calcBeforeOk = -not [string]::IsNullOrWhiteSpace($job.PreCalcHash)
                         $calcAfterOk = -not [string]::IsNullOrWhiteSpace($postCalcHash)
                         $calcMatch = $calcBeforeOk -and $calcAfterOk -and ($job.PreCalcHash -eq $postCalcHash)
