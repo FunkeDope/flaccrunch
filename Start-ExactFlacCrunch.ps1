@@ -19,7 +19,11 @@ Assumptions:
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$RootFolder
+    [string]$RootFolder,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$LogFolder = (Join-Path -Path ([Environment]::GetFolderPath('Desktop')) -ChildPath 'flaccruch-logs')
 )
 
 Set-StrictMode -Version Latest
@@ -37,6 +41,43 @@ function Format-Bytes {
     $v = [double]$Bytes
     while ($v -ge 1024 -and $i -lt ($units.Count - 1)) { $v /= 1024; $i++ }
     '{0:N2} {1}' -f $v, $units[$i]
+}
+
+function Get-SafeName {
+    param(
+        [Parameter(Mandatory)][string]$Value,
+        [int]$MaxLength = 100
+    )
+
+    $invalid = [regex]::Escape(([string]::Join('', [System.IO.Path]::GetInvalidFileNameChars())))
+    $safe = [regex]::Replace($Value, "[{0}]" -f $invalid, '_')
+    # Avoid wildcard tokens that break Start-Process redirect path binding.
+    $safe = [regex]::Replace($safe, '[\[\]\*\?]', '_')
+    # Keep only filename-friendly characters for stable folder/log names.
+    $safe = [regex]::Replace($safe, '[^A-Za-z0-9._ -]', '_')
+    $safe = [regex]::Replace($safe, '\s+', ' ')
+    $safe = $safe.Trim(' ', '.')
+    if ([string]::IsNullOrWhiteSpace($safe)) { $safe = 'flac-job' }
+    if ($safe.Length -gt $MaxLength) { $safe = $safe.Substring(0, $MaxLength) }
+    return $safe
+}
+
+function Escape-WildcardPath {
+    param([Parameter(Mandatory)][string]$Path)
+    return [System.Management.Automation.WildcardPattern]::Escape($Path)
+}
+
+function Write-RunLog {
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [ValidateSet('INFO', 'WARN', 'ERROR', 'SUCCESS')]
+        [string]$Level = 'INFO'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($script:LogFile)) { return }
+    $ts = Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fffK'
+    "{0} | {1} | {2}" -f $ts, $Level, $Message |
+    Out-File -LiteralPath $script:LogFile -Append -Encoding UTF8
 }
 
 function Safe-RemoveFile {
@@ -183,15 +224,31 @@ $metaflacCmd = Get-Command metaflac -ErrorAction SilentlyContinue
 if (-not $flacCmd -or -not $metaflacCmd) { throw "'flac' and/or 'metaflac' not found in PATH." }
 
 $albumName = $rootItem.Name
-$scriptDir = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
-$logFile = Join-Path -Path $scriptDir -ChildPath "$albumName.log"
+$safeAlbumName = Get-SafeName -Value $albumName
+$runStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+if ([string]::IsNullOrWhiteSpace($LogFolder)) {
+    $desktopPath = [Environment]::GetFolderPath('Desktop')
+    if ([string]::IsNullOrWhiteSpace($desktopPath)) {
+        $desktopPath = Join-Path -Path $env:USERPROFILE -ChildPath 'Desktop'
+    }
+    $LogFolder = Join-Path -Path $desktopPath -ChildPath 'flaccruch-logs'
+}
 
-$tempLogDir = Join-Path -Path $env:TEMP -ChildPath ("FlacCrunchLogs_{0}" -f ([guid]::NewGuid().ToString('N').Substring(0, 8)))
-New-Item -ItemType Directory -Path $tempLogDir -Force | Out-Null
+New-Item -ItemType Directory -Path $LogFolder -Force | Out-Null
+$runLogDir = Join-Path -Path $LogFolder -ChildPath ("{0}_{1}" -f $safeAlbumName, $runStamp)
+New-Item -ItemType Directory -Path $runLogDir -Force | Out-Null
+
+$jobLogDir = Join-Path -Path $runLogDir -ChildPath 'jobs'
+New-Item -ItemType Directory -Path $jobLogDir -Force | Out-Null
+
+$logFile = Join-Path -Path $runLogDir -ChildPath ("{0}_{1}.log" -f $safeAlbumName, $runStamp)
+$script:LogFile = $logFile
 
 @"
 Exact Flac Cruncher v20250225.codex5.3
 Target: $RootFolder
+Log Root: $LogFolder
+Run Logs: $runLogDir
 Started: $(Get-Date -Format o)
 ===================================================================
 "@ | Out-File -LiteralPath $logFile -Encoding UTF8
@@ -256,9 +313,8 @@ $files = @(
 
 $totalFiles = $files.Count
 if ($totalFiles -eq 0) {
-    "No FLAC files found. Exiting." | Out-File -LiteralPath $logFile -Append -Encoding UTF8
+    Write-RunLog -Level INFO -Message "No FLAC files found. Exiting."
     Write-Host "No FLAC files found. Exiting."
-    Remove-Item -LiteralPath $tempLogDir -Recurse -Force -ErrorAction SilentlyContinue
     return
 }
 
@@ -266,8 +322,18 @@ if ($totalFiles -eq 0) {
 $maxWorkers = [Math]::Min([Environment]::ProcessorCount, $totalFiles)
 if ($maxWorkers -lt 1) { $maxWorkers = 1 }
 
-$queue = [System.Collections.Generic.Queue[System.IO.FileInfo]]::new()
-foreach ($f in $files) { $queue.Enqueue($f) }
+$maxAttemptsPerFile = 3
+$queue = [System.Collections.Generic.Queue[object]]::new()
+$fileOrdinal = 0
+foreach ($f in $files) {
+    $fileOrdinal++
+    $queue.Enqueue([PSCustomObject]@{
+            FileId   = $fileOrdinal
+            Path     = $f.FullName
+            Name     = $f.Name
+            Attempts = 1
+        })
+}
 
 $nullHash = '00000000000000000000000000000000'
 
@@ -276,6 +342,9 @@ $nullHash = '00000000000000000000000000000000'
 [long]$totalSavedBytes = 0
 [int]$processed = 0
 [int]$failed = 0
+[int]$conversionAttempts = 0
+
+$compressionResults = [System.Collections.Generic.List[object]]::new()
 
 $recent = [System.Collections.Generic.List[string]]::new()
 
@@ -308,13 +377,21 @@ try {
                 if ($job.Proc.HasExited) {
                     $exitCode = $job.Proc.ExitCode
                     $job.Proc.Dispose()
-                    $processed++
+
+                    $errText = ""
+                    if (Test-Path -LiteralPath $job.ErrLog) {
+                        try { $errText = (Get-Content -LiteralPath $job.ErrLog -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
+                    }
+
+                    $postHash = $null
+                    $finalized = $false
+                    $failureReason = $null
+                    $newSize = 0
+                    $saved = 0
 
                     if ($exitCode -eq 0 -and (Test-Path -LiteralPath $job.Temp)) {
-
                         $postHash = Try-GetFlacMd5 -Path $job.Temp
                         $hashOK = $false
-
                         if ($null -ne $postHash) {
                             if ($job.PreHash -eq $nullHash -or $job.PreHash -eq $postHash) { $hashOK = $true }
                         }
@@ -335,14 +412,8 @@ try {
                                 }
                             }
 
-                            if (-not $replaced) {
-                                $failed++
-                                $msg = "[FAIL] $($job.Name) | Could not replace original (locked?) | Temp left: $($job.Temp)"
-                                $recent.Insert(0, $msg)
-                                "FAILED (REPLACE) | File: $($job.Original)`n  Could not replace original after retries. Temp left: $($job.Temp)`n" |
-                                Out-File -LiteralPath $logFile -Append -Encoding UTF8
-                            }
-                            else {
+                            if ($replaced) {
+                                $processed++
                                 $totalOriginalBytes += $job.OrigSize
                                 $totalNewBytes += $newSize
                                 $totalSavedBytes += $saved
@@ -357,47 +428,65 @@ try {
                                 }
                                 catch { }
 
+                                $savedPct = 0.0
+                                if ($job.OrigSize -gt 0) {
+                                    $savedPct = [Math]::Round((($saved / [double]$job.OrigSize) * 100.0), 2)
+                                }
+                                $compressionResults.Add([PSCustomObject]@{
+                                        Path       = $job.Original
+                                        SavedBytes = $saved
+                                        SavedPct   = $savedPct
+                                        OrigBytes  = $job.OrigSize
+                                        NewBytes   = $newSize
+                                    }) | Out-Null
+
                                 $hashNote = if ($job.PreHash -eq $nullHash) { 'EMBEDDED' } else { 'MATCH' }
-                                $msg = "[OK] $($job.Name) | Hash $hashNote | Saved $(Format-Bytes $saved)"
+                                $msg = "[OK] $($job.Name) | Attempt $($job.Attempt)/$maxAttemptsPerFile | Hash $hashNote | Saved $(Format-Bytes $saved)"
                                 $recent.Insert(0, $msg)
 
-                                "SUCCESS | File: $($job.Original)`n  Hash: $($job.PreHash) -> $postHash`n  Size: $(Format-Bytes $job.OrigSize) -> $(Format-Bytes $newSize) (Saved $(Format-Bytes $saved))`n" |
-                                Out-File -LiteralPath $logFile -Append -Encoding UTF8
-
-                                # Cleanup per-job logs on success
-                                Safe-RemoveFile -Path $job.ErrLog
-                                Safe-RemoveFile -Path $job.OutLog
+                                Write-RunLog -Level SUCCESS -Message ("File: {0} | Attempt: {1}/{2} | Hash: {3}->{4} | Size: {5}->{6} | Saved: {7}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $job.PreHash, $postHash, (Format-Bytes $job.OrigSize), (Format-Bytes $newSize), (Format-Bytes $saved))
+                                $finalized = $true
+                            }
+                            else {
+                                $failureReason = "Could not replace original after retries (file may be locked)"
                             }
                         }
                         else {
-                            $failed++
-                            Safe-RemoveFile -Path $job.Temp
-                            $msg = "[FAIL] $($job.Name) | Hash mismatch/unreadable"
-                            $recent.Insert(0, $msg)
-
-                            $errText = ""
-                            if (Test-Path -LiteralPath $job.ErrLog) {
-                                try { $errText = (Get-Content -LiteralPath $job.ErrLog -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
-                            }
-
-                            "FAILED (HASH) | File: $($job.Original)`n  Hash: $($job.PreHash) -> $postHash`n  STDERR: $errText`n" |
-                            Out-File -LiteralPath $logFile -Append -Encoding UTF8
+                            $failureReason = "Hash mismatch/unreadable"
                         }
                     }
                     else {
-                        $failed++
+                        if ($exitCode -ne 0) {
+                            $failureReason = "flac exit $exitCode"
+                        }
+                        else {
+                            $failureReason = "flac produced no temp output"
+                        }
+                    }
+
+                    if (-not $finalized) {
                         Safe-RemoveFile -Path $job.Temp
 
-                        $errText = ""
-                        if (Test-Path -LiteralPath $job.ErrLog) {
-                            try { $errText = (Get-Content -LiteralPath $job.ErrLog -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
+                        if ($job.Attempt -lt $maxAttemptsPerFile) {
+                            $nextAttempt = $job.Attempt + 1
+                            $queue.Enqueue([PSCustomObject]@{
+                                    FileId   = $job.FileId
+                                    Path     = $job.Original
+                                    Name     = $job.Name
+                                    Attempts = $nextAttempt
+                                })
+
+                            $msg = "[RETRY] $($job.Name) | Attempt $($job.Attempt)/$maxAttemptsPerFile failed: $failureReason"
+                            $recent.Insert(0, $msg)
+                            Write-RunLog -Level WARN -Message ("Retrying | File: {0} | NextAttempt: {1}/{2} | Reason: {3} | STDERR: {4} | ErrLog: {5} | OutLog: {6}" -f $job.Original, $nextAttempt, $maxAttemptsPerFile, $failureReason, $errText, $job.ErrLog, $job.OutLog)
                         }
-
-                        $msg = "[FAIL] $($job.Name) | flac exit $exitCode"
-                        $recent.Insert(0, $msg)
-
-                        "FAILED (ERROR) | File: $($job.Original) | Exit: $exitCode`n  STDERR: $errText`n" |
-                        Out-File -LiteralPath $logFile -Append -Encoding UTF8
+                        else {
+                            $failed++
+                            $processed++
+                            $msg = "[FAIL] $($job.Name) | Attempt $($job.Attempt)/$maxAttemptsPerFile | $failureReason"
+                            $recent.Insert(0, $msg)
+                            Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | STDERR: {4} | ErrLog: {5} | OutLog: {6}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $errText, $job.ErrLog, $job.OutLog)
+                        }
                     }
 
                     if ($recent.Count -gt 30) { $recent.RemoveRange(30, $recent.Count - 30) }
@@ -407,15 +496,17 @@ try {
 
             # Assign new job
             if ($null -eq $w.Job -and $queue.Count -gt 0) {
-                $file = $queue.Dequeue()
-                $original = $file.FullName
+                $queueItem = $queue.Dequeue()
+                $original = $queueItem.Path
 
                 # Temp must be track.tmp (no ".flac" substring)
                 $temp = [System.IO.Path]::ChangeExtension($original, '.tmp')
 
-                $jobId = [guid]::NewGuid().ToString('N')
-                $errLog = Join-Path -Path $tempLogDir -ChildPath "$jobId.err.log"
-                $outLog = Join-Path -Path $tempLogDir -ChildPath "$jobId.out.log"
+                $jobId = "{0:D5}_{1}_a{2}" -f $queueItem.FileId, ([guid]::NewGuid().ToString('N').Substring(0, 8)), $queueItem.Attempts
+                $errLog = Join-Path -Path $jobLogDir -ChildPath "$jobId.err.log"
+                $outLog = Join-Path -Path $jobLogDir -ChildPath "$jobId.out.log"
+                $errLogRedirect = Escape-WildcardPath -Path $errLog
+                $outLogRedirect = Escape-WildcardPath -Path $outLog
 
                 Safe-RemoveFile -Path $temp
                 Safe-RemoveFile -Path $errLog
@@ -436,12 +527,13 @@ try {
                 " -- " +
                 (Quote-WinArg $original)
 
+                $conversionAttempts++
                 $proc = Start-Process -FilePath $flacCmd.Source `
                     -ArgumentList $argString `
                     -NoNewWindow `
                     -PassThru `
-                    -RedirectStandardError $errLog `
-                    -RedirectStandardOutput $outLog
+                    -RedirectStandardError $errLogRedirect `
+                    -RedirectStandardOutput $outLogRedirect
 
                 Set-SingleCoreAffinity -Process $proc -CoreIndexZeroBased $w.CoreIdx
 
@@ -451,7 +543,9 @@ try {
                     Temp              = $temp
                     ErrLog            = $errLog
                     OutLog            = $outLog
-                    Name              = $file.Name
+                    FileId            = $queueItem.FileId
+                    Name              = $queueItem.Name
+                    Attempt           = $queueItem.Attempts
                     PreHash           = $preHash
                     OrigSize          = $origItem.Length
                     OrigAcl           = $origAcl
@@ -490,7 +584,7 @@ try {
                     if ($fill -gt $barLen) { $fill = $barLen }
                     $bar = ("#" * $fill).PadRight($barLen, '.')
 
-                    Write-Host ("Core {0:D2}: [{1}] {2,3}%  r={3}  {4}" -f $w.Id, $bar, $pct, $ratio, $name).PadRight($width)
+                    Write-Host ("Core {0:D2}: [{1}] {2,3}%  r={3}  a={4}/{5}  {6}" -f $w.Id, $bar, $pct, $ratio, $w.Job.Attempt, $maxAttemptsPerFile, $name).PadRight($width)
                 }
             }
 
@@ -524,33 +618,68 @@ finally {
     if ($interactive) {
         try { [Console]::CursorVisible = $true } catch { }
     }
-    # Keep per-job logs if failures occurred; otherwise clean temp dir.
-    try {
-        if ($failed -eq 0 -and (Test-Path -LiteralPath $tempLogDir)) {
-            Remove-Item -LiteralPath $tempLogDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        elseif ($failed -gt 0) {
-            "INFO | Failures occurred; per-job logs kept at: $tempLogDir" |
-            Out-File -LiteralPath $logFile -Append -Encoding UTF8
-        }
-    }
-    catch { }
+    Write-RunLog -Level INFO -Message ("Run logs kept at: {0}" -f $runLogDir)
 }
 
-@"
-===================================================================
-JOB SUMMARY: $albumName
-Processed             : $processed
-Failed                : $failed
-Total Files Found     : $totalFiles
-Total Original Size   : $(Format-Bytes $totalOriginalBytes)
-Total New Size        : $(Format-Bytes $totalNewBytes)
-Total Space Saved     : $(Format-Bytes $totalSavedBytes)
-Finished              : $(Get-Date -Format o)
-===================================================================
-"@ | Out-File -LiteralPath $logFile -Append -Encoding UTF8
+$topCompression = @(
+    $compressionResults |
+    Where-Object { $_.SavedBytes -gt 0 } |
+    Sort-Object -Property SavedBytes -Descending |
+    Select-Object -First 5
+)
+$maxCompression = $null
+if ($topCompression.Count -gt 0) { $maxCompression = $topCompression[0] }
+
+$maxCompressionLine = "Max Single-File Save : N/A"
+if ($null -ne $maxCompression) {
+    $maxCompressionLine = "Max Single-File Save : {0} ({1:N2}%) | {2}" -f (Format-Bytes $maxCompression.SavedBytes), $maxCompression.SavedPct, $maxCompression.Path
+}
+
+$summaryLines = [System.Collections.Generic.List[string]]::new()
+$summaryLines.Add("===================================================================") | Out-Null
+$summaryLines.Add("JOB SUMMARY: $albumName") | Out-Null
+$summaryLines.Add(("Processed Files      : {0}" -f $processed)) | Out-Null
+$summaryLines.Add(("Failed Files         : {0}" -f $failed)) | Out-Null
+$summaryLines.Add(("Total Files Found    : {0}" -f $totalFiles)) | Out-Null
+$summaryLines.Add(("Total Attempts       : {0}" -f $conversionAttempts)) | Out-Null
+$summaryLines.Add(("Total Original Size  : {0}" -f (Format-Bytes $totalOriginalBytes))) | Out-Null
+$summaryLines.Add(("Total New Size       : {0}" -f (Format-Bytes $totalNewBytes))) | Out-Null
+$summaryLines.Add(("Total Space Saved    : {0}" -f (Format-Bytes $totalSavedBytes))) | Out-Null
+$summaryLines.Add($maxCompressionLine) | Out-Null
+$summaryLines.Add("Top 5 Compression    :") | Out-Null
+
+if ($topCompression.Count -eq 0) {
+    $summaryLines.Add("  (No successful file conversions)") | Out-Null
+}
+else {
+    $rank = 0
+    foreach ($entry in $topCompression) {
+        $rank++
+        $summaryLines.Add(("  {0}. Saved {1} ({2:N2}%) | {3}" -f $rank, (Format-Bytes $entry.SavedBytes), $entry.SavedPct, $entry.Path)) | Out-Null
+    }
+}
+
+$summaryLines.Add(("Finished             : {0}" -f (Get-Date -Format o))) | Out-Null
+$summaryLines.Add("Logs                 : $runLogDir") | Out-Null
+$summaryLines.Add("===================================================================") | Out-Null
+
+$summaryText = [string]::Join([Environment]::NewLine, $summaryLines)
+$summaryText | Out-File -LiteralPath $logFile -Append -Encoding UTF8
 
 Write-Host ""
 Write-Host "JOB COMPLETE"
 Write-Host ("Saved: {0}" -f (Format-Bytes $totalSavedBytes))
+Write-Host $maxCompressionLine
+Write-Host "Top 5 Compression:"
+if ($topCompression.Count -eq 0) {
+    Write-Host "  (No successful file conversions)"
+}
+else {
+    $rank = 0
+    foreach ($entry in $topCompression) {
+        $rank++
+        Write-Host ("  {0}. Saved {1} ({2:N2}%) | {3}" -f $rank, (Format-Bytes $entry.SavedBytes), $entry.SavedPct, $entry.Path)
+    }
+}
+Write-Host ("Logs:  {0}" -f $runLogDir)
 Write-Host ("Log:   {0}" -f $logFile)
