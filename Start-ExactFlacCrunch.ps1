@@ -884,6 +884,7 @@ $nullHash = '00000000000000000000000000000000'
 [int]$conversionAttempts = 0
 
 $compressionResults = [System.Collections.Generic.List[object]]::new()
+$failedResults = [System.Collections.Generic.List[object]]::new()
 
 $recentEvents = [System.Collections.Generic.List[object]]::new()
 
@@ -1141,7 +1142,20 @@ try {
                     if (-not $finalized) {
                         Safe-RemoveFile -Path $job.Temp
 
-                        if ($job.Attempt -lt $maxAttemptsPerFile) {
+                        $nonRetryableDecodeError = $false
+                        if (-not [string]::IsNullOrWhiteSpace($errText)) {
+                            if ($errText -match 'FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC' -or
+                                $errText -match 'while decoding FLAC input, state = FLAC__STREAM_DECODER_ABORTED') {
+                                $nonRetryableDecodeError = $true
+                            }
+                        }
+
+                        if ($nonRetryableDecodeError -and -not [string]::IsNullOrWhiteSpace($failureReason)) {
+                            $failureReason = "{0} (non-retryable decode corruption)" -f $failureReason
+                        }
+
+                        $shouldRetry = (($job.Attempt -lt $maxAttemptsPerFile) -and (-not $nonRetryableDecodeError))
+                        if ($shouldRetry) {
                             $nextAttempt = $job.Attempt + 1
                             $queue.Enqueue([PSCustomObject]@{
                                     FileId   = $job.FileId
@@ -1199,6 +1213,18 @@ try {
                                 -Saved 'N/A' `
                                 -CompressionPct 'N/A' `
                                 -Detail $failureReason
+                            $failedResults.Add([PSCustomObject]@{
+                                    Path        = $job.Original
+                                    Name        = $job.Name
+                                    Attempt     = ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile)
+                                    Reason      = $failureReason
+                                    Verification = $verification
+                                    EmbeddedMd5 = $job.EmbeddedHash
+                                    CalcPreMd5  = $job.PreCalcHash
+                                    CalcPostMd5 = $postCalcHash
+                                    ErrLog      = $job.ErrLog
+                                    OutLog      = $job.OutLog
+                                }) | Out-Null
                             Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8} | ErrLog: {9} | OutLog: {10}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, $errText, $job.ErrLog, $job.OutLog)
                         }
                     }
@@ -1308,16 +1334,50 @@ if ($null -ne $maxCompression) {
     $maxCompressionLine = "Max Single-File Save : {0} ({1:N2}%) | {2}" -f (Format-Bytes $maxCompression.SavedBytes), $maxCompression.SavedPct, $maxCompression.Path
 }
 
+$successful = [Math]::Max(0, ($processed - $failed))
+$pending = [Math]::Max(0, ($totalFiles - $processed))
+$failedListPath = Join-Path -Path $runLogDir -ChildPath ("failed-files_{0}.log" -f $runStamp)
+
+$failedLines = [System.Collections.Generic.List[string]]::new()
+$failedLines.Add("Exact Flac Cruncher - Failed Files") | Out-Null
+$failedLines.Add(("Album    : {0}" -f $albumName)) | Out-Null
+$failedLines.Add(("Finished : {0}" -f (Get-Date -Format o))) | Out-Null
+$failedLines.Add(("Failed   : {0}" -f $failedResults.Count)) | Out-Null
+$failedLines.Add("===================================================================") | Out-Null
+if ($failedResults.Count -eq 0) {
+    $failedLines.Add("No permanently failed files.") | Out-Null
+}
+else {
+    $index = 0
+    foreach ($entry in $failedResults) {
+        $index++
+        $failedLines.Add(("{0}. {1}" -f $index, $entry.Path)) | Out-Null
+        $failedLines.Add(("   Attempt      : {0}" -f $entry.Attempt)) | Out-Null
+        $failedLines.Add(("   Reason       : {0}" -f $entry.Reason)) | Out-Null
+        $failedLines.Add(("   Verification : {0}" -f $entry.Verification)) | Out-Null
+        $failedLines.Add(("   Embedded MD5 : {0}" -f $entry.EmbeddedMd5)) | Out-Null
+        $failedLines.Add(("   CalcPre MD5  : {0}" -f $entry.CalcPreMd5)) | Out-Null
+        $failedLines.Add(("   CalcPost MD5 : {0}" -f $entry.CalcPostMd5)) | Out-Null
+        $failedLines.Add(("   ErrLog       : {0}" -f $entry.ErrLog)) | Out-Null
+        $failedLines.Add(("   OutLog       : {0}" -f $entry.OutLog)) | Out-Null
+        $failedLines.Add("") | Out-Null
+    }
+}
+[string]::Join([Environment]::NewLine, $failedLines) | Out-File -LiteralPath $failedListPath -Encoding UTF8
+
 $summaryLines = [System.Collections.Generic.List[string]]::new()
 $summaryLines.Add("===================================================================") | Out-Null
 $summaryLines.Add("JOB SUMMARY: $albumName") | Out-Null
 $summaryLines.Add(("Processed Files      : {0}" -f $processed)) | Out-Null
+$summaryLines.Add(("Successful Files     : {0}" -f $successful)) | Out-Null
 $summaryLines.Add(("Failed Files         : {0}" -f $failed)) | Out-Null
+$summaryLines.Add(("Pending Files        : {0}" -f $pending)) | Out-Null
 $summaryLines.Add(("Total Files Found    : {0}" -f $totalFiles)) | Out-Null
 $summaryLines.Add(("Total Attempts       : {0}" -f $conversionAttempts)) | Out-Null
 $summaryLines.Add(("Total Original Size  : {0}" -f (Format-Bytes $totalOriginalBytes))) | Out-Null
 $summaryLines.Add(("Total New Size       : {0}" -f (Format-Bytes $totalNewBytes))) | Out-Null
 $summaryLines.Add(("Total Space Saved    : {0}" -f (Format-Bytes $totalSavedBytes))) | Out-Null
+$summaryLines.Add(("Failed File Log      : {0}" -f $failedListPath)) | Out-Null
 $summaryLines.Add($maxCompressionLine) | Out-Null
 $summaryLines.Add("Top 5 Compression    :") | Out-Null
 
@@ -1346,6 +1406,7 @@ if ($runCanceled) {
 else {
     Write-Host "JOB COMPLETE"
 }
+Write-Host ("Processed: {0}/{1}  Success: {2}  Failed: {3}  Pending: {4}" -f $processed, $totalFiles, $successful, $failed, $pending)
 Write-Host ("Saved: {0}" -f (Format-Bytes $totalSavedBytes))
 Write-Host $maxCompressionLine
 Write-Host "Top 5 Compression:"
@@ -1359,5 +1420,6 @@ else {
         Write-Host ("  {0}. Saved {1} ({2:N2}%) | {3}" -f $rank, (Format-Bytes $entry.SavedBytes), $entry.SavedPct, $entry.Path)
     }
 }
+Write-Host ("Failed List: {0}" -f $failedListPath)
 Write-Host ("Logs:  {0}" -f $runLogDir)
 Write-Host ("Log:   {0}" -f $logFile)
