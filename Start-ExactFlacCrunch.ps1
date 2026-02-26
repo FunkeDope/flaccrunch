@@ -1188,7 +1188,8 @@ try {
                                 -not [string]::IsNullOrWhiteSpace($postCalcHash) -and
                                 ($job.PreCalcHash -eq $postCalcHash)) {
                                 if ($embeddedPresent) { 'MATCH' } else { 'MATCH|NEW' }
-                            } else { 'MISMATCH' }
+                            }
+                            else { 'MISMATCH' }
                             $beforeAfter = if ($newSize -gt 0) { ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) } else { ("{0} -> N/A" -f (Format-Bytes $job.OrigSize)) }
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'RETRY' `
@@ -1211,7 +1212,8 @@ try {
                                 -not [string]::IsNullOrWhiteSpace($postCalcHash) -and
                                 ($job.PreCalcHash -eq $postCalcHash)) {
                                 if ($embeddedPresent) { 'MATCH' } else { 'MATCH|NEW' }
-                            } else { 'MISMATCH' }
+                            }
+                            else { 'MISMATCH' }
                             $beforeAfter = if ($newSize -gt 0) { ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) } else { ("{0} -> N/A" -f (Format-Bytes $job.OrigSize)) }
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'FAIL' `
