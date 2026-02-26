@@ -55,7 +55,8 @@ function Format-Bytes {
     $i = 0
     $v = [double]$Bytes
     while ($v -ge 1024 -and $i -lt ($units.Count - 1)) { $v /= 1024; $i++ }
-    '{0:N2} {1}' -f $v, $units[$i]
+    $number = $v.ToString('00.00', [System.Globalization.CultureInfo]::InvariantCulture)
+    '{0,8} {1}' -f $number, $units[$i]
 }
 
 function Format-Elapsed {
@@ -460,7 +461,7 @@ function Get-VerificationColor {
     param([AllowNull()][string]$Verification)
 
     if ([string]::IsNullOrWhiteSpace($Verification)) { return 'DarkGray' }
-    if ($Verification -eq 'MATCH|NEW') { return 'Magenta' }
+    if ($Verification -eq 'MATCH|NEW') { return 'Green' }
     if ($Verification -eq 'MATCH') { return 'Cyan' }
     if ($Verification -eq 'MISMATCH') { return 'Red' }
     return 'Yellow'
@@ -474,11 +475,14 @@ function Get-WorkerStateColor {
     )
 
     switch ($State) {
-        'HASHIN' { return 'Blue' }
-        'HASHOUT' { return 'Magenta' }
+        'HASHIN' { return 'Yellow' }
+        'HASHOUT' { return 'DarkYellow' }
         'HASHING' { return 'DarkYellow' }
         'FINAL' { return 'Cyan' }
-        'ENCODE' { return 'White' }
+        'ENCODE' {
+            if ($Pct -ge 100) { return 'Green' }
+            return 'White'
+        }
         'IDLE' { return 'DarkGray' }
         default {
             if ($Stage -eq 'HASHING') { return 'DarkYellow' }
