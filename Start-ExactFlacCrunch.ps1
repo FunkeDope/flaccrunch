@@ -1,18 +1,21 @@
 <#
-Exact Flac Cruncher (Corrected / Linted)
+.SYNOPSIS
+Batch recompress FLAC files in place with decoded-audio integrity verification.
 
-Goals (per requirements):
-- Per-file temp outputs ending in ".tmp" with NO ".flac" substring (track.tmp, not track.flac.tmp).
-- Invoke flac correctly with spaces/quotes handled; enforce flac -o single-file restriction by guaranteeing only one input arg.
-- Redirect stdout+stderr to per-job logs (no console spam).
-- Bind each flac process to a single logical core when possible (Windows affinity mask up to 64 logical processors; if >64, warn and skip affinity).
-- Preserve original timestamps WITHOUT inheriting permissions (use --no-preserve-modtime, then restore timestamps).
-- Normalize final file attributes/ACLs (clear ReadOnly, restore original ACL).
-- Stable CLI UI (interactive ConsoleHost) and non-interactive status output.
+.DESCRIPTION
+Scans a root folder recursively for .flac files, runs `flac -8 -V` into per-file
+`.tmp` outputs, verifies decoded-audio MD5 consistency, and replaces originals only
+after verification succeeds. The script keeps per-run/per-job logs, restores source
+timestamps/ACLs, and supports safe cancellation.
 
-Assumptions:
-- Windows host (ProcessorAffinity semantics); flac.exe and metaflac.exe in PATH.
+.PARAMETER RootFolder
+Root directory to scan recursively for FLAC files.
 
+.PARAMETER LogFolder
+Directory where run logs are stored. A timestamped subfolder is created per run.
+
+.NOTES
+Requires `flac` and `metaflac` in PATH.
 #>
 
 [CmdletBinding()]
@@ -29,9 +32,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ----------------------------
-# Helpers (required)
-# ----------------------------
+# Core helper functions
 
 function Format-Bytes {
     param([Parameter(Mandatory)][long]$Bytes)
@@ -61,9 +62,9 @@ function Get-SafeName {
 
     $invalid = [regex]::Escape(([string]::Join('', [System.IO.Path]::GetInvalidFileNameChars())))
     $safe = [regex]::Replace($Value, "[{0}]" -f $invalid, '_')
-    # Avoid wildcard tokens that break Start-Process redirect path binding.
+    # Remove wildcard tokens that can break Start-Process redirection binding.
     $safe = [regex]::Replace($safe, '[\[\]\*\?]', '_')
-    # Keep only filename-friendly characters for stable folder/log names.
+    # Keep output predictable by limiting to filename-safe characters.
     $safe = [regex]::Replace($safe, '[^A-Za-z0-9._ -]', '_')
     $safe = [regex]::Replace($safe, '\s+', ' ')
     $safe = $safe.Trim(' ', '.')
@@ -102,9 +103,8 @@ function Safe-RemoveFile {
 
 function Quote-WinArg {
     <#
-      CreateProcess-style quoting suitable for Start-Process when UseShellExecute is false
-      (which is the case when redirecting StdOut/StdErr).
-      This prevents path-with-spaces splitting that caused flac to think multiple input files existed.
+      Windows CreateProcess-style quoting for Start-Process when UseShellExecute is false
+      (for redirected stdout/stderr). Prevents path splitting for spaced filenames.
     #>
     param([Parameter(Mandatory)][string]$Arg)
 
@@ -137,7 +137,7 @@ function Quote-WinArg {
 function Try-GetFlacMd5 {
     param([Parameter(Mandatory)][string]$Path)
     try {
-        # Use "--" to end options in case the path begins with '-'
+        # End option parsing in case a path starts with '-'.
         $h = (& metaflac --show-md5sum --no-filename -- $Path 2>$null).Trim()
         if ([string]::IsNullOrWhiteSpace($h)) { return $null }
         return $h
@@ -162,7 +162,7 @@ function Set-FlacMd5IfMissing {
     }
 
     try {
-        # Only write when MD5 is absent; keep existing valid embedded values unchanged.
+        # Write only when embedded MD5 is missing; keep existing valid values.
         $null = (& metaflac --set-md5sum=$ExpectedMd5 -- $Path 2>$null)
     }
     catch {
@@ -182,7 +182,7 @@ function Normalize-FileSecurity {
 
     if (-not (Test-Path -LiteralPath $Path)) { return }
 
-    # Ensure resulting file is not ReadOnly.
+    # Clear ReadOnly on the destination file.
     try {
         $item = Get-Item -LiteralPath $Path -Force
         if (($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
@@ -191,8 +191,7 @@ function Normalize-FileSecurity {
     }
     catch { }
 
-    # Keep access the same as the original file so elevated runs do not
-    # leave behind admin-only ACLs.
+    # Restore source ACL so elevated runs do not leave restrictive ACLs behind.
     if ($null -ne $BaselineAcl) {
         try {
             Set-Acl -LiteralPath $Path -AclObject $BaselineAcl
@@ -201,7 +200,7 @@ function Normalize-FileSecurity {
         catch { }
     }
 
-    # Fallback: if ACL inheritance was protected, re-enable parent inheritance.
+    # Fallback: re-enable inherited ACLs when explicit ACL restore is unavailable.
     try {
         $acl = Get-Acl -LiteralPath $Path
         if ($acl.AreAccessRulesProtected) {
@@ -212,9 +211,7 @@ function Normalize-FileSecurity {
     catch { }
 }
 
-# ----------------------------
-# Additional internal helpers
-# ----------------------------
+# UI and status helper functions
 
 function Read-FlacProgress {
     param(
@@ -336,13 +333,16 @@ function Get-CompressionColor {
         return 'DarkGray'
     }
 
-    # Positive-only gradient: more compression => stronger "good" color, no warning colors.
-    if ($value -ge 5.0) { return 'White' }           # Outstanding
-    if ($value -ge 3.0) { return 'Green' }           # Very good
-    if ($value -gt 1.0) { return 'Cyan' }            # Good
-    if ($value -gt 0.0) { return 'DarkCyan' }        # Any gain is positive
-    if ($value -eq 0.0) { return 'DarkGray' }        # No change
-    return 'DarkGray'                                # Expansion / worse result
+    # Compression gradient: lower savings are weaker/neutral, higher savings become stronger.
+    if ($value -gt 20.0) { return 'Magenta' }        # Exceptional compression
+    if ($value -ge 15.0) { return 'Yellow' }         # Very high compression
+    if ($value -ge 10.0) { return 'DarkYellow' }     # High compression
+    if ($value -ge 6.0) { return 'Green' }           # Strong compression
+    if ($value -ge 3.0) { return 'DarkGreen' }       # Moderate compression
+    if ($value -gt 1.0) { return 'Cyan' }            # Light compression
+    if ($value -gt 0.0) { return 'DarkCyan' }        # Minimal compression
+    if ($value -eq 0.0) { return 'Gray' }            # No change
+    return 'DarkGray'                                # Expansion / worse result (neutralized, not error-red)
 }
 
 function Get-StatusColor {
@@ -360,8 +360,8 @@ function Get-VerificationColor {
     param([AllowNull()][string]$Verification)
 
     if ([string]::IsNullOrWhiteSpace($Verification)) { return 'DarkGray' }
-    if ($Verification -like 'PASS*') { return 'Green' }
-    if ($Verification -like 'FAIL*') { return 'Red' }
+    if ($Verification -eq 'MATCH' -or $Verification -eq 'MATCH|NEW') { return 'Green' }
+    if ($Verification -eq 'MISMATCH') { return 'Red' }
     return 'Yellow'
 }
 
@@ -672,8 +672,7 @@ function Stop-ActiveJobsAndCleanup {
         }
         catch { }
 
-        # Original files are only replaced after successful hash-chain verification.
-        # On cancellation, delete temp artifacts so originals remain intact.
+        # Originals are replaced only after verification. On cancel, remove temp files.
         if (-not [string]::IsNullOrWhiteSpace($job.Temp) -and (Test-Path -LiteralPath $job.Temp)) {
             Safe-RemoveFile -Path $job.Temp
             $tmpDeleted++
@@ -693,12 +692,10 @@ function Stop-ActiveJobsAndCleanup {
     }
 }
 
-# Avoid touching $IsWindows (automatic var in PowerShell 7)
+# Avoid overriding $IsWindows (automatic variable in PowerShell 7).
 $script:IsWindowsHost = ($env:OS -eq 'Windows_NT')
 
-# ----------------------------
 # Preconditions
-# ----------------------------
 
 if (-not (Test-Path -LiteralPath $RootFolder)) { throw "RootFolder does not exist: $RootFolder" }
 $rootItem = Get-Item -LiteralPath $RootFolder -Force
@@ -740,7 +737,7 @@ Started: $($runStartedLocal.ToString('o'))
 ===================================================================
 "@ | Out-File -LiteralPath $logFile -Encoding UTF8
 
-# Affinity support: classic mask covers 64 logical processors in a single group
+# Affinity support: classic processor mask handles up to 64 logical processors.
 $cpuCount = [Environment]::ProcessorCount
 $affinityEnabled = $false
 if ($script:IsWindowsHost -and $cpuCount -le 64) {
@@ -766,7 +763,7 @@ function Set-SingleCoreAffinity {
     }
 
     try {
-        # Use signed Int64 shifting so bit 63 works (1L -shl 63 == Int64.MinValue)
+        # Use signed Int64 shifting so bit 63 remains valid.
         $mask = [IntPtr](1L -shl $CoreIndexZeroBased)
         $Process.ProcessorAffinity = $mask
     }
@@ -829,7 +826,7 @@ function Try-GetDecodedAudioMd5 {
     try {
         $quotedPath = Quote-WinArg $Path
 
-        # Prefer raw PCM hashing; use older-flac-compatible flags (-s instead of --totally-silent).
+        # Prefer raw PCM hashing; keep flags compatible with older flac versions.
         $rawArgVariants = @(
             ("-d -c -s --force-raw-format --endian=little --sign=signed -- " + $quotedPath),
             ("-d -c -s --force-raw-format -- " + $quotedPath)
@@ -847,10 +844,8 @@ function Try-GetDecodedAudioMd5 {
     return $null
 }
 
-# ----------------------------
-# Cleanup stale .tmp (conservative)
-# Delete *.tmp only if same-base .flac exists (track.tmp <-> track.flac)
-# ----------------------------
+# Cleanup stale .tmp files (conservative):
+# Delete *.tmp only when same-base *.flac exists (track.tmp <-> track.flac).
 
 Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue |
 Where-Object { $_.Extension -ieq '.tmp' } |
@@ -861,9 +856,7 @@ ForEach-Object {
     }
 }
 
-# ----------------------------
 # Collect FLAC files
-# ----------------------------
 
 $files = @(
     Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -Filter *.flac
@@ -876,7 +869,7 @@ if ($totalFiles -eq 0) {
     return
 }
 
-# Conservative default worker count
+# Conservative default worker count.
 $maxWorkers = [Math]::Min([Environment]::ProcessorCount, $totalFiles)
 if ($maxWorkers -lt 1) { $maxWorkers = 1 }
 
@@ -948,7 +941,7 @@ if ($interactive) {
     }
 }
 
-# Non-interactive throttled status output
+# Throttled status output for non-interactive hosts.
 $lastStatusUtc = [DateTime]::UtcNow
 $statusInterval = [TimeSpan]::FromSeconds(10)
 $runCanceled = $false
@@ -1034,7 +1027,7 @@ try {
 
         foreach ($w in $workers) {
 
-            # Finalize completed job
+            # Finalize completed job.
             if ($null -ne $w.Job) {
                 $job = $w.Job
 
@@ -1057,7 +1050,7 @@ try {
                         $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
                         if ([string]::IsNullOrWhiteSpace($job.PreCalcHash)) {
                             if ($embeddedPresent) {
-                                # Embedded stream MD5 is already the decoded-audio checksum for the source file.
+                                # Embedded stream MD5 already reflects decoded source audio.
                                 $job.PreCalcHash = $job.EmbeddedHash
                             }
                             else {
@@ -1071,14 +1064,7 @@ try {
                         $calcMatch = $calcBeforeOk -and $calcAfterOk -and ($job.PreCalcHash -eq $postCalcHash)
 
                         if ($calcMatch) {
-                            if ($embeddedPresent) {
-                                if (($job.EmbeddedHash -eq $job.PreCalcHash) -and ($job.EmbeddedHash -eq $postCalcHash)) {
-                                    $hashOK = $true
-                                }
-                            }
-                            else {
-                                $hashOK = $true
-                            }
+                            $hashOK = $true
                         }
 
                         if ($hashOK) {
@@ -1095,7 +1081,7 @@ try {
                             $newSize = (Get-Item -LiteralPath $job.Temp -Force).Length
                             $saved = $job.OrigSize - $newSize
 
-                            # Replace original (retry a few times for transient locks)
+                            # Replace original file, retrying to tolerate transient locks.
                             $replaced = $false
                             for ($attempt = 1; $attempt -le 5 -and -not $replaced; $attempt++) {
                                 try {
@@ -1111,7 +1097,7 @@ try {
                                 $totalNewBytes += $newSize
                                 $totalSavedBytes += $saved
 
-                                # Normalize for tagging and restore timestamps
+                                # Normalize destination ACL/attributes and restore original timestamps.
                                 Normalize-FileSecurity -Path $job.Original -BaselineAcl $job.OrigAcl
                                 try {
                                     $dest = Get-Item -LiteralPath $job.Original -Force
@@ -1134,7 +1120,7 @@ try {
                                         NewBytes   = $newSize
                                     }) | Out-Null
 
-                                $verification = if ($job.EmbeddedHash -eq $nullHash) { 'PASS/NEW' } else { 'PASS' }
+                                $verification = if ($embeddedPresent) { 'MATCH' } else { 'MATCH|NEW' }
                                 Push-RecentEvent -List $recentEvents `
                                     -Status 'OK' `
                                     -File $job.Name `
@@ -1159,11 +1145,8 @@ try {
                             if (-not $calcBeforeOk -or -not $calcAfterOk) {
                                 $failureReason = "Could not calculate decoded-audio hash (pre or post)"
                             }
-                            elseif ($embeddedPresent) {
-                                $failureReason = "3-hash check failed (embedded/pre/post mismatch)"
-                            }
                             else {
-                                $failureReason = "2-hash calc check failed (no embedded hash present)"
+                                $failureReason = "Decoded-audio hash mismatch (original vs converted)"
                             }
                         }
                     }
@@ -1201,15 +1184,11 @@ try {
                                     Attempts = $nextAttempt
                                 })
 
-                            $verification = 'FAIL-INCOMPLETE'
-                            if (-not [string]::IsNullOrWhiteSpace($job.PreCalcHash) -and -not [string]::IsNullOrWhiteSpace($postCalcHash)) {
-                                if ($job.EmbeddedHash -eq $nullHash) {
-                                    $verification = if ($job.PreCalcHash -eq $postCalcHash) { 'PASS-AUDIO' } else { 'FAIL-AUDIO' }
-                                }
-                                else {
-                                    $verification = if (($job.EmbeddedHash -eq $job.PreCalcHash) -and ($job.EmbeddedHash -eq $postCalcHash)) { 'PASS-3WAY' } else { 'FAIL-3WAY' }
-                                }
-                            }
+                            $verification = if (-not [string]::IsNullOrWhiteSpace($job.PreCalcHash) -and
+                                -not [string]::IsNullOrWhiteSpace($postCalcHash) -and
+                                ($job.PreCalcHash -eq $postCalcHash)) {
+                                if ($embeddedPresent) { 'MATCH' } else { 'MATCH|NEW' }
+                            } else { 'MISMATCH' }
                             $beforeAfter = if ($newSize -gt 0) { ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) } else { ("{0} -> N/A" -f (Format-Bytes $job.OrigSize)) }
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'RETRY' `
@@ -1228,15 +1207,11 @@ try {
                         else {
                             $failed++
                             $processed++
-                            $verification = 'FAIL-INCOMPLETE'
-                            if (-not [string]::IsNullOrWhiteSpace($job.PreCalcHash) -and -not [string]::IsNullOrWhiteSpace($postCalcHash)) {
-                                if ($job.EmbeddedHash -eq $nullHash) {
-                                    $verification = if ($job.PreCalcHash -eq $postCalcHash) { 'PASS-AUDIO' } else { 'FAIL-AUDIO' }
-                                }
-                                else {
-                                    $verification = if (($job.EmbeddedHash -eq $job.PreCalcHash) -and ($job.EmbeddedHash -eq $postCalcHash)) { 'PASS-3WAY' } else { 'FAIL-3WAY' }
-                                }
-                            }
+                            $verification = if (-not [string]::IsNullOrWhiteSpace($job.PreCalcHash) -and
+                                -not [string]::IsNullOrWhiteSpace($postCalcHash) -and
+                                ($job.PreCalcHash -eq $postCalcHash)) {
+                                if ($embeddedPresent) { 'MATCH' } else { 'MATCH|NEW' }
+                            } else { 'MISMATCH' }
                             $beforeAfter = if ($newSize -gt 0) { ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) } else { ("{0} -> N/A" -f (Format-Bytes $job.OrigSize)) }
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'FAIL' `
@@ -1251,16 +1226,16 @@ try {
                                 -CompressionPct 'N/A' `
                                 -Detail $failureReason
                             $failedResults.Add([PSCustomObject]@{
-                                    Path        = $job.Original
-                                    Name        = $job.Name
-                                    Attempt     = ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile)
-                                    Reason      = $failureReason
+                                    Path         = $job.Original
+                                    Name         = $job.Name
+                                    Attempt      = ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile)
+                                    Reason       = $failureReason
                                     Verification = $verification
-                                    EmbeddedMd5 = $job.EmbeddedHash
-                                    CalcPreMd5  = $job.PreCalcHash
-                                    CalcPostMd5 = $postCalcHash
-                                    ErrLog      = $job.ErrLog
-                                    OutLog      = $job.OutLog
+                                    EmbeddedMd5  = $job.EmbeddedHash
+                                    CalcPreMd5   = $job.PreCalcHash
+                                    CalcPostMd5  = $postCalcHash
+                                    ErrLog       = $job.ErrLog
+                                    OutLog       = $job.OutLog
                                 }) | Out-Null
                             Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8} | ErrLog: {9} | OutLog: {10}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, $errText, $job.ErrLog, $job.OutLog)
                         }
@@ -1271,12 +1246,12 @@ try {
                 }
             }
 
-            # Assign new job
+            # Assign new job.
             if ($null -eq $w.Job -and $queue.Count -gt 0) {
                 $queueItem = $queue.Dequeue()
                 $original = $queueItem.Path
 
-                # Temp must be track.tmp (no ".flac" substring)
+                # Temp file must be track.tmp (no ".flac" substring).
                 $temp = [System.IO.Path]::ChangeExtension($original, '.tmp')
 
                 $jobId = "{0:D5}_{1}_a{2}" -f $queueItem.FileId, ([guid]::NewGuid().ToString('N').Substring(0, 8)), $queueItem.Attempts
@@ -1289,7 +1264,7 @@ try {
                 Safe-RemoveFile -Path $errLog
                 Safe-RemoveFile -Path $outLog
 
-                # Snapshot metadata before conversion / replacement
+                # Snapshot source metadata before conversion/replacement.
                 $origItem = Get-Item -LiteralPath $original -Force
                 $origAcl = $null
                 try { $origAcl = Get-Acl -LiteralPath $original } catch { }
@@ -1297,8 +1272,8 @@ try {
                 if ($null -eq $embeddedHash) { $embeddedHash = $nullHash }
                 $preCalcHash = $null
 
-                # Build ONE properly-quoted ArgumentList string; include "--" to end options.
-                # We restore timestamps and ACL ourselves after replacement.
+                # Build one properly quoted ArgumentList; include "--" to end options.
+                # Timestamps/ACL are restored after replacement.
                 $argString =
                 "-8 -V -f --no-preserve-modtime -o " +
                 (Quote-WinArg $temp) +
