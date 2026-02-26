@@ -9,7 +9,7 @@ It recursively scans a folder, runs `flac -8 -V` for each file, verifies decoded
 - Finds all `*.flac` files under `-RootFolder` (recursive).
 - Uses per-file temp outputs with `.tmp` extension (for example `track.tmp`).
 - Runs multiple workers in parallel (up to CPU count or file count, whichever is smaller).
-- Redirects each job's stdout/stderr to per-job log files.
+- Keeps one rolling run log for the full script execution.
 - Verifies integrity with decoded-audio MD5 checks:
 - Uses embedded FLAC MD5 when present.
 - Computes decoded-audio MD5 hashes before and after conversion.
@@ -89,9 +89,8 @@ If verification fails:
 Each run creates:
 
 - Main run log (`<album>_<timestamp>.log`)
-- Job logs folder (`jobs\`)
-- One `*.err.log` and one `*.out.log` per conversion attempt
-- Failed files report (`failed-files_<timestamp>.log`)
+- EFC-style final summary log (`efc-final_<timestamp>.log`)
+- Failed files report (`failed-files_<timestamp>.log`) only when there are permanent failures
 
 At the end, the script prints and logs:
 

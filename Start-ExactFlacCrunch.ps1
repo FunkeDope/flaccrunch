@@ -5,7 +5,8 @@ Batch recompress FLAC files in place with decoded-audio integrity verification.
 .DESCRIPTION
 Scans a root folder recursively for .flac files, runs `flac -8 -V` into per-file
 `.tmp` outputs, verifies decoded-audio MD5 consistency, and replaces originals only
-after verification succeeds. The script keeps per-run/per-job logs, restores source
+after verification succeeds. The script keeps one rolling run log, writes an
+EFC-style final summary log, emits a failure log only when needed, restores source
 timestamps/ACLs, and supports safe cancellation.
 
 .PARAMETER RootFolder
@@ -31,6 +32,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:RunLogBuffer = [System.Collections.Generic.List[string]]::new()
+$script:RunLogLastFlushUtc = [DateTime]::UtcNow
+$script:RunLogFlushInterval = [TimeSpan]::FromSeconds(2)
+$script:RunLogMaxBufferedLines = 40
 
 # Core helper functions
 
@@ -78,6 +83,25 @@ function Escape-WildcardPath {
     return [System.Management.Automation.WildcardPattern]::Escape($Path)
 }
 
+function Flush-RunLog {
+    param([switch]$Force)
+
+    if ([string]::IsNullOrWhiteSpace($script:LogFile)) { return }
+    if ($script:RunLogBuffer.Count -eq 0) { return }
+
+    $nowUtc = [DateTime]::UtcNow
+    if (-not $Force) {
+        $withinCount = ($script:RunLogBuffer.Count -lt $script:RunLogMaxBufferedLines)
+        $withinTime = (($nowUtc - $script:RunLogLastFlushUtc) -lt $script:RunLogFlushInterval)
+        if ($withinCount -and $withinTime) { return }
+    }
+
+    $linesToWrite = @($script:RunLogBuffer)
+    $script:RunLogBuffer.Clear()
+    Add-Content -LiteralPath $script:LogFile -Value $linesToWrite -Encoding UTF8
+    $script:RunLogLastFlushUtc = $nowUtc
+}
+
 function Write-RunLog {
     param(
         [Parameter(Mandatory)][string]$Message,
@@ -87,8 +111,22 @@ function Write-RunLog {
 
     if ([string]::IsNullOrWhiteSpace($script:LogFile)) { return }
     $ts = Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fffK'
-    "{0} | {1} | {2}" -f $ts, $Level, $Message |
-    Out-File -LiteralPath $script:LogFile -Append -Encoding UTF8
+    $script:RunLogBuffer.Add(("{0} | {1} | {2}" -f $ts, $Level, $Message)) | Out-Null
+    Flush-RunLog
+}
+
+function Format-ErrSnippet {
+    param(
+        [AllowEmptyString()]
+        [string]$Text,
+        [int]$MaxLength = 400
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '(none)' }
+
+    $singleLine = [regex]::Replace($Text, '\s+', ' ').Trim()
+    if ($singleLine.Length -le $MaxLength) { return $singleLine }
+    return ("{0}..." -f $singleLine.Substring(0, $MaxLength))
 }
 
 function Safe-RemoveFile {
@@ -178,14 +216,14 @@ function Set-FlacMd5IfMissing {
 
 function Read-FlacProgress {
     param(
-        [Parameter(Mandatory)][string]$ErrLogPath,
+        [Parameter(Mandatory)][string]$StdErrPath,
         [hashtable]$Cache
     )
 
     $default = @{ Pct = 0; Ratio = 'N/A' }
-    if (-not (Test-Path -LiteralPath $ErrLogPath)) { return $default }
+    if (-not (Test-Path -LiteralPath $StdErrPath)) { return $default }
 
-    $cacheKey = $ErrLogPath.ToLowerInvariant()
+    $cacheKey = $StdErrPath.ToLowerInvariant()
     $entry = $null
     if ($null -ne $Cache -and $Cache.ContainsKey($cacheKey)) { $entry = $Cache[$cacheKey] }
     $nowUtc = [DateTime]::UtcNow
@@ -198,7 +236,7 @@ function Read-FlacProgress {
     }
 
     try {
-        $fi = Get-Item -LiteralPath $ErrLogPath -ErrorAction Stop
+        $fi = Get-Item -LiteralPath $StdErrPath -ErrorAction Stop
         $length = [long]$fi.Length
 
         if ($null -ne $entry -and $entry.Length -eq $length) {
@@ -217,7 +255,7 @@ function Read-FlacProgress {
         $startOffset = [Math]::Max(0L, $length - $tailSize)
         $raw = ''
 
-        $fs = [System.IO.FileStream]::new($ErrLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $fs = [System.IO.FileStream]::new($StdErrPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
         try {
             [void]$fs.Seek($startOffset, [System.IO.SeekOrigin]::Begin)
             $sr = [System.IO.StreamReader]::new($fs)
@@ -474,7 +512,7 @@ function Render-InteractiveUi {
             }
             default {
                 $stateText = 'ENCODE'
-                $p = Read-FlacProgress -ErrLogPath $w.Job.ErrLog -Cache $ProgressCache
+                $p = Read-FlacProgress -StdErrPath $w.Job.StdErrCapture -Cache $ProgressCache
                 $pct = [int]$p.Pct
                 $ratio = [string]$p.Ratio
                 if ($ratio -eq 'N/A') { $ratio = '-' }
@@ -651,6 +689,12 @@ function Stop-ActiveJobsAndCleanup {
             Safe-RemoveFile -Path $job.Temp
             $tmpDeleted++
         }
+        if (-not [string]::IsNullOrWhiteSpace($job.StdErrCapture) -and (Test-Path -LiteralPath $job.StdErrCapture)) {
+            Safe-RemoveFile -Path $job.StdErrCapture
+        }
+        if (-not [string]::IsNullOrWhiteSpace($job.StdOutCapture) -and (Test-Path -LiteralPath $job.StdOutCapture)) {
+            Safe-RemoveFile -Path $job.StdOutCapture
+        }
 
         try {
             if ($null -ne $job.Proc) { $job.Proc.Dispose() }
@@ -696,8 +740,8 @@ New-Item -ItemType Directory -Path $LogFolder -Force | Out-Null
 $runLogDir = Join-Path -Path $LogFolder -ChildPath ("{0}_{1}" -f $safeAlbumName, $runStamp)
 New-Item -ItemType Directory -Path $runLogDir -Force | Out-Null
 
-$jobLogDir = Join-Path -Path $runLogDir -ChildPath 'jobs'
-New-Item -ItemType Directory -Path $jobLogDir -Force | Out-Null
+$runtimeCaptureDir = Join-Path -Path $runLogDir -ChildPath '.runtime'
+New-Item -ItemType Directory -Path $runtimeCaptureDir -Force | Out-Null
 
 $logFile = Join-Path -Path $runLogDir -ChildPath ("{0}_{1}.log" -f $safeAlbumName, $runStamp)
 $script:LogFile = $logFile
@@ -718,8 +762,7 @@ if ($script:IsWindowsHost -and $cpuCount -le 64) {
     $affinityEnabled = $true
 }
 elseif ($script:IsWindowsHost -and $cpuCount -gt 64) {
-    "WARN | Host has $cpuCount logical processors; processor groups not handled. Affinity disabled." |
-    Out-File -LiteralPath $logFile -Append -Encoding UTF8
+    Write-RunLog -Level WARN -Message ("Host has {0} logical processors; processor groups not handled. Affinity disabled." -f $cpuCount)
 }
 
 function Set-SingleCoreAffinity {
@@ -731,8 +774,7 @@ function Set-SingleCoreAffinity {
     if (-not $affinityEnabled) { return }
 
     if ($CoreIndexZeroBased -lt 0 -or $CoreIndexZeroBased -gt 63) {
-        "WARN | Core index $CoreIndexZeroBased out of mask range; affinity skipped for PID $($Process.Id)." |
-        Out-File -LiteralPath $logFile -Append -Encoding UTF8
+        Write-RunLog -Level WARN -Message ("Core index {0} out of mask range; affinity skipped for PID {1}." -f $CoreIndexZeroBased, $Process.Id)
         return
     }
 
@@ -742,8 +784,7 @@ function Set-SingleCoreAffinity {
         $Process.ProcessorAffinity = $mask
     }
     catch {
-        "WARN | Failed to set affinity | PID $($Process.Id) | $($_.Exception.Message)" |
-        Out-File -LiteralPath $logFile -Append -Encoding UTF8
+        Write-RunLog -Level WARN -Message ("Failed to set affinity | PID {0} | {1}" -f $Process.Id, $_.Exception.Message)
     }
 }
 
@@ -848,6 +889,7 @@ $files = @(
 $totalFiles = $files.Count
 if ($totalFiles -eq 0) {
     Write-RunLog -Level INFO -Message "No FLAC files found. Exiting."
+    Flush-RunLog -Force
     Write-Host "No FLAC files found. Exiting."
     return
 }
@@ -1072,8 +1114,8 @@ try {
                     $job.Proc = $null
 
                     $errText = ""
-                    if (Test-Path -LiteralPath $job.ErrLog) {
-                        try { $errText = (Get-Content -LiteralPath $job.ErrLog -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
+                    if (Test-Path -LiteralPath $job.StdErrCapture) {
+                        try { $errText = (Get-Content -LiteralPath $job.StdErrCapture -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
                     }
                     $job.ErrText = $errText
 
@@ -1276,7 +1318,7 @@ try {
                                 -Saved 'N/A' `
                                 -CompressionPct 'N/A' `
                                 -Detail $failureReason
-                            Write-RunLog -Level WARN -Message ("Retrying | File: {0} | NextAttempt: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8} | ErrLog: {9} | OutLog: {10}" -f $job.Original, $nextAttempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, $errText, $job.ErrLog, $job.OutLog)
+                            Write-RunLog -Level WARN -Message ("Retrying | File: {0} | NextAttempt: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8}" -f $job.Original, $nextAttempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-ErrSnippet -Text $errText))
                         }
                         else {
                             $failed++
@@ -1309,13 +1351,14 @@ try {
                                     EmbeddedMd5  = $job.EmbeddedHash
                                     CalcPreMd5   = $job.PreCalcHash
                                     CalcPostMd5  = $postCalcHash
-                                    ErrLog       = $job.ErrLog
-                                    OutLog       = $job.OutLog
+                                    StdErr       = (Format-ErrSnippet -Text $errText)
                                 }) | Out-Null
-                            Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8} | ErrLog: {9} | OutLog: {10}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, $errText, $job.ErrLog, $job.OutLog)
+                            Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-ErrSnippet -Text $errText))
                         }
                     }
 
+                    Safe-RemoveFile -Path $job.StdErrCapture
+                    Safe-RemoveFile -Path $job.StdOutCapture
                     $w.Job = $null
                     $uiDirty = $true
                 }
@@ -1330,14 +1373,14 @@ try {
                 $temp = [System.IO.Path]::ChangeExtension($original, '.tmp')
 
                 $jobId = "{0:D5}_{1}_a{2}" -f $queueItem.FileId, ([guid]::NewGuid().ToString('N').Substring(0, 8)), $queueItem.Attempts
-                $errLog = Join-Path -Path $jobLogDir -ChildPath "$jobId.err.log"
-                $outLog = Join-Path -Path $jobLogDir -ChildPath "$jobId.out.log"
-                $errLogRedirect = Escape-WildcardPath -Path $errLog
-                $outLogRedirect = Escape-WildcardPath -Path $outLog
+                $stdErrCapture = Join-Path -Path $runtimeCaptureDir -ChildPath "$jobId.stderr.tmp"
+                $stdOutCapture = Join-Path -Path $runtimeCaptureDir -ChildPath "$jobId.stdout.tmp"
+                $stdErrRedirect = Escape-WildcardPath -Path $stdErrCapture
+                $stdOutRedirect = Escape-WildcardPath -Path $stdOutCapture
 
                 Safe-RemoveFile -Path $temp
-                Safe-RemoveFile -Path $errLog
-                Safe-RemoveFile -Path $outLog
+                Safe-RemoveFile -Path $stdErrCapture
+                Safe-RemoveFile -Path $stdOutCapture
 
                 # Snapshot source metadata needed for verification and accounting.
                 $origItem = Get-Item -LiteralPath $original -Force
@@ -1357,8 +1400,8 @@ try {
                     -ArgumentList $argString `
                     -NoNewWindow `
                     -PassThru `
-                    -RedirectStandardError $errLogRedirect `
-                    -RedirectStandardOutput $outLogRedirect
+                    -RedirectStandardError $stdErrRedirect `
+                    -RedirectStandardOutput $stdOutRedirect
 
                 Set-SingleCoreAffinity -Process $proc -CoreIndexZeroBased $w.CoreIdx
 
@@ -1366,8 +1409,8 @@ try {
                     Proc            = $proc
                     Original        = $original
                     Temp            = $temp
-                    ErrLog          = $errLog
-                    OutLog          = $outLog
+                    StdErrCapture   = $stdErrCapture
+                    StdOutCapture   = $stdOutCapture
                     FileId          = $queueItem.FileId
                     Name            = $queueItem.Name
                     Attempt         = $queueItem.Attempts
@@ -1405,7 +1448,9 @@ finally {
     if ($interactive) {
         try { [Console]::CursorVisible = $true } catch { }
     }
+    try { Remove-Item -LiteralPath $runtimeCaptureDir -Recurse -Force -ErrorAction SilentlyContinue } catch { }
     Write-RunLog -Level INFO -Message ("Run logs kept at: {0}" -f $runLogDir)
+    Flush-RunLog -Force
 }
 
 $topCompression = @(
@@ -1417,7 +1462,8 @@ $topCompression = @(
 
 $successful = [Math]::Max(0, ($processed - $failed))
 $pending = [Math]::Max(0, ($totalFiles - $processed))
-$failedListPath = Join-Path -Path $runLogDir -ChildPath ("failed-files_{0}.log" -f $runStamp)
+$failedListPath = $null
+$efcFinalLogPath = Join-Path -Path $runLogDir -ChildPath ("efc-final_{0}.log" -f $runStamp)
 $finishedLocal = Get-Date
 $totalElapsed = $finishedLocal.ToUniversalTime() - $runStartedUtc
 if ($totalElapsed.Ticks -lt 0) { $totalElapsed = [TimeSpan]::Zero }
@@ -1432,10 +1478,8 @@ $failedLines.Add(("Album    : {0}" -f $albumName)) | Out-Null
 $failedLines.Add(("Finished : {0}" -f (Get-Date -Format o))) | Out-Null
 $failedLines.Add(("Failed   : {0}" -f $failedResults.Count)) | Out-Null
 $failedLines.Add("===================================================================") | Out-Null
-if ($failedResults.Count -eq 0) {
-    $failedLines.Add("No permanently failed files.") | Out-Null
-}
-else {
+if ($failedResults.Count -gt 0) {
+    $failedListPath = Join-Path -Path $runLogDir -ChildPath ("failed-files_{0}.log" -f $runStamp)
     $index = 0
     foreach ($entry in $failedResults) {
         $index++
@@ -1446,12 +1490,11 @@ else {
         $failedLines.Add(("   Embedded MD5 : {0}" -f $entry.EmbeddedMd5)) | Out-Null
         $failedLines.Add(("   CalcPre MD5  : {0}" -f $entry.CalcPreMd5)) | Out-Null
         $failedLines.Add(("   CalcPost MD5 : {0}" -f $entry.CalcPostMd5)) | Out-Null
-        $failedLines.Add(("   ErrLog       : {0}" -f $entry.ErrLog)) | Out-Null
-        $failedLines.Add(("   OutLog       : {0}" -f $entry.OutLog)) | Out-Null
+        $failedLines.Add(("   STDERR       : {0}" -f $entry.StdErr)) | Out-Null
         $failedLines.Add("") | Out-Null
     }
+    [string]::Join([Environment]::NewLine, $failedLines) | Out-File -LiteralPath $failedListPath -Encoding UTF8
 }
-[string]::Join([Environment]::NewLine, $failedLines) | Out-File -LiteralPath $failedListPath -Encoding UTF8
 
 $summaryLines = [System.Collections.Generic.List[string]]::new()
 $summaryLines.Add("===================================================================") | Out-Null
@@ -1468,7 +1511,8 @@ $summaryLines.Add(("Total Original Size  : {0}" -f (Format-Bytes $totalOriginalB
 $summaryLines.Add(("Total New Size       : {0}" -f (Format-Bytes $totalNewBytes))) | Out-Null
 $summaryLines.Add(("TOTAL SPACE SAVED    : *** {0} ({1:N2}% of original) ***" -f (Format-Bytes $totalSavedBytes), $overallReductionPct)) | Out-Null
 $summaryLines.Add(("Avg Saved / Success  : {0}" -f (Format-Bytes $avgSavedPerSuccessBytes))) | Out-Null
-$summaryLines.Add(("Failed File Log      : {0}" -f $failedListPath)) | Out-Null
+$summaryLines.Add(("Failed File Log      : {0}" -f $(if ($failedListPath) { $failedListPath } else { '(none)' }))) | Out-Null
+$summaryLines.Add(("EFC Final Log        : {0}" -f $efcFinalLogPath)) | Out-Null
 $summaryLines.Add("Top 3 Compression    :") | Out-Null
 
 if ($topCompression.Count -eq 0) {
@@ -1487,7 +1531,9 @@ $summaryLines.Add("Logs                 : $runLogDir") | Out-Null
 $summaryLines.Add("===================================================================") | Out-Null
 
 $summaryText = [string]::Join([Environment]::NewLine, $summaryLines)
+Flush-RunLog -Force
 $summaryText | Out-File -LiteralPath $logFile -Append -Encoding UTF8
+$summaryText | Out-File -LiteralPath $efcFinalLogPath -Encoding UTF8
 
 Write-Host ""
 if ($runCanceled) {
@@ -1511,6 +1557,12 @@ else {
         Write-Host ("  {0}. Saved {1} ({2:N2}%) | {3}" -f $rank, (Format-Bytes $entry.SavedBytes), $entry.SavedPct, $entry.Path)
     }
 }
-Write-Host ("Failed List: {0}" -f $failedListPath)
+if ($failedListPath) {
+    Write-Host ("Failed List: {0}" -f $failedListPath)
+}
+else {
+    Write-Host "Failed List: (none)"
+}
+Write-Host ("EFC Final Log: {0}" -f $efcFinalLogPath)
 Write-Host ("Logs:  {0}" -f $runLogDir)
 Write-Host ("Log:   {0}" -f $logFile)
