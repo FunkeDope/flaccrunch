@@ -37,6 +37,15 @@ $script:RunLogLastFlushUtc = [DateTime]::UtcNow
 $script:RunLogFlushInterval = [TimeSpan]::FromSeconds(2)
 $script:RunLogMaxBufferedLines = 40
 
+# Ensure console I/O uses UTF-8 so filenames with non-ASCII characters render correctly.
+try {
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [Console]::OutputEncoding = $utf8NoBom
+    [Console]::InputEncoding = $utf8NoBom
+    $OutputEncoding = $utf8NoBom
+}
+catch { }
+
 # Core helper functions
 
 function Format-Bytes {
@@ -315,10 +324,100 @@ function Truncate-Text {
     )
 
     if ($Width -lt 1) { return '' }
+    return (Fit-DisplayText -Text $Text -Width $Width -UseEllipsis).TrimEnd()
+}
+
+function Get-CodepointDisplayWidth {
+    param([Parameter(Mandatory)][int]$CodePoint)
+
+    if ($CodePoint -le 0) { return 0 }
+
+    # Control characters and combining/formatting marks are zero-width in terminal cells.
+    if (($CodePoint -lt 0x20) -or ($CodePoint -ge 0x7F -and $CodePoint -lt 0xA0)) { return 0 }
+    $cpText = [char]::ConvertFromUtf32($CodePoint)
+    $category = [char]::GetUnicodeCategory($cpText, 0)
+    if ($category -eq [System.Globalization.UnicodeCategory]::NonSpacingMark -or
+        $category -eq [System.Globalization.UnicodeCategory]::SpacingCombiningMark -or
+        $category -eq [System.Globalization.UnicodeCategory]::EnclosingMark -or
+        $category -eq [System.Globalization.UnicodeCategory]::Format -or
+        $category -eq [System.Globalization.UnicodeCategory]::Control) {
+        return 0
+    }
+
+    # East Asian wide/full-width ranges + emoji ranges.
+    if (($CodePoint -ge 0x1100 -and $CodePoint -le 0x115F) -or
+        ($CodePoint -ge 0x2329 -and $CodePoint -le 0x232A) -or
+        ($CodePoint -ge 0x2E80 -and $CodePoint -le 0xA4CF) -or
+        ($CodePoint -ge 0xAC00 -and $CodePoint -le 0xD7A3) -or
+        ($CodePoint -ge 0xF900 -and $CodePoint -le 0xFAFF) -or
+        ($CodePoint -ge 0xFE10 -and $CodePoint -le 0xFE19) -or
+        ($CodePoint -ge 0xFE30 -and $CodePoint -le 0xFE6F) -or
+        ($CodePoint -ge 0xFF00 -and $CodePoint -le 0xFF60) -or
+        ($CodePoint -ge 0xFFE0 -and $CodePoint -le 0xFFE6) -or
+        ($CodePoint -ge 0x1F300 -and $CodePoint -le 0x1FAFF) -or
+        ($CodePoint -ge 0x20000 -and $CodePoint -le 0x2FFFD) -or
+        ($CodePoint -ge 0x30000 -and $CodePoint -le 0x3FFFD)) {
+        return 2
+    }
+
+    return 1
+}
+
+function Get-DisplayTextWidth {
+    param([AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) { return 0 }
+    $width = 0
+    $enumerator = [System.Globalization.StringInfo]::GetTextElementEnumerator($Text)
+    while ($enumerator.MoveNext()) {
+        $element = [string]$enumerator.Current
+        $cp = [char]::ConvertToUtf32($element, 0)
+        $width += Get-CodepointDisplayWidth -CodePoint $cp
+    }
+    return $width
+}
+
+function Fit-DisplayText {
+    param(
+        [AllowNull()][string]$Text,
+        [Parameter(Mandatory)][int]$Width,
+        [switch]$UseEllipsis
+    )
+
+    if ($Width -lt 1) { return '' }
     if ($null -eq $Text) { $Text = '' }
-    if ($Text.Length -le $Width) { return $Text }
-    if ($Width -le 3) { return $Text.Substring(0, $Width) }
-    return ($Text.Substring(0, $Width - 3) + '...')
+
+    $currentWidth = Get-DisplayTextWidth -Text $Text
+    if ($currentWidth -le $Width) {
+        return ($Text + (' ' * ($Width - $currentWidth)))
+    }
+
+    $ellipsis = if ($UseEllipsis -and $Width -gt 3) { '...' } else { '' }
+    $targetWidth = $Width - $ellipsis.Length
+    if ($targetWidth -lt 0) { $targetWidth = 0 }
+
+    $sb = [System.Text.StringBuilder]::new()
+    $used = 0
+    $enumerator = [System.Globalization.StringInfo]::GetTextElementEnumerator($Text)
+    while ($enumerator.MoveNext()) {
+        $element = [string]$enumerator.Current
+        $cp = [char]::ConvertToUtf32($element, 0)
+        $w = Get-CodepointDisplayWidth -CodePoint $cp
+        if (($used + $w) -gt $targetWidth) { break }
+        [void]$sb.Append($element)
+        $used += $w
+    }
+
+    if ($ellipsis.Length -gt 0) {
+        [void]$sb.Append($ellipsis)
+        $used += $ellipsis.Length
+    }
+
+    if ($used -lt $Width) {
+        [void]$sb.Append((' ' * ($Width - $used)))
+    }
+
+    return $sb.ToString()
 }
 
 function Get-CompressionColor {
@@ -334,22 +433,22 @@ function Get-CompressionColor {
         return 'DarkGray'
     }
 
-    # Compression gradient: lower savings are weaker/neutral, higher savings become stronger.
-    if ($value -gt 20.0) { return 'Magenta' }        # Exceptional compression
-    if ($value -ge 15.0) { return 'Yellow' }         # Very high compression
-    if ($value -ge 10.0) { return 'DarkYellow' }     # High compression
-    if ($value -ge 6.0) { return 'Green' }           # Strong compression
-    if ($value -ge 3.0) { return 'DarkGreen' }       # Moderate compression
-    if ($value -gt 1.0) { return 'Cyan' }            # Light compression
-    if ($value -gt 0.0) { return 'DarkCyan' }        # Minimal compression
+    # Compression gradient: cool colors for low wins, warm/purple for major wins.
+    if ($value -ge 20.0) { return 'Magenta' }        # Exceptional compression
+    if ($value -ge 15.0) { return 'DarkMagenta' }    # Very high compression
+    if ($value -ge 10.0) { return 'Yellow' }         # High compression
+    if ($value -ge 6.0) { return 'DarkYellow' }      # Strong compression
+    if ($value -ge 3.0) { return 'Cyan' }            # Moderate compression
+    if ($value -gt 1.0) { return 'DarkCyan' }        # Light compression
+    if ($value -gt 0.0) { return 'Blue' }            # Minimal compression
     if ($value -eq 0.0) { return 'Gray' }            # No change
-    return 'DarkGray'                                # Expansion / worse result (neutralized, not error-red)
+    return 'DarkRed'                                 # Expansion / worse result
 }
 
 function Get-StatusColor {
     param([AllowNull()][string]$Status)
     switch ($Status) {
-        'OK' { return 'Green' }
+        'OK' { return 'Cyan' }
         'RETRY' { return 'Yellow' }
         'FAIL' { return 'Red' }
         'WAIT' { return 'DarkGray' }
@@ -361,9 +460,31 @@ function Get-VerificationColor {
     param([AllowNull()][string]$Verification)
 
     if ([string]::IsNullOrWhiteSpace($Verification)) { return 'DarkGray' }
-    if ($Verification -eq 'MATCH' -or $Verification -eq 'MATCH|NEW') { return 'Green' }
+    if ($Verification -eq 'MATCH|NEW') { return 'Magenta' }
+    if ($Verification -eq 'MATCH') { return 'Cyan' }
     if ($Verification -eq 'MISMATCH') { return 'Red' }
     return 'Yellow'
+}
+
+function Get-WorkerStateColor {
+    param(
+        [AllowNull()][string]$State,
+        [AllowNull()][string]$Stage,
+        [int]$Pct = 0
+    )
+
+    switch ($State) {
+        'HASHIN' { return 'Blue' }
+        'HASHOUT' { return 'Magenta' }
+        'HASHING' { return 'DarkYellow' }
+        'FINAL' { return 'Cyan' }
+        'ENCODE' { return 'White' }
+        'IDLE' { return 'DarkGray' }
+        default {
+            if ($Stage -eq 'HASHING') { return 'DarkYellow' }
+            return 'White'
+        }
+    }
 }
 
 function Format-VerificationText {
@@ -385,6 +506,7 @@ function Render-InteractiveUi {
         [Parameter(Mandatory)][int]$MaxAttemptsPerFile,
         [Parameter(Mandatory)][object[]]$Workers,
         [AllowNull()][System.Collections.Generic.List[object]]$RecentEvents,
+        [AllowNull()][object[]]$TopCompression,
         [Parameter(Mandatory)][hashtable]$ProgressCache,
         [int]$PreviousRows = 0,
         [switch]$ForceClear,
@@ -419,8 +541,8 @@ function Render-InteractiveUi {
             [AllowNull()][string]$Text = '',
             [ConsoleColor]$Color = [ConsoleColor]::Gray
         )
-        $content = Truncate-Text -Text $Text -Width $width
-        Write-Host $content.PadRight($width) -ForegroundColor $Color
+        $content = Fit-DisplayText -Text $Text -Width $width -UseEllipsis
+        Write-Host $content -ForegroundColor $Color
         $script:__uiRowsWritten++
     }
 
@@ -432,7 +554,7 @@ function Render-InteractiveUi {
 
     Write-UiLine -Text ("Exact Flac Cruncher | {0}" -f $AlbumName) -Color Cyan
     Write-UiLine -Text ("Progress {0}/{1} | Failed {2} | Elapsed {3} | Queue {4} | Active {5}/{6}" -f $Processed, $TotalFiles, $Failed, $elapsedText, $QueueCount, $activeCount, $Workers.Count) -Color White
-    Write-UiLine -Text ("TOTAL SAVED: {0}" -f (Format-Bytes $TotalSavedBytes)) -Color Green
+    Write-UiLine -Text ("TOTAL SAVED: {0}" -f (Format-Bytes $TotalSavedBytes)) -Color DarkCyan
     if ([string]::IsNullOrWhiteSpace($Banner)) {
         Write-UiLine -Text "Ctrl+C: Cancel safely. Will clean up temp files and restore original files on exit." -Color DarkGray
     }
@@ -440,8 +562,23 @@ function Render-InteractiveUi {
         Write-UiLine -Text $Banner -Color Yellow
     }
     Write-UiLine -Text ("-" * $width) -Color DarkGray
+    Write-UiLine -Text "Top 3 Compression (live)" -Color Magenta
+    if ($null -eq $TopCompression -or $TopCompression.Count -eq 0) {
+        Write-UiLine -Text "  (No successful file conversions yet)" -Color DarkGray
+    }
+    else {
+        $rank = 0
+        foreach ($entry in $TopCompression) {
+            $rank++
+            $entryColor = Get-CompressionColor -CompressionPct ("{0:N2}%" -f $entry.SavedPct)
+            $line = ("  {0}. Saved {1} ({2:N2}%) | {3}" -f $rank, (Format-Bytes $entry.SavedBytes), $entry.SavedPct, ([System.IO.Path]::GetFileName([string]$entry.Path)))
+            Write-UiLine -Text $line -Color $entryColor
+            if ($rank -ge 3) { break }
+        }
+    }
+    Write-UiLine -Text ("-" * $width) -Color DarkGray
 
-    $fixedRows = 13
+    $fixedRows = 19
     $remainingRows = [Math]::Max(6, $maxRows - $fixedRows)
     $workerRows = [Math]::Min($Workers.Count, [Math]::Max(4, [int][Math]::Floor($remainingRows * 0.45)))
     $eventRows = [Math]::Max(4, $remainingRows - $workerRows)
@@ -497,8 +634,8 @@ function Render-InteractiveUi {
                 $stateText = 'HASHING'
                 $phase = [string]$w.Job.HashPhase
                 if ($phase -eq 'SOURCE') {
-                    $stateText = 'HASHSRC'
-                    $fileSuffix = ' [hash:src]'
+                    $stateText = 'HASHIN'
+                    $fileSuffix = ' [hash:in]'
                 }
                 elseif ($phase -eq 'OUTPUT') {
                     $stateText = 'HASHOUT'
@@ -526,7 +663,7 @@ function Render-InteractiveUi {
         if ($fill -lt 0) { $fill = 0 }
         if ($fill -gt $barLen) { $fill = $barLen }
         $bar = ('[' + ('#' * $fill).PadRight($barLen, '.') + ']')
-        $name = Truncate-Text -Text ($w.Job.Name + $fileSuffix) -Width $wFile
+        $name = Fit-DisplayText -Text ($w.Job.Name + $fileSuffix) -Width $wFile -UseEllipsis
 
         $line = (("C{0:D2}" -f $w.Id).PadRight($wCore) + '|' +
             $stateText.PadRight($wState) + '|' +
@@ -534,8 +671,8 @@ function Render-InteractiveUi {
             ("{0,3}%" -f $pct).PadRight($wPct) + '|' +
             $ratio.PadRight($wRatio) + '|' +
             $bar.PadRight($wBar) + '|' +
-            $name.PadRight($wFile))
-        $lineColor = if ($stage -eq 'HASHING') { 'Yellow' } elseif ($pct -ge 100) { 'Green' } else { 'White' }
+            $name)
+        $lineColor = Get-WorkerStateColor -State $stateText -Stage $stage -Pct $pct
         Write-UiLine -Text $line -Color $lineColor
     }
 
@@ -578,24 +715,30 @@ function Render-InteractiveUi {
         $savedColor = $cmpColor
         $verificationDisplay = Format-VerificationText -Verification ([string]$row.Verification)
         $verificationColor = Get-VerificationColor -Verification $row.Verification
-        $fileText = Truncate-Text -Text ([string]$row.File) -Width $wFile
-        $detailText = Truncate-Text -Text ([string]$row.Detail) -Width $wDetail
+        $timeText = Fit-DisplayText -Text ([string]$row.Time) -Width $wTime
+        $statusText = Fit-DisplayText -Text ([string]$row.Status) -Width $wStat
+        $attemptText = Fit-DisplayText -Text ([string]$row.Attempt) -Width $wTry2
+        $cmpText = Fit-DisplayText -Text ([string]$row.CompressionPct) -Width $wComp
+        $savedText = Fit-DisplayText -Text ([string]$row.Saved) -Width $wSaved
+        $verifyText = Fit-DisplayText -Text $verificationDisplay -Width $wHash -UseEllipsis
+        $fileText = Fit-DisplayText -Text ([string]$row.File) -Width $wFile -UseEllipsis
+        $detailText = Fit-DisplayText -Text ([string]$row.Detail) -Width $wDetail -UseEllipsis
 
-        Write-Host ([string]$row.Time).PadRight($wTime) -NoNewline -ForegroundColor DarkGray
+        Write-Host $timeText -NoNewline -ForegroundColor DarkGray
         Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host ([string]$row.Status).PadRight($wStat) -NoNewline -ForegroundColor $statusColor
+        Write-Host $statusText -NoNewline -ForegroundColor $statusColor
         Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host ([string]$row.Attempt).PadRight($wTry2) -NoNewline -ForegroundColor Gray
+        Write-Host $attemptText -NoNewline -ForegroundColor Gray
         Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host ([string]$row.CompressionPct).PadRight($wComp) -NoNewline -ForegroundColor $cmpColor
+        Write-Host $cmpText -NoNewline -ForegroundColor $cmpColor
         Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host ([string]$row.Saved).PadRight($wSaved) -NoNewline -ForegroundColor $savedColor
+        Write-Host $savedText -NoNewline -ForegroundColor $savedColor
         Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host (Truncate-Text -Text $verificationDisplay -Width $wHash).PadRight($wHash) -NoNewline -ForegroundColor $verificationColor
+        Write-Host $verifyText -NoNewline -ForegroundColor $verificationColor
         Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $fileText.PadRight($wFile) -NoNewline -ForegroundColor Gray
+        Write-Host $fileText -NoNewline -ForegroundColor Gray
         Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $detailText.PadRight($wDetail) -ForegroundColor DarkGray
+        Write-Host $detailText -ForegroundColor DarkGray
         $script:__uiRowsWritten++
     }
 
@@ -884,7 +1027,7 @@ ForEach-Object {
 
 $files = @(
     Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -Filter *.flac
-)
+) | Sort-Object -Property @{ Expression = 'Length'; Descending = $true }, @{ Expression = 'FullName'; Descending = $false }
 
 $totalFiles = $files.Count
 if ($totalFiles -eq 0) {
@@ -1012,6 +1155,12 @@ try {
                     -MaxAttemptsPerFile $maxAttemptsPerFile `
                     -Workers @($workers) `
                     -RecentEvents $recentEvents `
+                    -TopCompression @(
+                    $compressionResults |
+                    Where-Object { $_.SavedBytes -gt 0 } |
+                    Sort-Object -Property SavedBytes -Descending |
+                    Select-Object -First 3
+                ) `
                     -ProgressCache $progressCache `
                     -PreviousRows $lastUiRenderRows `
                     -ForceClear:$sizeChanged `
@@ -1037,6 +1186,12 @@ try {
                     -MaxAttemptsPerFile $maxAttemptsPerFile `
                     -Workers @($workers) `
                     -RecentEvents $recentEvents `
+                    -TopCompression @(
+                    $compressionResults |
+                    Where-Object { $_.SavedBytes -gt 0 } |
+                    Sort-Object -Property SavedBytes -Descending |
+                    Select-Object -First 3
+                ) `
                     -ProgressCache $progressCache `
                     -PreviousRows $lastUiRenderRows `
                     -Banner $uiBanner
