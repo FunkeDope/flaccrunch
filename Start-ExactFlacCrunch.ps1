@@ -451,15 +451,21 @@ function Render-InteractiveUi {
 
         $pct = 0
         $ratio = '-'
-        $stateText = 'BUSY'
+        $stateText = 'ENCODE'
         $fileSuffix = ''
 
         switch ($stage) {
             'HASHING' {
                 $stateText = 'HASHING'
                 $phase = [string]$w.Job.HashPhase
-                if ($phase -eq 'SOURCE') { $fileSuffix = ' [hash:src]' }
-                elseif ($phase -eq 'OUTPUT') { $fileSuffix = ' [hash:out]' }
+                if ($phase -eq 'SOURCE') {
+                    $stateText = 'HASHSRC'
+                    $fileSuffix = ' [hash:src]'
+                }
+                elseif ($phase -eq 'OUTPUT') {
+                    $stateText = 'HASHOUT'
+                    $fileSuffix = ' [hash:out]'
+                }
                 else { $fileSuffix = ' [hash]' }
             }
             'FINALIZING' {
@@ -467,7 +473,7 @@ function Render-InteractiveUi {
                 $fileSuffix = ' [finalize]'
             }
             default {
-                $stateText = 'BUSY'
+                $stateText = 'ENCODE'
                 $p = Read-FlacProgress -ErrLogPath $w.Job.ErrLog -Cache $ProgressCache
                 $pct = [int]$p.Pct
                 $ratio = [string]$p.Ratio
