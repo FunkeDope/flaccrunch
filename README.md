@@ -16,7 +16,7 @@ It recursively scans a folder, runs `flac -8 -V` for each file, verifies decoded
 - Handles both 3-way verification (embedded + pre + post) and 2-way verification (pre + post when embedded MD5 is null).
 - Embeds MD5 into output if source embedded MD5 is null and post hash is available.
 - Replaces original only after verification succeeds.
-- Restores source ACL and timestamps after replacement.
+- Relies on FLAC default metadata preservation (timestamps/permissions) and preserves modtime when writing missing MD5 metadata.
 - Supports safe cancellation (`Ctrl+C` in interactive console): active jobs are stopped and temp files are cleaned.
 
 ## Requirements

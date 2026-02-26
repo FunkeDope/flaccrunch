@@ -162,8 +162,8 @@ function Set-FlacMd5IfMissing {
     }
 
     try {
-        # Write only when embedded MD5 is missing; keep existing valid values.
-        $null = (& metaflac --set-md5sum=$ExpectedMd5 -- $Path 2>$null)
+        # Preserve file modtime when rewriting metadata.
+        $null = (& metaflac --preserve-modtime --set-md5sum=$ExpectedMd5 -- $Path 2>$null)
     }
     catch {
         return $false
@@ -172,43 +172,6 @@ function Set-FlacMd5IfMissing {
     $after = Try-GetFlacMd5 -Path $Path
     if ([string]::IsNullOrWhiteSpace($after)) { return $false }
     return ($after -eq $ExpectedMd5)
-}
-
-function Normalize-FileSecurity {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [System.Security.AccessControl.FileSecurity]$BaselineAcl
-    )
-
-    if (-not (Test-Path -LiteralPath $Path)) { return }
-
-    # Clear ReadOnly on the destination file.
-    try {
-        $item = Get-Item -LiteralPath $Path -Force
-        if (($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
-            $item.Attributes = ($item.Attributes -bxor [System.IO.FileAttributes]::ReadOnly)
-        }
-    }
-    catch { }
-
-    # Restore source ACL so elevated runs do not leave restrictive ACLs behind.
-    if ($null -ne $BaselineAcl) {
-        try {
-            Set-Acl -LiteralPath $Path -AclObject $BaselineAcl
-            return
-        }
-        catch { }
-    }
-
-    # Fallback: re-enable inherited ACLs when explicit ACL restore is unavailable.
-    try {
-        $acl = Get-Acl -LiteralPath $Path
-        if ($acl.AreAccessRulesProtected) {
-            $acl.SetAccessRuleProtection($false, $true)
-            Set-Acl -LiteralPath $Path -AclObject $acl
-        }
-    }
-    catch { }
 }
 
 # UI and status helper functions
@@ -483,27 +446,52 @@ function Render-InteractiveUi {
             continue
         }
 
-        $p = Read-FlacProgress -ErrLogPath $w.Job.ErrLog -Cache $ProgressCache
-        $pct = [int]$p.Pct
-        $ratio = [string]$p.Ratio
-        if ($ratio -eq 'N/A') { $ratio = '-' }
+        $stage = [string]$w.Job.Stage
+        if ([string]::IsNullOrWhiteSpace($stage)) { $stage = 'CONVERTING' }
+
+        $pct = 0
+        $ratio = '-'
+        $stateText = 'BUSY'
+        $fileSuffix = ''
+
+        switch ($stage) {
+            'HASHING' {
+                $stateText = 'HASHING'
+                $phase = [string]$w.Job.HashPhase
+                if ($phase -eq 'SOURCE') { $fileSuffix = ' [hash:src]' }
+                elseif ($phase -eq 'OUTPUT') { $fileSuffix = ' [hash:out]' }
+                else { $fileSuffix = ' [hash]' }
+            }
+            'FINALIZING' {
+                $stateText = 'FINAL'
+                $fileSuffix = ' [finalize]'
+            }
+            default {
+                $stateText = 'BUSY'
+                $p = Read-FlacProgress -ErrLogPath $w.Job.ErrLog -Cache $ProgressCache
+                $pct = [int]$p.Pct
+                $ratio = [string]$p.Ratio
+                if ($ratio -eq 'N/A') { $ratio = '-' }
+            }
+        }
+
         $attempt = ("{0}/{1}" -f $w.Job.Attempt, $MaxAttemptsPerFile)
 
         $barLen = [Math]::Max(8, $wBar - 2)
-        $fill = [int][Math]::Floor(($pct / 100.0) * $barLen)
+        $fill = if ($stage -eq 'HASHING') { [int](($script:__uiRowsWritten + $i) % ($barLen + 1)) } else { [int][Math]::Floor(($pct / 100.0) * $barLen) }
         if ($fill -lt 0) { $fill = 0 }
         if ($fill -gt $barLen) { $fill = $barLen }
         $bar = ('[' + ('#' * $fill).PadRight($barLen, '.') + ']')
-        $name = Truncate-Text -Text $w.Job.Name -Width $wFile
+        $name = Truncate-Text -Text ($w.Job.Name + $fileSuffix) -Width $wFile
 
         $line = (("C{0:D2}" -f $w.Id).PadRight($wCore) + '|' +
-            'BUSY'.PadRight($wState) + '|' +
+            $stateText.PadRight($wState) + '|' +
             $attempt.PadRight($wTry) + '|' +
             ("{0,3}%" -f $pct).PadRight($wPct) + '|' +
             $ratio.PadRight($wRatio) + '|' +
             $bar.PadRight($wBar) + '|' +
             $name.PadRight($wFile))
-        $lineColor = if ($pct -ge 100) { 'Green' } else { 'White' }
+        $lineColor = if ($stage -eq 'HASHING') { 'Yellow' } elseif ($pct -ge 100) { 'Green' } else { 'White' }
         Write-UiLine -Text $line -Color $lineColor
     }
 
@@ -580,36 +568,6 @@ function Render-InteractiveUi {
     return [Math]::Min($maxRows, $targetRows)
 }
 
-function Wrap-CellText {
-    param(
-        [AllowNull()][string]$Text,
-        [Parameter(Mandatory)][int]$Width
-    )
-
-    if ($Width -lt 1) { return @('') }
-    if ($null -eq $Text -or $Text -eq '') { return @('') }
-
-    $chunks = [System.Collections.Generic.List[string]]::new()
-    $remaining = $Text
-
-    while ($remaining.Length -gt $Width) {
-        $take = $Width
-        $slice = $remaining.Substring(0, $take)
-        $lastSpace = $slice.LastIndexOf(' ')
-        if ($lastSpace -ge 1) {
-            $chunks.Add($remaining.Substring(0, $lastSpace))
-            $remaining = $remaining.Substring($lastSpace + 1)
-        }
-        else {
-            $chunks.Add($slice)
-            $remaining = $remaining.Substring($take)
-        }
-    }
-
-    $chunks.Add($remaining)
-    return , $chunks.ToArray()
-}
-
 function Push-RecentEvent {
     param(
         [Parameter(Mandatory)][object]$List,
@@ -668,6 +626,16 @@ function Stop-ActiveJobsAndCleanup {
                     try { Stop-Process -Id $job.Proc.Id -Force -ErrorAction Stop } catch { }
                 }
                 $killed++
+            }
+        }
+        catch { }
+
+        try {
+            if ($null -ne $job.HashJob) {
+                if ($job.HashJob.State -eq 'Running' -or $job.HashJob.State -eq 'NotStarted') {
+                    Stop-Job -Job $job.HashJob -Force -ErrorAction SilentlyContinue | Out-Null
+                }
+                Remove-Job -Job $job.HashJob -Force -ErrorAction SilentlyContinue | Out-Null
             }
         }
         catch { }
@@ -773,75 +741,84 @@ function Set-SingleCoreAffinity {
     }
 }
 
-function Try-GetDecodedAudioMd5 {
+function Start-DecodedAudioHashJob {
     param(
         [Parameter(Mandatory)][string]$FlacExePath,
         [Parameter(Mandatory)][string]$Path
     )
 
-    function Invoke-FlacHashFromStdout {
+    $jobScript = {
         param(
-            [Parameter(Mandatory)][string]$ExePath,
-            [Parameter(Mandatory)][string]$Args
+            [string]$ExePath,
+            [string]$FilePath
         )
 
-        $psi = [System.Diagnostics.ProcessStartInfo]::new()
-        $psi.FileName = $ExePath
-        $psi.Arguments = $Args
-        $psi.UseShellExecute = $false
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-        $psi.CreateNoWindow = $true
+        function Invoke-FlacHashFromStdout {
+            param(
+                [Parameter(Mandatory)][string]$InnerExePath,
+                [Parameter(Mandatory)][string]$Args
+            )
 
-        $proc = [System.Diagnostics.Process]::new()
-        $proc.StartInfo = $psi
-        $null = $proc.Start()
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $InnerExePath
+            $psi.Arguments = $Args
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.CreateNoWindow = $true
 
-        $md5 = [System.Security.Cryptography.MD5]::Create()
-        try {
-            $buffer = New-Object byte[] 65536
-            $stream = $proc.StandardOutput.BaseStream
+            $proc = [System.Diagnostics.Process]::new()
+            $proc.StartInfo = $psi
+            $null = $proc.Start()
 
-            while ($true) {
-                $read = $stream.Read($buffer, 0, $buffer.Length)
-                if ($read -le 0) { break }
-                $null = $md5.TransformBlock($buffer, 0, $read, $buffer, 0)
+            $md5 = [System.Security.Cryptography.MD5]::Create()
+            try {
+                $buffer = New-Object byte[] 65536
+                $stream = $proc.StandardOutput.BaseStream
+
+                while ($true) {
+                    $read = $stream.Read($buffer, 0, $buffer.Length)
+                    if ($read -le 0) { break }
+                    $null = $md5.TransformBlock($buffer, 0, $read, $buffer, 0)
+                }
+
+                $empty = [byte[]]::new(0)
+                $null = $md5.TransformFinalBlock($empty, 0, 0)
+                $null = $proc.StandardError.ReadToEnd()
+                $proc.WaitForExit()
+                if ($proc.ExitCode -ne 0) { return $null }
+
+                return ([BitConverter]::ToString($md5.Hash)).Replace('-', '').ToLowerInvariant()
             }
-
-            $empty = [byte[]]::new(0)
-            $null = $md5.TransformFinalBlock($empty, 0, 0)
-
-            $stderr = $proc.StandardError.ReadToEnd()
-            $proc.WaitForExit()
-            if ($proc.ExitCode -ne 0) { return $null }
-
-            return ([BitConverter]::ToString($md5.Hash)).Replace('-', '').ToLowerInvariant()
+            finally {
+                $md5.Dispose()
+                $proc.Dispose()
+            }
         }
-        finally {
-            $md5.Dispose()
-            $proc.Dispose()
+
+        try {
+            $quotedPath = if ($FilePath -notmatch '[\s"]') { $FilePath } else { '"' + ($FilePath -replace '"', '\"') + '"' }
+            $rawArgVariants = @(
+                ("-d -c -s --force-raw-format --endian=little --sign=signed -- " + $quotedPath),
+                ("-d -c -s --force-raw-format -- " + $quotedPath)
+            )
+
+            foreach ($args in $rawArgVariants) {
+                $hash = Invoke-FlacHashFromStdout -InnerExePath $ExePath -Args $args
+                if (-not [string]::IsNullOrWhiteSpace($hash)) { return $hash }
+            }
         }
+        catch { }
+
+        return $null
     }
 
     try {
-        $quotedPath = Quote-WinArg $Path
-
-        # Prefer raw PCM hashing; keep flags compatible with older flac versions.
-        $rawArgVariants = @(
-            ("-d -c -s --force-raw-format --endian=little --sign=signed -- " + $quotedPath),
-            ("-d -c -s --force-raw-format -- " + $quotedPath)
-        )
-
-        foreach ($args in $rawArgVariants) {
-            $h = Invoke-FlacHashFromStdout -ExePath $FlacExePath -Args $args
-            if (-not [string]::IsNullOrWhiteSpace($h)) { return $h }
-        }
+        return Start-Job -ScriptBlock $jobScript -ArgumentList $FlacExePath, $Path
     }
     catch {
-        # Fall through to null return.
+        return $null
     }
-
-    return $null
 }
 
 # Cleanup stale .tmp files (conservative):
@@ -1030,34 +1007,134 @@ try {
             # Finalize completed job.
             if ($null -ne $w.Job) {
                 $job = $w.Job
+                if ([string]::IsNullOrWhiteSpace($job.Stage)) { $job.Stage = 'CONVERTING' }
 
-                if ($job.Proc.HasExited) {
-                    $exitCode = $job.Proc.ExitCode
-                    $job.Proc.Dispose()
+                if ($job.Stage -eq 'HASHING') {
+                    if ($null -eq $job.HashJob) {
+                        $job.FailureReason = "Decoded-audio hash worker unavailable"
+                        $job.Stage = 'FINALIZING'
+                        $uiDirty = $true
+                    }
+                    else {
+                        $hashState = $job.HashJob.State
+                        if ($hashState -eq 'Completed' -or $hashState -eq 'Failed' -or $hashState -eq 'Stopped') {
+                            $hashOutput = @()
+                            try { $hashOutput = @(Receive-Job -Job $job.HashJob -ErrorAction SilentlyContinue) } catch { }
+                            try { Remove-Job -Job $job.HashJob -Force -ErrorAction SilentlyContinue | Out-Null } catch { }
+                            $job.HashJob = $null
+
+                            $hashValue = @($hashOutput | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 1)
+                            $decodedHash = if ($hashValue.Count -gt 0) { $hashValue[0].Trim() } else { $null }
+
+                            if ($job.HashPhase -eq 'SOURCE') {
+                                $job.PreCalcHash = $decodedHash
+                                if ([string]::IsNullOrWhiteSpace($job.PreCalcHash)) {
+                                    $job.FailureReason = "Could not calculate decoded-audio hash (pre)"
+                                    $job.Stage = 'FINALIZING'
+                                }
+                                else {
+                                    $job.HashPhase = 'OUTPUT'
+                                    $job.HashJob = Start-DecodedAudioHashJob -FlacExePath $flacCmd.Source -Path $job.Temp
+                                    if ($null -eq $job.HashJob) {
+                                        $job.FailureReason = "Could not start decoded-audio hash worker (output)"
+                                        $job.Stage = 'FINALIZING'
+                                    }
+                                }
+                            }
+                            elseif ($job.HashPhase -eq 'OUTPUT') {
+                                $job.PostCalcHash = $decodedHash
+                                if ([string]::IsNullOrWhiteSpace($job.PostCalcHash)) {
+                                    $job.FailureReason = "Could not calculate decoded-audio hash (post)"
+                                }
+                                $job.Stage = 'FINALIZING'
+                            }
+                            else {
+                                $job.FailureReason = "Unknown hash phase state"
+                                $job.Stage = 'FINALIZING'
+                            }
+                            $uiDirty = $true
+                        }
+                    }
+                    if ($job.Stage -ne 'FINALIZING') { continue }
+                }
+
+                if ($job.Stage -eq 'CONVERTING') {
+                    if ($null -eq $job.Proc -or -not $job.Proc.HasExited) { continue }
+
+                    $job.ConvertExitCode = $job.Proc.ExitCode
+                    try { $job.Proc.Dispose() } catch { }
+                    $job.Proc = $null
 
                     $errText = ""
                     if (Test-Path -LiteralPath $job.ErrLog) {
                         try { $errText = (Get-Content -LiteralPath $job.ErrLog -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
                     }
+                    $job.ErrText = $errText
+
+                    if ($job.ConvertExitCode -ne 0) {
+                        $job.FailureReason = "flac exit $($job.ConvertExitCode)"
+                        $job.Stage = 'FINALIZING'
+                        $uiDirty = $true
+                    }
+                    elseif (-not (Test-Path -LiteralPath $job.Temp)) {
+                        $job.FailureReason = "flac produced no temp output"
+                        $job.Stage = 'FINALIZING'
+                        $uiDirty = $true
+                    }
+                    else {
+                        $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
+                        if ([string]::IsNullOrWhiteSpace($job.PreCalcHash) -and $embeddedPresent) {
+                            # Embedded stream MD5 already reflects decoded source audio.
+                            $job.PreCalcHash = $job.EmbeddedHash
+                        }
+
+                        if ([string]::IsNullOrWhiteSpace($job.PreCalcHash)) {
+                            $job.HashPhase = 'SOURCE'
+                            $job.HashJob = Start-DecodedAudioHashJob -FlacExePath $flacCmd.Source -Path $job.Original
+                            if ($null -eq $job.HashJob) {
+                                $job.FailureReason = "Could not start decoded-audio hash worker (source)"
+                                $job.Stage = 'FINALIZING'
+                            }
+                            else {
+                                $job.Stage = 'HASHING'
+                            }
+                        }
+                        else {
+                            $job.HashPhase = 'OUTPUT'
+                            $job.HashJob = Start-DecodedAudioHashJob -FlacExePath $flacCmd.Source -Path $job.Temp
+                            if ($null -eq $job.HashJob) {
+                                $job.FailureReason = "Could not start decoded-audio hash worker (output)"
+                                $job.Stage = 'FINALIZING'
+                            }
+                            else {
+                                $job.Stage = 'HASHING'
+                            }
+                        }
+                        $uiDirty = $true
+                    }
+                    if ($job.Stage -ne 'FINALIZING') { continue }
+                }
+
+                if ($job.Stage -eq 'FINALIZING') {
+                    $exitCode = if ($null -ne $job.ConvertExitCode) { [int]$job.ConvertExitCode } else { 1 }
+                    $errText = [string]$job.ErrText
 
                     $postCalcHash = $null
+                    if (-not [string]::IsNullOrWhiteSpace($job.PostCalcHash)) { $postCalcHash = [string]$job.PostCalcHash }
                     $finalized = $false
-                    $failureReason = $null
+                    $failureReason = $job.FailureReason
                     $newSize = 0
                     $saved = 0
 
                     if ($exitCode -eq 0 -and (Test-Path -LiteralPath $job.Temp)) {
                         $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
-                        if ([string]::IsNullOrWhiteSpace($job.PreCalcHash)) {
-                            if ($embeddedPresent) {
-                                # Embedded stream MD5 already reflects decoded source audio.
-                                $job.PreCalcHash = $job.EmbeddedHash
-                            }
-                            else {
-                                $job.PreCalcHash = Try-GetDecodedAudioMd5 -FlacExePath $flacCmd.Source -Path $job.Original
-                            }
+                        if ([string]::IsNullOrWhiteSpace($job.PreCalcHash) -and $embeddedPresent) {
+                            # Embedded stream MD5 already reflects decoded source audio.
+                            $job.PreCalcHash = $job.EmbeddedHash
                         }
-                        $postCalcHash = Try-GetDecodedAudioMd5 -FlacExePath $flacCmd.Source -Path $job.Temp
+                        if ([string]::IsNullOrWhiteSpace($postCalcHash) -and -not [string]::IsNullOrWhiteSpace($job.PostCalcHash)) {
+                            $postCalcHash = [string]$job.PostCalcHash
+                        }
                         $hashOK = $false
                         $calcBeforeOk = -not [string]::IsNullOrWhiteSpace($job.PreCalcHash)
                         $calcAfterOk = -not [string]::IsNullOrWhiteSpace($postCalcHash)
@@ -1096,16 +1173,6 @@ try {
                                 $totalOriginalBytes += $job.OrigSize
                                 $totalNewBytes += $newSize
                                 $totalSavedBytes += $saved
-
-                                # Normalize destination ACL/attributes and restore original timestamps.
-                                Normalize-FileSecurity -Path $job.Original -BaselineAcl $job.OrigAcl
-                                try {
-                                    $dest = Get-Item -LiteralPath $job.Original -Force
-                                    $dest.CreationTimeUtc = $job.OrigCreationUtc
-                                    $dest.LastWriteTimeUtc = $job.OrigLastWriteUtc
-                                    $dest.LastAccessTimeUtc = $job.OrigLastAccessUtc
-                                }
-                                catch { }
 
                                 $savedPct = 0.0
                                 if ($job.OrigSize -gt 0) {
@@ -1266,18 +1333,15 @@ try {
                 Safe-RemoveFile -Path $errLog
                 Safe-RemoveFile -Path $outLog
 
-                # Snapshot source metadata before conversion/replacement.
+                # Snapshot source metadata needed for verification and accounting.
                 $origItem = Get-Item -LiteralPath $original -Force
-                $origAcl = $null
-                try { $origAcl = Get-Acl -LiteralPath $original } catch { }
                 $embeddedHash = Try-GetFlacMd5 -Path $original
                 if ($null -eq $embeddedHash) { $embeddedHash = $nullHash }
                 $preCalcHash = $null
 
                 # Build one properly quoted ArgumentList; include "--" to end options.
-                # Timestamps/ACL are restored after replacement.
                 $argString =
-                "-8 -V -f --no-preserve-modtime -o " +
+                "-8 -V -f -o " +
                 (Quote-WinArg $temp) +
                 " -- " +
                 (Quote-WinArg $original)
@@ -1293,21 +1357,24 @@ try {
                 Set-SingleCoreAffinity -Process $proc -CoreIndexZeroBased $w.CoreIdx
 
                 $w.Job = [PSCustomObject]@{
-                    Proc              = $proc
-                    Original          = $original
-                    Temp              = $temp
-                    ErrLog            = $errLog
-                    OutLog            = $outLog
-                    FileId            = $queueItem.FileId
-                    Name              = $queueItem.Name
-                    Attempt           = $queueItem.Attempts
-                    EmbeddedHash      = $embeddedHash
-                    PreCalcHash       = $preCalcHash
-                    OrigSize          = $origItem.Length
-                    OrigAcl           = $origAcl
-                    OrigCreationUtc   = $origItem.CreationTimeUtc
-                    OrigLastWriteUtc  = $origItem.LastWriteTimeUtc
-                    OrigLastAccessUtc = $origItem.LastAccessTimeUtc
+                    Proc            = $proc
+                    Original        = $original
+                    Temp            = $temp
+                    ErrLog          = $errLog
+                    OutLog          = $outLog
+                    FileId          = $queueItem.FileId
+                    Name            = $queueItem.Name
+                    Attempt         = $queueItem.Attempts
+                    EmbeddedHash    = $embeddedHash
+                    PreCalcHash     = $preCalcHash
+                    OrigSize        = $origItem.Length
+                    Stage           = 'CONVERTING'
+                    HashPhase       = ''
+                    HashJob         = $null
+                    PostCalcHash    = $null
+                    ConvertExitCode = $null
+                    ErrText         = ''
+                    FailureReason   = $null
                 }
                 $uiDirty = $true
             }
