@@ -88,6 +88,100 @@ function Get-SafeName {
     return $safe
 }
 
+function Get-RootDisplayName {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [System.IO.FileSystemInfo]$Item
+    )
+
+    if ($null -ne $Item -and -not [string]::IsNullOrWhiteSpace($Item.Name)) {
+        return $Item.Name
+    }
+
+    $trimmed = $Path.TrimEnd('\', '/')
+    if ([string]::IsNullOrWhiteSpace($trimmed)) { return 'root' }
+
+    $leaf = Split-Path -Path $trimmed -Leaf
+    if (-not [string]::IsNullOrWhiteSpace($leaf)) { return $leaf }
+
+    if ($trimmed -match '^[\\/]{2,}([^\\/]+)[\\/]+([^\\/]+)$') {
+        return ('{0}_{1}' -f $Matches[1], $Matches[2])
+    }
+
+    return $trimmed
+}
+
+function Test-DirectoryWriteAccess {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+
+    $probePath = Join-Path -Path $Path -ChildPath ('.efc-write-test-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+    try {
+        [System.IO.File]::WriteAllText($probePath, '')
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+        return $true
+    }
+    catch {
+        try {
+            if (Test-Path -LiteralPath $probePath) {
+                Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        catch { }
+
+        return $false
+    }
+}
+
+function Test-IsPermissionText {
+    param([AllowEmptyString()][string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
+    return ($Text -match '(?i)access is denied|permission denied|unauthorizedaccess|unauthorized access|not authorized|read-only|readonly')
+}
+
+function Get-FriendlyPermissionMessage {
+    param(
+        [Parameter(Mandatory)][string]$Operation,
+        [string]$Path,
+        [AllowNull()]$Exception,
+        [AllowEmptyString()][string]$Details
+    )
+
+    $isPermissionIssue = $false
+    $detailText = $Details
+
+    if ($null -ne $Exception) {
+        if ($Exception -is [System.UnauthorizedAccessException] -or $Exception -is [System.Security.SecurityException]) {
+            $isPermissionIssue = $true
+        }
+        elseif (Test-IsPermissionText -Text $Exception.Message) {
+            $isPermissionIssue = $true
+        }
+
+        if ([string]::IsNullOrWhiteSpace($detailText)) {
+            $detailText = $Exception.Message
+        }
+    }
+    elseif (Test-IsPermissionText -Text $detailText) {
+        $isPermissionIssue = $true
+    }
+
+    if (-not $isPermissionIssue) { return $null }
+
+    $suffix = ''
+    if (-not [string]::IsNullOrWhiteSpace($Path)) {
+        $suffix = " | Path: $Path"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($detailText)) {
+        return "Permission denied while $Operation$suffix"
+    }
+
+    return "Permission denied while $Operation$suffix | Detail: $detailText"
+}
+
 function Escape-WildcardPath {
     param([Parameter(Mandatory)][string]$Path)
     return [System.Management.Automation.WildcardPattern]::Escape($Path)
@@ -870,7 +964,7 @@ $flacCmd = Get-Command flac -ErrorAction SilentlyContinue
 $metaflacCmd = Get-Command metaflac -ErrorAction SilentlyContinue
 if (-not $flacCmd -or -not $metaflacCmd) { throw "'flac' and/or 'metaflac' not found in PATH." }
 
-$albumName = $rootItem.Name
+$albumName = Get-RootDisplayName -Path $RootFolder -Item $rootItem
 $safeAlbumName = Get-SafeName -Value $albumName
 $runStartedLocal = Get-Date
 $runStartedUtc = $runStartedLocal.ToUniversalTime()
@@ -1015,10 +1109,27 @@ function Start-DecodedAudioHashJob {
     }
 }
 
+# Check root folder writability only. Subfolders may vary, so permission issues below are handled per item.
+$rootWritable = Test-DirectoryWriteAccess -Path $RootFolder
+if (-not $rootWritable) {
+    $warningText = "Root folder failed a temp write test. The run may still work for readable/writable subfolders, but permission-related failures will be reported clearly."
+    Write-Host $warningText -ForegroundColor Yellow
+    Write-RunLog -Level WARN -Message ("{0} | Path: {1}" -f $warningText, $RootFolder)
+
+    $continueAnswer = Read-Host "Continue anyway? [y/N]"
+    if ($continueAnswer -notmatch '^(?i)y(?:es)?$') {
+        Write-RunLog -Level WARN -Message "Run cancelled during root-folder write preflight."
+        Flush-RunLog -Force
+        Write-Host "Cancelled before starting conversions."
+        return
+    }
+}
+
 # Cleanup stale .tmp files (conservative):
 # Delete *.tmp only when same-base *.flac exists (track.tmp <-> track.flac).
 
-Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue |
+$cleanupScanErrors = @()
+Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +cleanupScanErrors |
 Where-Object { $_.Extension -ieq '.tmp' } |
 ForEach-Object {
     $maybeFlac = [System.IO.Path]::ChangeExtension($_.FullName, '.flac')
@@ -1029,9 +1140,36 @@ ForEach-Object {
 
 # Collect FLAC files
 
+$fileScanErrors = @()
 $files = @(
-    Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -Filter *.flac
+    Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +fileScanErrors -Filter *.flac
 ) | Sort-Object -Property @{ Expression = 'Length'; Descending = $true }, @{ Expression = 'FullName'; Descending = $false }
+
+$permissionScanPaths = @(
+    @($cleanupScanErrors) + @($fileScanErrors) |
+    Where-Object { Get-FriendlyPermissionMessage -Operation 'scanning folders' -Path $_.TargetObject -Exception $_.Exception -Details $_.ToString() } |
+    ForEach-Object {
+        if (-not [string]::IsNullOrWhiteSpace([string]$_.TargetObject)) {
+            [string]$_.TargetObject
+        }
+    } |
+    Sort-Object -Unique
+)
+
+if ($permissionScanPaths.Count -gt 0) {
+    $warningLines = [System.Collections.Generic.List[string]]::new()
+    $warningLines.Add(("Some folders/files were skipped during scan due to permissions: {0}" -f $permissionScanPaths.Count)) | Out-Null
+    foreach ($path in ($permissionScanPaths | Select-Object -First 3)) {
+        $warningLines.Add(("  SKIPPED: {0}" -f $path)) | Out-Null
+    }
+    if ($permissionScanPaths.Count -gt 3) {
+        $warningLines.Add(("  ... plus {0} more" -f ($permissionScanPaths.Count - 3))) | Out-Null
+    }
+
+    $warningText = [string]::Join([Environment]::NewLine, $warningLines)
+    Write-Host $warningText -ForegroundColor Yellow
+    Write-RunLog -Level WARN -Message ([regex]::Replace($warningText, '\r?\n', ' | '))
+}
 
 $totalFiles = $files.Count
 if ($totalFiles -eq 0) {
@@ -1367,12 +1505,15 @@ try {
 
                             # Replace original file, retrying to tolerate transient locks.
                             $replaced = $false
+                            $lastMoveException = $null
                             for ($attempt = 1; $attempt -le 5 -and -not $replaced; $attempt++) {
                                 try {
                                     Move-Item -LiteralPath $job.Temp -Destination $job.Original -Force
                                     $replaced = $true
                                 }
-                                catch { }
+                                catch {
+                                    $lastMoveException = $_.Exception
+                                }
                             }
 
                             if ($replaced) {
@@ -1412,7 +1553,13 @@ try {
                                 $finalized = $true
                             }
                             else {
-                                $failureReason = "Could not replace original after retries (file may be locked)"
+                                $permissionFailure = Get-FriendlyPermissionMessage -Operation 'replacing original file' -Path $job.Original -Exception $lastMoveException
+                                if (-not [string]::IsNullOrWhiteSpace($permissionFailure)) {
+                                    $failureReason = $permissionFailure
+                                }
+                                else {
+                                    $failureReason = "Could not replace original after retries (file may be locked)"
+                                }
                             }
                         }
                         else {
@@ -1431,6 +1578,11 @@ try {
                         else {
                             $failureReason = "flac produced no temp output"
                         }
+                    }
+
+                    $permissionFailure = Get-FriendlyPermissionMessage -Operation 'converting file' -Path $job.Original -Details $errText
+                    if (-not [string]::IsNullOrWhiteSpace($permissionFailure)) {
+                        $failureReason = $permissionFailure
                     }
 
                     if (-not $finalized) {
@@ -1541,50 +1693,92 @@ try {
                 Safe-RemoveFile -Path $stdErrCapture
                 Safe-RemoveFile -Path $stdOutCapture
 
-                # Snapshot source metadata needed for verification and accounting.
-                $origItem = Get-Item -LiteralPath $original -Force
-                $embeddedHash = Try-GetFlacMd5 -Path $original
-                if ($null -eq $embeddedHash) { $embeddedHash = $nullHash }
-                $preCalcHash = $null
+                try {
+                    # Snapshot source metadata needed for verification and accounting.
+                    $origItem = Get-Item -LiteralPath $original -Force
+                    $embeddedHash = Try-GetFlacMd5 -Path $original
+                    if ($null -eq $embeddedHash) { $embeddedHash = $nullHash }
+                    $preCalcHash = $null
 
-                # Build one properly quoted ArgumentList; include "--" to end options.
-                $argString =
-                "-8 -V -f -o " +
-                (Quote-WinArg $temp) +
-                " -- " +
-                (Quote-WinArg $original)
+                    # Build one properly quoted ArgumentList; include "--" to end options.
+                    $argString =
+                    "-8 -V -f -o " +
+                    (Quote-WinArg $temp) +
+                    " -- " +
+                    (Quote-WinArg $original)
 
-                $conversionAttempts++
-                $proc = Start-Process -FilePath $flacCmd.Source `
-                    -ArgumentList $argString `
-                    -NoNewWindow `
-                    -PassThru `
-                    -RedirectStandardError $stdErrRedirect `
-                    -RedirectStandardOutput $stdOutRedirect
+                    $conversionAttempts++
+                    $proc = Start-Process -FilePath $flacCmd.Source `
+                        -ArgumentList $argString `
+                        -NoNewWindow `
+                        -PassThru `
+                        -RedirectStandardError $stdErrRedirect `
+                        -RedirectStandardOutput $stdOutRedirect
 
-                Set-SingleCoreAffinity -Process $proc -CoreIndexZeroBased $w.CoreIdx
+                    Set-SingleCoreAffinity -Process $proc -CoreIndexZeroBased $w.CoreIdx
 
-                $w.Job = [PSCustomObject]@{
-                    Proc            = $proc
-                    Original        = $original
-                    Temp            = $temp
-                    StdErrCapture   = $stdErrCapture
-                    StdOutCapture   = $stdOutCapture
-                    FileId          = $queueItem.FileId
-                    Name            = $queueItem.Name
-                    Attempt         = $queueItem.Attempts
-                    EmbeddedHash    = $embeddedHash
-                    PreCalcHash     = $preCalcHash
-                    OrigSize        = $origItem.Length
-                    Stage           = 'CONVERTING'
-                    HashPhase       = ''
-                    HashJob         = $null
-                    PostCalcHash    = $null
-                    ConvertExitCode = $null
-                    ErrText         = ''
-                    FailureReason   = $null
+                    $w.Job = [PSCustomObject]@{
+                        Proc            = $proc
+                        Original        = $original
+                        Temp            = $temp
+                        StdErrCapture   = $stdErrCapture
+                        StdOutCapture   = $stdOutCapture
+                        FileId          = $queueItem.FileId
+                        Name            = $queueItem.Name
+                        Attempt         = $queueItem.Attempts
+                        EmbeddedHash    = $embeddedHash
+                        PreCalcHash     = $preCalcHash
+                        OrigSize        = $origItem.Length
+                        Stage           = 'CONVERTING'
+                        HashPhase       = ''
+                        HashJob         = $null
+                        PostCalcHash    = $null
+                        ConvertExitCode = $null
+                        ErrText         = ''
+                        FailureReason   = $null
+                    }
+                    $uiDirty = $true
                 }
-                $uiDirty = $true
+                catch {
+                    Safe-RemoveFile -Path $temp
+                    Safe-RemoveFile -Path $stdErrCapture
+                    Safe-RemoveFile -Path $stdOutCapture
+
+                    $failed++
+                    $processed++
+                    $failureReason = Get-FriendlyPermissionMessage -Operation 'starting conversion' -Path $original -Exception $_.Exception
+                    if ([string]::IsNullOrWhiteSpace($failureReason)) {
+                        $failureReason = "Could not start conversion | Path: {0} | Detail: {1}" -f $original, $_.Exception.Message
+                    }
+
+                    Push-RecentEvent -List $recentEvents `
+                        -Status 'FAIL' `
+                        -File $queueItem.Name `
+                        -Attempt ("{0}/{1}" -f $queueItem.Attempts, $maxAttemptsPerFile) `
+                        -EmbeddedHash (Format-HashForUi -Hash $nullHash -NullHash $nullHash) `
+                        -CalculatedBeforeHash (Format-HashForUi -Hash $null -NullHash $nullHash) `
+                        -CalculatedAfterHash (Format-HashForUi -Hash $null -NullHash $nullHash) `
+                        -Verification 'MISMATCH' `
+                        -BeforeAfter 'N/A -> N/A' `
+                        -Saved 'N/A' `
+                        -CompressionPct 'N/A' `
+                        -Detail $failureReason
+
+                    $failedResults.Add([PSCustomObject]@{
+                            Path         = $original
+                            Name         = $queueItem.Name
+                            Attempt      = ("{0}/{1}" -f $queueItem.Attempts, $maxAttemptsPerFile)
+                            Reason       = $failureReason
+                            Verification = 'MISMATCH'
+                            EmbeddedMd5  = $nullHash
+                            CalcPreMd5   = $null
+                            CalcPostMd5  = $null
+                            StdErr       = '(none)'
+                        }) | Out-Null
+
+                    Write-RunLog -Level ERROR -Message ("Failed before conversion start | File: {0} | Attempt: {1}/{2} | Reason: {3}" -f $original, $queueItem.Attempts, $maxAttemptsPerFile, $failureReason)
+                    $uiDirty = $true
+                }
             }
         }
 
