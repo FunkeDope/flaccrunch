@@ -114,6 +114,27 @@ function Get-RootDisplayName {
     return $trimmed
 }
 
+function Get-DefaultLogFolder {
+    $homePath = [Environment]::GetFolderPath('UserProfile')
+    if ([string]::IsNullOrWhiteSpace($homePath)) {
+        $homePath = $HOME
+    }
+    if ([string]::IsNullOrWhiteSpace($homePath)) {
+        $homePath = (Get-Location).Path
+    }
+
+    $desktopPath = [Environment]::GetFolderPath('Desktop')
+    if ([string]::IsNullOrWhiteSpace($desktopPath) -and -not [string]::IsNullOrWhiteSpace($homePath)) {
+        $desktopPath = Join-Path -Path $homePath -ChildPath 'Desktop'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($desktopPath) -and (Test-Path -LiteralPath $desktopPath)) {
+        return (Join-Path -Path $desktopPath -ChildPath 'flaccruch-logs')
+    }
+
+    return (Join-Path -Path $homePath -ChildPath 'flaccruch-logs')
+}
+
 function Test-DirectoryWriteAccess {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -428,13 +449,28 @@ function Resolve-OptionalTool {
     return $null
 }
 
+function Resolve-RequiredTool {
+    param(
+        [Parameter(Mandatory)][string[]]$Names,
+        [string]$BaseDirectory,
+        [Parameter(Mandatory)][string]$DisplayName
+    )
+
+    $cmd = Resolve-OptionalTool -Names $Names -BaseDirectory $BaseDirectory
+    if ($null -ne $cmd) {
+        return $cmd
+    }
+
+    throw ("'{0}' not found. Add it to PATH or place it beside this script." -f $DisplayName)
+}
+
 function Refresh-ProcessPathFromRegistry {
     try {
         $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         $combined = @($machinePath, $userPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         if ($combined.Count -gt 0) {
-            $env:PATH = ($combined -join ';')
+            $env:PATH = ($combined -join [System.IO.Path]::PathSeparator)
         }
     }
     catch { }
@@ -1478,7 +1514,7 @@ function Render-InteractiveUi {
             }
             default {
                 $stateText = 'ENCODE'
-                $p = Read-FlacProgress -StdErrPath $w.Job.StdErrCapture -Cache $ProgressCache
+                $p = Read-FlacProgress -StdErrPath $w.Job.ErrLog -Cache $ProgressCache
                 $pct = [int]$p.Pct
                 $ratio = [string]$p.Ratio
                 if ($ratio -eq 'N/A') { $ratio = '-' }
@@ -1702,9 +1738,6 @@ function Stop-ActiveJobsAndCleanup {
             Safe-RemoveFile -Path $job.Temp
             $tmpDeleted++
         }
-        if (-not [string]::IsNullOrWhiteSpace($job.StdErrCapture) -and (Test-Path -LiteralPath $job.StdErrCapture)) {
-            Safe-RemoveFile -Path $job.StdErrCapture
-        }
 
         try {
             if ($null -ne $job.Proc) { $job.Proc.Dispose() }
@@ -1729,9 +1762,6 @@ if (-not (Test-Path -LiteralPath $RootFolder)) { throw "RootFolder does not exis
 $rootItem = Get-Item -LiteralPath $RootFolder -Force
 if (-not $rootItem.PSIsContainer) { throw "RootFolder is not a directory: $RootFolder" }
 
-$flacCmd = Get-Command flac -ErrorAction SilentlyContinue
-$metaflacCmd = Get-Command metaflac -ErrorAction SilentlyContinue
-if (-not $flacCmd -or -not $metaflacCmd) { throw "'flac' and/or 'metaflac' not found in PATH." }
 $toolBaseDirectory = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($toolBaseDirectory)) {
     try {
@@ -1742,8 +1772,14 @@ if ([string]::IsNullOrWhiteSpace($toolBaseDirectory)) {
     }
 }
 
-$pngOptimizerCmd = Resolve-OptionalTool -Names @('oxipng.exe', 'pngcrush.exe') -BaseDirectory $toolBaseDirectory
-$jpegOptimizerCmd = Resolve-OptionalTool -Names @('jpegtran.exe') -BaseDirectory $toolBaseDirectory
+if ($script:IsWindowsHost) {
+    Refresh-ProcessPathFromRegistry
+}
+
+$flacCmd = Resolve-RequiredTool -Names @('flac', 'flac.exe') -BaseDirectory $toolBaseDirectory -DisplayName 'flac'
+$metaflacCmd = Resolve-RequiredTool -Names @('metaflac', 'metaflac.exe') -BaseDirectory $toolBaseDirectory -DisplayName 'metaflac'
+$pngOptimizerCmd = Resolve-OptionalTool -Names @('oxipng', 'oxipng.exe', 'pngcrush', 'pngcrush.exe') -BaseDirectory $toolBaseDirectory
+$jpegOptimizerCmd = Resolve-OptionalTool -Names @('jpegtran', 'jpegtran.exe') -BaseDirectory $toolBaseDirectory
 
 $albumName = Get-RootDisplayName -Path $RootFolder -Item $rootItem
 $safeAlbumName = Get-SafeName -Value $albumName
@@ -1751,11 +1787,7 @@ $runStartedLocal = Get-Date
 $runStartedUtc = $runStartedLocal.ToUniversalTime()
 $runStamp = $runStartedLocal.ToString('yyyyMMdd-HHmmss-fff')
 if ([string]::IsNullOrWhiteSpace($LogFolder)) {
-    $desktopPath = [Environment]::GetFolderPath('Desktop')
-    if ([string]::IsNullOrWhiteSpace($desktopPath)) {
-        $desktopPath = Join-Path -Path $env:USERPROFILE -ChildPath 'Desktop'
-    }
-    $LogFolder = Join-Path -Path $desktopPath -ChildPath 'flaccruch-logs'
+    $LogFolder = Get-DefaultLogFolder
 }
 
 New-Item -ItemType Directory -Path $LogFolder -Force | Out-Null
@@ -1765,9 +1797,13 @@ New-Item -ItemType Directory -Path $runLogDir -Force | Out-Null
 $runtimeCaptureDir = Join-Path -Path $runLogDir -ChildPath '.runtime'
 New-Item -ItemType Directory -Path $runtimeCaptureDir -Force | Out-Null
 
+$jobLogDir = Join-Path -Path $runLogDir -ChildPath 'job-logs'
+New-Item -ItemType Directory -Path $jobLogDir -Force | Out-Null
+
 $logFile = Join-Path -Path $runLogDir -ChildPath ("{0}_{1}.log" -f $safeAlbumName, $runStamp)
 $script:LogFile = $logFile
 $verboseLogFile = $null
+$script:VerboseLogFile = $null
 if (Test-VerboseUiEnabled) {
     $verboseLogFile = Join-Path -Path $runLogDir -ChildPath ("verbose-trace_{0}.log" -f $runStamp)
     $script:VerboseLogFile = $verboseLogFile
@@ -2285,8 +2321,8 @@ try {
                     $job.Proc = $null
 
                     $errText = ""
-                    if (Test-Path -LiteralPath $job.StdErrCapture) {
-                        try { $errText = (Get-Content -LiteralPath $job.StdErrCapture -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
+                    if (Test-Path -LiteralPath $job.ErrLog) {
+                        try { $errText = (Get-Content -LiteralPath $job.ErrLog -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
                     }
                     $job.ErrText = $errText
                     if (-not [string]::IsNullOrWhiteSpace($errText)) {
@@ -2605,7 +2641,7 @@ try {
                                 -Saved 'N/A' `
                                 -CompressionPct 'N/A' `
                                 -Detail $failureReason
-                            Write-RunLog -Level WARN -Message ("Retrying | File: {0} | NextAttempt: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8}" -f $job.Original, $nextAttempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-ErrSnippet -Text $errText))
+                            Write-RunLog -Level WARN -Message ("Retrying | File: {0} | NextAttempt: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8} | ErrLog: {9} | OutLog: {10}" -f $job.Original, $nextAttempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-ErrSnippet -Text $errText), $job.ErrLog, $job.OutLog)
                         }
                         else {
                             $failed++
@@ -2639,12 +2675,13 @@ try {
                                     CalcPreMd5   = $job.PreCalcHash
                                     CalcPostMd5  = $postCalcHash
                                     StdErr       = (Format-ErrSnippet -Text $errText)
+                                    ErrLog       = $job.ErrLog
+                                    OutLog       = $job.OutLog
                                 }) | Out-Null
-                            Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-ErrSnippet -Text $errText))
+                            Write-RunLog -Level ERROR -Message ("Failed permanently | File: {0} | Attempts: {1}/{2} | Reason: {3} | Embedded: {4} | CalcPre: {5} | CalcPost: {6} | Verification: {7} | STDERR: {8} | ErrLog: {9} | OutLog: {10}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $failureReason, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-ErrSnippet -Text $errText), $job.ErrLog, $job.OutLog)
                         }
                     }
 
-                    Safe-RemoveFile -Path $job.StdErrCapture
                     $w.Job = $null
                     $uiDirty = $true
                 }
@@ -2659,11 +2696,14 @@ try {
                 $temp = [System.IO.Path]::ChangeExtension($original, '.tmp')
 
                 $jobId = "{0:D5}_{1}_a{2}" -f $queueItem.FileId, ([guid]::NewGuid().ToString('N').Substring(0, 8)), $queueItem.Attempts
-                $stdErrCapture = Join-Path -Path $runtimeCaptureDir -ChildPath "$jobId.stderr.tmp"
-                $stdErrRedirect = Escape-WildcardPath -Path $stdErrCapture
+                $errLog = Join-Path -Path $jobLogDir -ChildPath "$jobId.err.log"
+                $outLog = Join-Path -Path $jobLogDir -ChildPath "$jobId.out.log"
+                $errLogRedirect = Escape-WildcardPath -Path $errLog
+                $outLogRedirect = Escape-WildcardPath -Path $outLog
 
                 Safe-RemoveFile -Path $temp
-                Safe-RemoveFile -Path $stdErrCapture
+                Safe-RemoveFile -Path $errLog
+                Safe-RemoveFile -Path $outLog
 
                 try {
                     # Snapshot source metadata needed for verification and accounting.
@@ -2685,7 +2725,8 @@ try {
                         -ArgumentList $argString `
                         -NoNewWindow `
                         -PassThru `
-                        -RedirectStandardError $stdErrRedirect
+                        -RedirectStandardError $errLogRedirect `
+                        -RedirectStandardOutput $outLogRedirect
 
                     try {
                         $proc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
@@ -2699,7 +2740,8 @@ try {
                         Original        = $original
                         Temp            = $temp
                         JobId           = $jobId
-                        StdErrCapture   = $stdErrCapture
+                        ErrLog          = $errLog
+                        OutLog          = $outLog
                         FileId          = $queueItem.FileId
                         Name            = $queueItem.Name
                         Attempt         = $queueItem.Attempts
@@ -2720,7 +2762,8 @@ try {
                 }
                 catch {
                     Safe-RemoveFile -Path $temp
-                    Safe-RemoveFile -Path $stdErrCapture
+                    Safe-RemoveFile -Path $errLog
+                    Safe-RemoveFile -Path $outLog
 
                     $failed++
                     $processed++
@@ -2752,6 +2795,8 @@ try {
                             CalcPreMd5   = $null
                             CalcPostMd5  = $null
                             StdErr       = '(none)'
+                            ErrLog       = '(none)'
+                            OutLog       = '(none)'
                         }) | Out-Null
 
                     Write-RunLog -Level ERROR -Message ("Failed before conversion start | File: {0} | Attempt: {1}/{2} | Reason: {3}" -f $original, $queueItem.Attempts, $maxAttemptsPerFile, $failureReason)
@@ -2825,6 +2870,8 @@ if ($failedResults.Count -gt 0) {
         $failedLines.Add(("   CalcPre MD5  : {0}" -f $entry.CalcPreMd5)) | Out-Null
         $failedLines.Add(("   CalcPost MD5 : {0}" -f $entry.CalcPostMd5)) | Out-Null
         $failedLines.Add(("   STDERR       : {0}" -f $entry.StdErr)) | Out-Null
+        $failedLines.Add(("   ErrLog       : {0}" -f $entry.ErrLog)) | Out-Null
+        $failedLines.Add(("   OutLog       : {0}" -f $entry.OutLog)) | Out-Null
         $failedLines.Add("") | Out-Null
     }
     [string]::Join([Environment]::NewLine, $failedLines) | Out-File -LiteralPath $failedListPath -Encoding UTF8
