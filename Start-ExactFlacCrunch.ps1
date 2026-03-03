@@ -30,6 +30,10 @@ param(
     [string]$LogFolder = (Join-Path -Path ([Environment]::GetFolderPath('Desktop')) -ChildPath 'flaccruch-logs')
 )
 
+if (($null -eq $PSVersionTable) -or ($null -eq $PSVersionTable.PSVersion) -or ($PSVersionTable.PSVersion.Major -lt 7)) {
+    throw "Start-ExactFlacCrunch.ps1 requires PowerShell 7 or newer. Windows PowerShell 5.x is not supported. Rerun this script with pwsh 7."
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:RunLogBuffer = [System.Collections.Generic.List[string]]::new()
