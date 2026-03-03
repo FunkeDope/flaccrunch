@@ -1534,9 +1534,9 @@ function Render-InteractiveUi {
     $eventFixed = $wTime + $wStat + $wTry2 + $wComp + $wSaved + $wHash
     $eventSep = 7
     $wTextTotal = [Math]::Max(34, $width - ($eventFixed + $eventSep))
-    $wFile = [int][Math]::Floor($wTextTotal * 0.62)
+    $wFile = [int][Math]::Floor($wTextTotal * 0.52)
     if ($wFile -lt 18) { $wFile = 18 }
-    if ($wFile -gt ($wTextTotal - 12)) { $wFile = $wTextTotal - 12 }
+    if ($wFile -gt ($wTextTotal - 18)) { $wFile = $wTextTotal - 18 }
     $wDetail = $wTextTotal - $wFile
 
     Write-UiLine -Text "Recent Results (latest first)" -Color Cyan
@@ -1647,14 +1647,42 @@ function Stop-ActiveJobsAndCleanup {
         $job = $w.Job
 
         try {
-            if ($null -ne $job.Proc -and -not $job.Proc.HasExited) {
-                try {
-                    $job.Proc.Kill($true)
+            if ($null -ne $job.Proc) {
+                $stillRunning = $false
+                try { $stillRunning = -not $job.Proc.HasExited } catch { $stillRunning = $false }
+
+                if ($stillRunning) {
+                    $stopIssued = $false
+
+                    try {
+                        $job.Proc.Kill($true)
+                        $stopIssued = $true
+                    }
+                    catch { }
+
+                    if ($stopIssued) {
+                        try { $null = $job.Proc.WaitForExit(2000) } catch { }
+                    }
+
+                    $stillRunning = $false
+                    try {
+                        $job.Proc.Refresh()
+                        $stillRunning = -not $job.Proc.HasExited
+                    }
+                    catch { $stillRunning = $false }
+
+                    if ($stillRunning) {
+                        try {
+                            Stop-Process -Id $job.Proc.Id -Force -ErrorAction Stop
+                            $stopIssued = $true
+                        }
+                        catch { }
+
+                        try { $null = $job.Proc.WaitForExit(2000) } catch { }
+                    }
+
+                    if ($stopIssued) { $killed++ }
                 }
-                catch {
-                    try { Stop-Process -Id $job.Proc.Id -Force -ErrorAction Stop } catch { }
-                }
-                $killed++
             }
         }
         catch { }
@@ -1945,7 +1973,11 @@ if ($totalFiles -eq 0) {
 }
 
 # Conservative default worker count.
-$maxWorkers = [Math]::Min([Environment]::ProcessorCount, $totalFiles)
+$availableWorkerSlots = [Environment]::ProcessorCount
+if ($availableWorkerSlots -gt 1) {
+    $availableWorkerSlots--
+}
+$maxWorkers = [Math]::Min($availableWorkerSlots, $totalFiles)
 if ($maxWorkers -lt 1) { $maxWorkers = 1 }
 
 $maxAttemptsPerFile = 3
@@ -2096,50 +2128,6 @@ try {
             catch { }
         }
 
-        if ($interactive) {
-            $nowUtc = [DateTime]::UtcNow
-            $sizeKey = ''
-            try { $sizeKey = '{0}x{1}' -f [Console]::WindowWidth, [Console]::WindowHeight } catch { }
-            $sizeChanged = ($sizeKey -ne $lastUiSizeKey)
-            if ($sizeChanged) { $lastUiSizeKey = $sizeKey }
-
-            if ($uiDirty -or $sizeChanged -or (($nowUtc - $lastUiFrameUtc) -ge $uiFrameInterval)) {
-                $lastUiRenderRows = Render-InteractiveUi `
-                    -AlbumName $albumName `
-                    -RunStartedUtc $runStartedUtc `
-                    -Processed $processed `
-                    -TotalFiles $totalFiles `
-                    -Failed $failed `
-                    -TotalSavedBytes $totalSavedBytes `
-                    -TotalMetadataSavedBytes $totalMetadataSavedBytes `
-                    -TotalPaddingTrimSavedBytes $totalPaddingTrimSavedBytes `
-                    -PaddingTrimFiles $paddingTrimFiles `
-                    -TotalArtworkSavedBytes $totalArtworkSavedBytes `
-                    -TotalArtworkRawSavedBytes $totalArtworkRawSavedBytes `
-                    -ArtworkOptimizedFiles $artworkOptimizedFiles `
-                    -ArtworkOptimizedBlocks $artworkOptimizedBlocks `
-                    -QueueCount $queue.Count `
-                    -MaxAttemptsPerFile $maxAttemptsPerFile `
-                    -Workers @($workers) `
-                    -RecentEvents $recentEvents `
-                    -TopCompression @(
-                    $compressionResults |
-                    Where-Object { $_.SavedBytes -gt 0 } |
-                    Sort-Object -Property SavedBytes -Descending |
-                    Select-Object -First 3
-                ) `
-                    -ProgressCache $progressCache `
-                    -VerboseMessages $script:VerboseUiMessages `
-                    -PngToolStatus $pngToolStatus `
-                    -JpegToolStatus $jpegToolStatus `
-                    -PreviousRows $lastUiRenderRows `
-                    -ForceClear:$sizeChanged `
-                    -Banner $uiBanner
-                $lastUiFrameUtc = $nowUtc
-                $uiDirty = $false
-            }
-        }
-
         if ($script:CancelRequested) {
             $runCanceled = $true
             $uiBanner = "Cancellation requested... stopping active jobs and cleaning temp files."
@@ -2183,6 +2171,50 @@ try {
 
             Write-RunLog -Level WARN -Message ("Cancellation cleanup complete | ProcessesStopped: {0} | TempFilesDeleted: {1}" -f $cancelResult.Killed, $cancelResult.TempDeleted)
             break
+        }
+
+        if ($interactive) {
+            $nowUtc = [DateTime]::UtcNow
+            $sizeKey = ''
+            try { $sizeKey = '{0}x{1}' -f [Console]::WindowWidth, [Console]::WindowHeight } catch { }
+            $sizeChanged = ($sizeKey -ne $lastUiSizeKey)
+            if ($sizeChanged) { $lastUiSizeKey = $sizeKey }
+
+            if ($uiDirty -or $sizeChanged -or (($nowUtc - $lastUiFrameUtc) -ge $uiFrameInterval)) {
+                $lastUiRenderRows = Render-InteractiveUi `
+                    -AlbumName $albumName `
+                    -RunStartedUtc $runStartedUtc `
+                    -Processed $processed `
+                    -TotalFiles $totalFiles `
+                    -Failed $failed `
+                    -TotalSavedBytes $totalSavedBytes `
+                    -TotalMetadataSavedBytes $totalMetadataSavedBytes `
+                    -TotalPaddingTrimSavedBytes $totalPaddingTrimSavedBytes `
+                    -PaddingTrimFiles $paddingTrimFiles `
+                    -TotalArtworkSavedBytes $totalArtworkSavedBytes `
+                    -TotalArtworkRawSavedBytes $totalArtworkRawSavedBytes `
+                    -ArtworkOptimizedFiles $artworkOptimizedFiles `
+                    -ArtworkOptimizedBlocks $artworkOptimizedBlocks `
+                    -QueueCount $queue.Count `
+                    -MaxAttemptsPerFile $maxAttemptsPerFile `
+                    -Workers @($workers) `
+                    -RecentEvents $recentEvents `
+                    -TopCompression @(
+                    $compressionResults |
+                    Where-Object { $_.SavedBytes -gt 0 } |
+                    Sort-Object -Property SavedBytes -Descending |
+                    Select-Object -First 3
+                ) `
+                    -ProgressCache $progressCache `
+                    -VerboseMessages $script:VerboseUiMessages `
+                    -PngToolStatus $pngToolStatus `
+                    -JpegToolStatus $jpegToolStatus `
+                    -PreviousRows $lastUiRenderRows `
+                    -ForceClear:$sizeChanged `
+                    -Banner $uiBanner
+                $lastUiFrameUtc = $nowUtc
+                $uiDirty = $false
+            }
         }
 
         foreach ($w in $workers) {
@@ -2431,25 +2463,31 @@ try {
                             }
 
                             $artSummary = 'none'
+                            $artDetailText = 'none'
                             if ($null -ne $artResult) {
                                 if ($metadataNetCredited -gt 0) {
                                     if ($artResult.BlocksOptimized -gt 0) {
                                         $artSummary = ("MetadataCleanup {0} net ({1} raw image, {2} block{3})" -f (Format-Bytes $metadataNetCredited), (Format-Bytes $artResult.RawSavedBytes), $artResult.BlocksOptimized, $(if ($artResult.BlocksOptimized -eq 1) { '' } else { 's' }))
+                                        $artDetailText = ("Meta {0} ({1} raw, {2} blk{3})" -f (Format-Bytes $metadataNetCredited), (Format-Bytes $artResult.RawSavedBytes), $artResult.BlocksOptimized, $(if ($artResult.BlocksOptimized -eq 1) { '' } else { 's' }))
                                     }
                                     else {
                                         $artSummary = ("MetadataCleanup {0} net (padding-only)" -f (Format-Bytes $metadataNetCredited))
+                                        $artDetailText = ("Meta {0} (pad)" -f (Format-Bytes $metadataNetCredited))
                                     }
                                 }
                                 elseif ($artResult.Changed) {
                                     if ($artResult.BlocksOptimized -gt 0) {
                                         $artSummary = ("MetadataCleanup 00.00 B net ({0} raw image, no final-size change)" -f (Format-Bytes $artResult.RawSavedBytes))
+                                        $artDetailText = ("Meta 00.00 B ({0} raw)" -f (Format-Bytes $artResult.RawSavedBytes))
                                     }
                                     else {
                                         $artSummary = "MetadataCleanup 00.00 B net (padding-only, no final-size change)"
+                                        $artDetailText = "Meta 00.00 B (pad)"
                                     }
                                 }
                                 elseif (-not [string]::IsNullOrWhiteSpace($artResult.Summary)) {
                                     $artSummary = $artResult.Summary
+                                    $artDetailText = $artResult.Summary
                                 }
                             }
 
@@ -2467,13 +2505,19 @@ try {
                                 }) | Out-Null
 
                             $verification = if ($embeddedPresent) { 'MATCH' } else { 'MATCH|NEW' }
-                            $detailText = 'Replaced original'
+                            $audioSavedPct = 0.0
+                            if ($job.OrigSize -gt 0) {
+                                $audioSavedPct = [Math]::Round((($audioNetSaved / [double]$job.OrigSize) * 100.0), 2)
+                            }
+                            $detailParts = [System.Collections.Generic.List[string]]::new()
+                            $detailParts.Add(("Audio {0} ({1:N2}%)" -f (Format-Bytes $audioNetSaved), $audioSavedPct)) | Out-Null
                             if ($null -ne $artResult -and $artResult.Changed) {
-                                $detailText = "Replaced original | $artSummary"
+                                $detailParts.Add($artDetailText) | Out-Null
                             }
-                            elseif ($null -ne $artResult -and $artSummary -ne 'none') {
-                                $detailText = "Replaced original | $artSummary"
+                            elseif ($null -ne $artResult -and $artDetailText -ne 'none') {
+                                $detailParts.Add($artDetailText) | Out-Null
                             }
+                            $detailText = [string]::Join(' | ', $detailParts)
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'OK' `
                                 -File $job.Name `
@@ -2643,6 +2687,11 @@ try {
                         -PassThru `
                         -RedirectStandardError $stdErrRedirect
 
+                    try {
+                        $proc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+                    }
+                    catch { }
+
                     Set-SingleCoreAffinity -Process $proc -CoreIndexZeroBased $w.CoreIdx
 
                     $w.Job = [PSCustomObject]@{
@@ -2755,6 +2804,7 @@ $overallReductionPct = if ($totalOriginalBytes -gt 0) { [Math]::Round((($totalSa
 $successRatePct = if ($totalFiles -gt 0) { [Math]::Round((($successful / [double]$totalFiles) * 100.0), 2) } else { 0.0 }
 $avgSavedPerSuccessBytes = if ($successful -gt 0) { [long][Math]::Round(($totalSavedBytes / [double]$successful), 0) } else { 0L }
 $audioSavedBytes = [Math]::Max(0L, ($totalSavedBytes - $totalMetadataSavedBytes))
+$audioReductionPct = if ($totalOriginalBytes -gt 0) { [Math]::Round((($audioSavedBytes / [double]$totalOriginalBytes) * 100.0), 2) } else { 0.0 }
 
 $failedLines = [System.Collections.Generic.List[string]]::new()
 $failedLines.Add("Exact Flac Cruncher - Failed Files") | Out-Null
@@ -2782,26 +2832,19 @@ if ($failedResults.Count -gt 0) {
 
 $summaryLines = [System.Collections.Generic.List[string]]::new()
 $summaryLines.Add("===================================================================") | Out-Null
-$summaryLines.Add("JOB SUMMARY: $albumName") | Out-Null
-$summaryLines.Add(("Processed Files      : {0}" -f $processed)) | Out-Null
-$summaryLines.Add(("Successful Files     : {0}" -f $successful)) | Out-Null
-$summaryLines.Add(("Failed Files         : {0}" -f $failed)) | Out-Null
-$summaryLines.Add(("Pending Files        : {0}" -f $pending)) | Out-Null
-$summaryLines.Add(("Total Files Found    : {0}" -f $totalFiles)) | Out-Null
-$summaryLines.Add(("Total Attempts       : {0}" -f $conversionAttempts)) | Out-Null
-$summaryLines.Add(("Success Rate         : {0:N2}%" -f $successRatePct)) | Out-Null
-$summaryLines.Add(("Total Script Time    : {0}" -f $totalElapsedText)) | Out-Null
-$summaryLines.Add(("Total Original Size  : {0}" -f (Format-Bytes $totalOriginalBytes))) | Out-Null
-$summaryLines.Add(("Total New Size       : {0}" -f (Format-Bytes $totalNewBytes))) | Out-Null
-$summaryLines.Add(("TOTAL SAVED (ALL)    : *** {0} ({1:N2}% of original) ***" -f (Format-Bytes $totalSavedBytes), $overallReductionPct)) | Out-Null
-$summaryLines.Add(("Audio Recompress     : {0}" -f (Format-Bytes $audioSavedBytes))) | Out-Null
-$summaryLines.Add(("FLAC Padding Trim    : {0} across {1} file(s)" -f (Format-Bytes $totalPaddingTrimSavedBytes), $paddingTrimFiles)) | Out-Null
-$summaryLines.Add(("Album Art Cleanup    : Net {0} across {1} file(s), {2} block(s)" -f (Format-Bytes $totalArtworkSavedBytes), $artworkOptimizedFiles, $artworkOptimizedBlocks)) | Out-Null
-$summaryLines.Add(("Album Art Raw Trim   : {0}" -f (Format-Bytes $totalArtworkRawSavedBytes))) | Out-Null
-$summaryLines.Add(("Avg Saved / Success  : {0}" -f (Format-Bytes $avgSavedPerSuccessBytes))) | Out-Null
-$summaryLines.Add(("Failed File Log      : {0}" -f $(if ($failedListPath) { $failedListPath } else { '(none)' }))) | Out-Null
-$summaryLines.Add(("EFC Final Log        : {0}" -f $efcFinalLogPath)) | Out-Null
-$summaryLines.Add(("Verbose Trace Log    : {0}" -f $(if ($verboseLogFile) { $verboseLogFile } else { '(disabled)' }))) | Out-Null
+$summaryLines.Add("SUMMARY: $albumName") | Out-Null
+$summaryLines.Add(("Done/OK/Fail/Pend    : {0}/{1}/{2}/{3}" -f $processed, $successful, $failed, $pending)) | Out-Null
+$summaryLines.Add(("Files/Attempts/Rate  : {0}/{1}/{2:N2}%%" -f $totalFiles, $conversionAttempts, $successRatePct)) | Out-Null
+$summaryLines.Add(("Elapsed              : {0}" -f $totalElapsedText)) | Out-Null
+$summaryLines.Add(("Size In -> Out       : {0} -> {1}" -f (Format-Bytes $totalOriginalBytes), (Format-Bytes $totalNewBytes))) | Out-Null
+$summaryLines.Add(("Saved Total          : {0} ({1:N2}%%)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct)) | Out-Null
+$summaryLines.Add(("Saved Audio          : {0} ({1:N2}%%)" -f (Format-Bytes $audioSavedBytes), $audioReductionPct)) | Out-Null
+$summaryLines.Add(("Saved Pad/Art        : {0} / {1}" -f (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes))) | Out-Null
+$summaryLines.Add(("Art Raw | Files/Blk  : {0} | {1}/{2}" -f (Format-Bytes $totalArtworkRawSavedBytes), $artworkOptimizedFiles, $artworkOptimizedBlocks)) | Out-Null
+$summaryLines.Add(("Avg / Success        : {0}" -f (Format-Bytes $avgSavedPerSuccessBytes))) | Out-Null
+$summaryLines.Add(("Failed Log           : {0}" -f $(if ($failedListPath) { $failedListPath } else { '(none)' }))) | Out-Null
+$summaryLines.Add(("Final Log            : {0}" -f $efcFinalLogPath)) | Out-Null
+$summaryLines.Add(("Verbose Log          : {0}" -f $(if ($verboseLogFile) { $verboseLogFile } else { '(disabled)' }))) | Out-Null
 $summaryLines.Add("Top 3 Compression    :") | Out-Null
 
 if ($topCompression.Count -eq 0) {
@@ -2834,7 +2877,7 @@ else {
 Write-Host ("Processed: {0}/{1}  Success: {2}  Failed: {3}  Pending: {4}" -f $processed, $totalFiles, $successful, $failed, $pending)
 Write-Host ("Elapsed: {0}" -f $totalElapsedText)
 Write-Host ("TOTAL SAVED (ALL): {0} ({1:N2}% of original)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct) -ForegroundColor Green
-Write-Host ("Audio Recompress: {0} | FLAC Padding Trim: {1} | Album Art Cleanup (Net): {2}" -f (Format-Bytes $audioSavedBytes), (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes))
+Write-Host ("Audio Recompress: {0} ({1:N2}% of original) | FLAC Padding Trim: {2} | Album Art Cleanup (Net): {3}" -f (Format-Bytes $audioSavedBytes), $audioReductionPct, (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes))
 Write-Host ("Album Art (Raw): {0} | Padding Files: {1} | Art Files: {2} | Blocks: {3}" -f (Format-Bytes $totalArtworkRawSavedBytes), $paddingTrimFiles, $artworkOptimizedFiles, $artworkOptimizedBlocks)
 Write-Host ("Success Rate: {0:N2}%  Avg Saved/Success: {1}" -f $successRatePct, (Format-Bytes $avgSavedPerSuccessBytes))
 Write-Host "Top 3 Compression:"
