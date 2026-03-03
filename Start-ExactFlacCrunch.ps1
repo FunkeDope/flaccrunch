@@ -119,6 +119,20 @@ function Format-LabelValue {
     return ("{0}: {1}" -f $Label.PadRight($LabelWidth), $Value)
 }
 
+function Write-SummaryLine {
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value,
+        [int]$LabelWidth = 16,
+        [ConsoleColor]$LabelColor = [ConsoleColor]::Gray,
+        [ConsoleColor]$ValueColor = [ConsoleColor]::White
+    )
+
+    Write-Host ($Label.PadRight($LabelWidth)) -NoNewline -ForegroundColor $LabelColor
+    Write-Host ': ' -NoNewline -ForegroundColor DarkGray
+    Write-Host $Value -ForegroundColor $ValueColor
+}
+
 function Format-TopCompressionLine {
     param(
         [Parameter(Mandatory)][int]$Rank,
@@ -1581,6 +1595,9 @@ function Render-InteractiveUi {
     $elapsedText = Format-Elapsed -Elapsed $elapsed
     $metadataNetSavedBytes = $TotalMetadataSavedBytes
     $audioDeltaBytes = $TotalSavedBytes - $metadataNetSavedBytes
+    if ($TotalSavedBytes -le 0 -and $audioDeltaBytes -lt 0) {
+        $audioDeltaBytes = 0L
+    }
     $successfulCount = [Math]::Max(0, ($Processed - $Failed))
 
     Write-UiLine -Text ("Exact Flac Cruncher | {0}" -f $AlbumName) -Color Cyan
@@ -3002,6 +3019,9 @@ try {
                 $elapsedText = Format-Elapsed -Elapsed ($nowUtc - $runStartedUtc)
                 $metadataSavedStatus = $totalMetadataSavedBytes
                 $audioSavedStatus = $totalSavedBytes - $metadataSavedStatus
+                if ($totalSavedBytes -le 0 -and $audioSavedStatus -lt 0) {
+                    $audioSavedStatus = 0L
+                }
                 Write-Host ("Progress: {0}/{1}  Failed: {2}  Elapsed: {3}  Saved(All): {4}  Audio Delta: {5}  Pad: {6}  Art(Net): {7}  Art(Raw): {8}" -f $processed, $totalFiles, $failed, $elapsedText, (Format-Bytes $totalSavedBytes), (Format-Bytes $audioSavedStatus -Signed), (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes))
             }
         }
@@ -3041,6 +3061,9 @@ $successRatePct = if ($totalFiles -gt 0) { [Math]::Round((($successful / [double
 $avgSavedPerSuccessBytes = if ($successful -gt 0) { [long][Math]::Round(($totalSavedBytes / [double]$successful), 0) } else { 0L }
 $metadataNetSavedBytes = $totalMetadataSavedBytes
 $audioSavedBytes = $totalSavedBytes - $metadataNetSavedBytes
+if ($totalSavedBytes -le 0 -and $audioSavedBytes -lt 0) {
+    $audioSavedBytes = 0L
+}
 $audioReductionPct = if ($totalOriginalBytes -gt 0) { [Math]::Round((($audioSavedBytes / [double]$totalOriginalBytes) * 100.0), 2) } else { 0.0 }
 
 $failedLines = [System.Collections.Generic.List[string]]::new()
@@ -3121,16 +3144,29 @@ if ($runCanceled) {
 else {
     Write-Host "JOB COMPLETE"
 }
-Write-Host (Format-LabelValue -Label 'Processed' -Value ("{0}/{1} | Success {2} | Failed {3} | Pending {4}" -f $processed, $totalFiles, $successful, $failed, $pending))
-Write-Host (Format-LabelValue -Label 'Elapsed' -Value $totalElapsedText)
-Write-Host (Format-LabelValue -Label 'Total Saved' -Value ("{0} | {1} of original" -f (Format-Bytes $totalSavedBytes), (Format-Percent -Value $overallReductionPct))) -ForegroundColor Green
-Write-Host (Format-LabelValue -Label 'Audio Delta' -Value ("{0} | {1} of original" -f (Format-Bytes $audioSavedBytes -Signed), (Format-Percent -Value $audioReductionPct)))
-Write-Host (Format-LabelValue -Label 'Metadata Net' -Value (Format-Bytes $metadataNetSavedBytes))
-Write-Host (Format-LabelValue -Label 'Padding Trim' -Value (Format-Bytes $totalPaddingTrimSavedBytes))
-Write-Host (Format-LabelValue -Label 'Padding Files' -Value (Format-HeaderCount -Value $paddingTrimFiles))
-Write-Host (Format-LabelValue -Label 'Artwork Net/Raw' -Value ("{0} / {1}" -f (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes)))
-Write-Host (Format-LabelValue -Label 'Artwork Files/Blk' -Value (Format-CountPair -Left $artworkOptimizedFiles -Right $artworkOptimizedBlocks))
-Write-Host (Format-LabelValue -Label 'Avg / Success' -Value ("{0} | {1}" -f (Format-Percent -Value $successRatePct), (Format-Bytes $avgSavedPerSuccessBytes)))
+$processedColor = if ($failed -gt 0) { 'Red' } elseif ($pending -gt 0) { 'Yellow' } else { 'Green' }
+$successColor = if ($successful -gt 0 -and $failed -eq 0) { 'Green' } elseif ($successful -gt 0) { 'Yellow' } else { 'Gray' }
+$failedColor = if ($failed -gt 0) { 'Red' } else { 'Green' }
+$pendingColor = if ($pending -gt 0) { 'Yellow' } else { 'Green' }
+$audioDeltaColor = if ($audioSavedBytes -lt 0) { 'Red' } elseif ($audioSavedBytes -gt 0) { 'Cyan' } else { 'Gray' }
+$metadataColor = if ($metadataNetSavedBytes -gt 0) { 'DarkGreen' } else { 'Gray' }
+$paddingColor = if ($totalPaddingTrimSavedBytes -gt 0 -or $paddingTrimFiles -gt 0) { 'DarkGreen' } else { 'Gray' }
+$artworkColor = if ($totalArtworkSavedBytes -gt 0 -or $artworkOptimizedFiles -gt 0) { 'DarkGreen' } else { 'Gray' }
+
+$processedText = ("{0}/{1}" -f $processed, $totalFiles)
+Write-SummaryLine -Label 'Processed' -Value $processedText -ValueColor $processedColor
+Write-SummaryLine -Label 'Succeeded' -Value ("{0}" -f $successful) -ValueColor $successColor
+Write-SummaryLine -Label 'Failed' -Value ("{0}" -f $failed) -ValueColor $failedColor
+Write-SummaryLine -Label 'Pending' -Value ("{0}" -f $pending) -ValueColor $pendingColor
+Write-SummaryLine -Label 'Elapsed' -Value $totalElapsedText -ValueColor Gray
+Write-SummaryLine -Label 'Total Saved' -Value ("{0} | {1} of original" -f (Format-Bytes $totalSavedBytes), (Format-Percent -Value $overallReductionPct)) -ValueColor Green
+Write-SummaryLine -Label 'Audio Delta' -Value ("{0} | {1} of original" -f (Format-Bytes $audioSavedBytes -Signed), (Format-Percent -Value $audioReductionPct)) -ValueColor $audioDeltaColor
+Write-SummaryLine -Label 'Metadata Net' -Value (Format-Bytes $metadataNetSavedBytes) -ValueColor $metadataColor
+Write-SummaryLine -Label 'Padding Trim' -Value (Format-Bytes $totalPaddingTrimSavedBytes) -ValueColor $paddingColor
+Write-SummaryLine -Label 'Padding Files' -Value ("{0}" -f $paddingTrimFiles) -ValueColor $paddingColor
+Write-SummaryLine -Label 'Artwork Net/Raw' -Value ("{0} / {1}" -f (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes)) -ValueColor $artworkColor
+Write-SummaryLine -Label 'Artwork Files/Blk' -Value ("{0}/{1}" -f $artworkOptimizedFiles, $artworkOptimizedBlocks) -ValueColor $artworkColor
+Write-SummaryLine -Label 'Avg / Success' -Value ("{0} | {1}" -f (Format-Percent -Value $successRatePct), (Format-Bytes $avgSavedPerSuccessBytes)) -ValueColor Gray
 Write-Host "Top 3 Compression:"
 if ($topCompression.Count -eq 0) {
     if ($successful -gt 0) {
@@ -3148,17 +3184,17 @@ else {
     }
 }
 if ($failedListPath) {
-    Write-Host (Format-LabelValue -Label 'Failed List' -Value $failedListPath)
+    Write-SummaryLine -Label 'Failed List' -Value $failedListPath -ValueColor Gray
 }
 else {
-    Write-Host (Format-LabelValue -Label 'Failed List' -Value '(none)')
+    Write-SummaryLine -Label 'Failed List' -Value '(none)' -ValueColor Gray
 }
-Write-Host (Format-LabelValue -Label 'EFC Final Log' -Value $efcFinalLogPath)
+Write-SummaryLine -Label 'EFC Final Log' -Value $efcFinalLogPath -ValueColor Gray
 if ($verboseLogFile) {
-    Write-Host (Format-LabelValue -Label 'Verbose Trace Log' -Value $verboseLogFile)
+    Write-SummaryLine -Label 'Verbose Trace' -Value $verboseLogFile -ValueColor Gray
 }
 else {
-    Write-Host (Format-LabelValue -Label 'Verbose Trace Log' -Value '(disabled)')
+    Write-SummaryLine -Label 'Verbose Trace' -Value '(disabled)' -ValueColor Gray
 }
-Write-Host (Format-LabelValue -Label 'Logs' -Value $runLogDir)
-Write-Host (Format-LabelValue -Label 'Log' -Value $logFile)
+Write-SummaryLine -Label 'Logs' -Value $runLogDir -ValueColor Gray
+Write-SummaryLine -Label 'Log' -Value $logFile -ValueColor Gray
