@@ -3,7 +3,7 @@
 Batch recompress FLAC files in place with decoded-audio integrity verification.
 
 .DESCRIPTION
-Scans a root folder recursively for .flac files, runs `flac -8 -V` into per-file
+Scans a root folder recursively for .flac files, runs `flac -8 -e -p -V` into per-file
 `.tmp` outputs, verifies decoded-audio MD5 consistency, and replaces originals only
 after verification succeeds. The script keeps one rolling run log, writes an
 EFC-style final summary log, emits a failure log only when needed, restores source
@@ -36,6 +36,9 @@ $script:RunLogBuffer = [System.Collections.Generic.List[string]]::new()
 $script:RunLogLastFlushUtc = [DateTime]::UtcNow
 $script:RunLogFlushInterval = [TimeSpan]::FromSeconds(2)
 $script:RunLogMaxBufferedLines = 40
+$script:VerboseUiMessages = [System.Collections.Generic.List[string]]::new()
+$script:UiInteractiveMode = $false
+$script:VerboseLogFile = $null
 
 # Ensure console I/O uses UTF-8 so filenames with non-ASCII characters render correctly.
 try {
@@ -219,6 +222,38 @@ function Write-RunLog {
     Flush-RunLog
 }
 
+function Test-VerboseUiEnabled {
+    return ($VerbosePreference -ne 'SilentlyContinue')
+}
+
+function Write-VerboseUi {
+    param([Parameter(Mandatory)][string]$Message)
+
+    if (-not (Test-VerboseUiEnabled)) { return }
+
+    if (-not $script:UiInteractiveMode) {
+        Write-Verbose $Message
+    }
+
+    if ($null -eq $script:VerboseUiMessages) {
+        $script:VerboseUiMessages = [System.Collections.Generic.List[string]]::new()
+    }
+
+    $timestamped = "{0} | {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message
+    $script:VerboseUiMessages.Insert(0, $timestamped)
+    if ($script:VerboseUiMessages.Count -gt 20) {
+        $script:VerboseUiMessages.RemoveRange(20, $script:VerboseUiMessages.Count - 20)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($script:VerboseLogFile)) {
+        try {
+            $diskLine = "{0} | {1}" -f (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fffK'), $Message
+            Add-Content -LiteralPath $script:VerboseLogFile -Value $diskLine -Encoding UTF8
+        }
+        catch { }
+    }
+}
+
 function Format-ErrSnippet {
     param(
         [AllowEmptyString()]
@@ -314,6 +349,680 @@ function Set-FlacMd5IfMissing {
     $after = Try-GetFlacMd5 -Path $Path
     if ([string]::IsNullOrWhiteSpace($after)) { return $false }
     return ($after -eq $ExpectedMd5)
+}
+
+function Get-OptionalToolSearchDirectories {
+    $dirs = [System.Collections.Generic.List[string]]::new()
+
+    $candidates = @(
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Links",
+        "$env:LOCALAPPDATA\Microsoft\WindowsApps",
+        'C:\libjpeg-turbo64\bin',
+        'C:\libjpeg-turbo\bin',
+        "$env:ProgramFiles\libjpeg-turbo\bin",
+        "$env:ProgramFiles\libjpeg-turbo64\bin",
+        "$env:ProgramFiles(x86)\libjpeg-turbo\bin"
+    )
+
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        if ($dirs -notcontains $candidate) {
+            $dirs.Add($candidate) | Out-Null
+        }
+    }
+
+    return @($dirs)
+}
+
+function Resolve-OptionalTool {
+    param(
+        [Parameter(Mandatory)][string[]]$Names,
+        [string]$BaseDirectory
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($BaseDirectory)) {
+        foreach ($name in $Names) {
+            $candidate = Join-Path -Path $BaseDirectory -ChildPath $name
+            if (Test-Path -LiteralPath $candidate) {
+                try {
+                    $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+                    if (-not $item.PSIsContainer) {
+                        return [PSCustomObject]@{
+                            Name   = [System.IO.Path]::GetFileNameWithoutExtension($item.Name)
+                            Source = $item.FullName
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+    }
+
+    foreach ($searchDir in @(Get-OptionalToolSearchDirectories)) {
+        foreach ($name in $Names) {
+            $candidate = Join-Path -Path $searchDir -ChildPath $name
+            if (Test-Path -LiteralPath $candidate) {
+                try {
+                    $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+                    if (-not $item.PSIsContainer) {
+                        return [PSCustomObject]@{
+                            Name   = [System.IO.Path]::GetFileNameWithoutExtension($item.Name)
+                            Source = $item.FullName
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+    }
+
+    foreach ($name in $Names) {
+        $commandName = [System.IO.Path]::GetFileNameWithoutExtension($name)
+        $cmd = Get-Command $commandName -ErrorAction SilentlyContinue
+        if ($cmd) {
+            return $cmd
+        }
+    }
+
+    return $null
+}
+
+function Refresh-ProcessPathFromRegistry {
+    try {
+        $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $combined = @($machinePath, $userPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        if ($combined.Count -gt 0) {
+            $env:PATH = ($combined -join ';')
+        }
+    }
+    catch { }
+}
+
+function Invoke-OptionalOptimizerInstallPrompt {
+    param(
+        [AllowNull()]$PngOptimizerCommand,
+        [AllowNull()]$JpegOptimizerCommand,
+        [string]$BaseDirectory,
+        [switch]$Interactive
+    )
+
+    $result = [PSCustomObject]@{
+        PngOptimizerCommand  = $PngOptimizerCommand
+        JpegOptimizerCommand = $JpegOptimizerCommand
+        Prompted             = $false
+    }
+
+    if (-not $Interactive) {
+        return $result
+    }
+
+    $needPng = ($null -eq $PngOptimizerCommand)
+    $needJpeg = ($null -eq $JpegOptimizerCommand)
+    if (-not $needPng -and -not $needJpeg) {
+        return $result
+    }
+
+    $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $wingetCmd) {
+        return $result
+    }
+
+    Write-Host ""
+    Write-Host "Optional album-art tools are missing." -ForegroundColor Yellow
+    if ($needPng) {
+        Write-Host "  PNG  : missing ('oxipng' preferred, or 'pngcrush')." -ForegroundColor DarkYellow
+    }
+    if ($needJpeg) {
+        Write-Host "  JPEG : missing ('jpegtran')." -ForegroundColor DarkYellow
+    }
+    if (-not [string]::IsNullOrWhiteSpace($BaseDirectory)) {
+        Write-Host ("You can also place the EXE(s) next to this script: {0}" -f $BaseDirectory) -ForegroundColor DarkGray
+    }
+
+    $reply = ''
+    try {
+        $reply = [string](Read-Host "Attempt best-effort install with winget now? [y/N]")
+    }
+    catch {
+        return $result
+    }
+
+    if ($reply.Trim().ToLowerInvariant() -notin @('y', 'yes')) {
+        return $result
+    }
+
+    $result.Prompted = $true
+
+    if ($needPng) {
+        Write-Host "Installing PNG optimizer with winget (oxipng)..." -ForegroundColor Cyan
+        try {
+            $null = & $wingetCmd.Source install --id Shssoichiro.Oxipng -e --source winget --accept-source-agreements --accept-package-agreements 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "winget could not install oxipng automatically."
+            }
+        }
+        catch {
+            Write-Warning ("winget could not install oxipng automatically: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    if ($needJpeg) {
+        Write-Host "Installing JPEG optimizer with winget (libjpeg-turbo / jpegtran)..." -ForegroundColor Cyan
+        try {
+            $null = & $wingetCmd.Source install --id libjpeg-turbo.libjpeg-turbo.VC -e --source winget --accept-source-agreements --accept-package-agreements 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "winget could not install libjpeg-turbo (jpegtran) automatically."
+            }
+        }
+        catch {
+            Write-Warning ("winget could not install libjpeg-turbo (jpegtran) automatically: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    Refresh-ProcessPathFromRegistry
+    $result.PngOptimizerCommand = Resolve-OptionalTool -Names @('oxipng.exe', 'pngcrush.exe') -BaseDirectory $BaseDirectory
+    $result.JpegOptimizerCommand = Resolve-OptionalTool -Names @('jpegtran.exe') -BaseDirectory $BaseDirectory
+
+    return $result
+}
+
+function Get-ImageSignatureKind {
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        try {
+            $buffer = New-Object byte[] 8
+            $read = $fs.Read($buffer, 0, $buffer.Length)
+        }
+        finally {
+            $fs.Dispose()
+        }
+    }
+    catch {
+        return $null
+    }
+
+    if ($read -ge 8 -and
+        $buffer[0] -eq 0x89 -and
+        $buffer[1] -eq 0x50 -and
+        $buffer[2] -eq 0x4E -and
+        $buffer[3] -eq 0x47 -and
+        $buffer[4] -eq 0x0D -and
+        $buffer[5] -eq 0x0A -and
+        $buffer[6] -eq 0x1A -and
+        $buffer[7] -eq 0x0A) {
+        return 'PNG'
+    }
+
+    if ($read -ge 3 -and
+        $buffer[0] -eq 0xFF -and
+        $buffer[1] -eq 0xD8 -and
+        $buffer[2] -eq 0xFF) {
+        return 'JPEG'
+    }
+
+    return $null
+}
+
+function Get-FlacPictureBlocks {
+    param(
+        [Parameter(Mandatory)][string]$MetaflacExePath,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $items = [System.Collections.Generic.List[object]]::new()
+    $lines = @()
+    try {
+        $lines = @(& $MetaflacExePath --list --block-type=PICTURE -- $Path 2>$null)
+    }
+    catch {
+        return @()
+    }
+
+    if ($LASTEXITCODE -ne 0 -or $lines.Count -eq 0) {
+        return @()
+    }
+
+    $current = $null
+    foreach ($rawLine in $lines) {
+        $line = [string]$rawLine
+        $trimmed = $line.Trim()
+
+        if ($trimmed -match '^METADATA block #(?<num>\d+)') {
+            if ($null -ne $current) {
+                $items.Add([PSCustomObject]$current) | Out-Null
+            }
+
+            $current = [ordered]@{
+                BlockNumber = [int]$Matches['num']
+                PictureType = 3
+                MimeType    = ''
+                Description = ''
+                Width       = 0
+                Height      = 0
+                Depth       = 0
+                Colors      = 0
+            }
+            continue
+        }
+
+        if ($null -eq $current) { continue }
+
+        if ($trimmed -match '^type:\s*(?<num>\d+)\s+\((?<label>.+)\)$') {
+            if ($Matches['label'] -ne 'PICTURE') {
+                $current.PictureType = [int]$Matches['num']
+            }
+            continue
+        }
+
+        if ($trimmed -match '^MIME type:\s*(?<value>.*)$') {
+            $current.MimeType = [string]$Matches['value']
+            continue
+        }
+
+        if ($trimmed -match '^description:\s*(?<value>.*)$') {
+            $current.Description = [string]$Matches['value']
+            continue
+        }
+
+        if ($trimmed -match '^width:\s*(?<value>\d+)$') {
+            $current.Width = [int]$Matches['value']
+            continue
+        }
+
+        if ($trimmed -match '^height:\s*(?<value>\d+)$') {
+            $current.Height = [int]$Matches['value']
+            continue
+        }
+
+        if ($trimmed -match '^depth:\s*(?<value>\d+)$') {
+            $current.Depth = [int]$Matches['value']
+            continue
+        }
+
+        if ($trimmed -match '^colors:\s*(?<value>\d+)$') {
+            $current.Colors = [int]$Matches['value']
+            continue
+        }
+    }
+
+    if ($null -ne $current) {
+        $items.Add([PSCustomObject]$current) | Out-Null
+    }
+
+    return @($items)
+}
+
+function New-MetaflacPictureSpec {
+    param(
+        [Parameter(Mandatory)]$Block,
+        [Parameter(Mandatory)][string]$FilePath
+    )
+
+    $mimeType = [string]$Block.MimeType
+    if ([string]::IsNullOrWhiteSpace($mimeType) -or $mimeType -eq '-->') {
+        return $null
+    }
+
+    $description = [string]$Block.Description
+    if ($description -match '[\r\n|]') {
+        return $null
+    }
+
+    $dimensionSpec = ''
+    if ($Block.Width -gt 0 -and $Block.Height -gt 0 -and $Block.Depth -gt 0) {
+        $dimensionSpec = "{0}x{1}x{2}" -f $Block.Width, $Block.Height, $Block.Depth
+        if ($Block.Colors -gt 0) {
+            $dimensionSpec = "{0}/{1}" -f $dimensionSpec, $Block.Colors
+        }
+    }
+
+    return ("{0}|{1}|{2}|{3}|{4}" -f [int]$Block.PictureType, $mimeType, $description, $dimensionSpec, $FilePath)
+}
+
+function Optimize-FlacAlbumArt {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$MetaflacExePath,
+        [AllowNull()][string]$PngOptimizerPath,
+        [AllowNull()][string]$JpegOptimizerPath,
+        [Parameter(Mandatory)][string]$ScratchDir,
+        [Parameter(Mandatory)][string]$JobId
+    )
+
+    $result = [PSCustomObject]@{
+        Changed             = $false
+        SavedBytes          = 0L
+        RawSavedBytes       = 0L
+        CandidateSavedBytes = 0L
+        BlocksOptimized     = 0
+        Summary             = ''
+    }
+
+    $pictureBlocks = @(Get-FlacPictureBlocks -MetaflacExePath $MetaflacExePath -Path $Path)
+
+    $scanMessage = ("Album art scan | File: {0} | PictureBlocks: {1} | PNG Tool: {2} | JPEG Tool: {3}" -f $Path, $pictureBlocks.Count, $(if ([string]::IsNullOrWhiteSpace($PngOptimizerPath)) { 'OFF' } else { $PngOptimizerPath }), $(if ([string]::IsNullOrWhiteSpace($JpegOptimizerPath)) { 'OFF' } else { $JpegOptimizerPath }))
+    Write-RunLog -Level INFO -Message $scanMessage
+    Write-VerboseUi -Message $scanMessage
+
+    $stagedPictures = [System.Collections.Generic.List[object]]::new()
+    foreach ($block in $pictureBlocks) {
+        $baseName = "{0}_b{1}" -f $JobId, $block.BlockNumber
+        $picturePath = Join-Path -Path $ScratchDir -ChildPath ("{0}.picture.tmp" -f $baseName)
+        $jpegOutputPath = Join-Path -Path $ScratchDir -ChildPath ("{0}.jpegopt.tmp" -f $baseName)
+
+        Safe-RemoveFile -Path $picturePath
+        Safe-RemoveFile -Path $jpegOutputPath
+
+        $exportOutput = @()
+        try {
+            $exportOutput = @(& $MetaflacExePath "--block-number=$($block.BlockNumber)" "--export-picture-to=$picturePath" -- $Path 2>&1)
+        }
+        catch {
+            Write-VerboseUi -Message ("metaflac export threw | File: {0} | Block: {1} | Detail: {2}" -f $Path, $block.BlockNumber, $_.Exception.Message)
+            Safe-RemoveFile -Path $picturePath
+            Safe-RemoveFile -Path $jpegOutputPath
+            continue
+        }
+
+        if ($exportOutput.Count -gt 0) {
+            Write-VerboseUi -Message ("metaflac export | File: {0} | Block: {1} | Output: {2}" -f $Path, $block.BlockNumber, (Format-ErrSnippet -Text ([string]::Join(' ', @($exportOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
+        }
+
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $picturePath)) {
+            Write-VerboseUi -Message ("Album art export failed | File: {0} | Block: {1} | Exit: {2}" -f $Path, $block.BlockNumber, $LASTEXITCODE)
+            Safe-RemoveFile -Path $picturePath
+            Safe-RemoveFile -Path $jpegOutputPath
+            continue
+        }
+
+        $pictureKind = Get-ImageSignatureKind -Path $picturePath
+        if ($null -eq $pictureKind) {
+            $mimeType = [string]$block.MimeType
+            if ($mimeType -match '(?i)image/png') {
+                $pictureKind = 'PNG'
+            }
+            elseif ($mimeType -match '(?i)image/jpe?g') {
+                $pictureKind = 'JPEG'
+            }
+        }
+
+        $beforeSize = (Get-Item -LiteralPath $picturePath -Force).Length
+        $afterSize = $beforeSize
+
+        if ($pictureKind -eq 'PNG') {
+            if ([string]::IsNullOrWhiteSpace($PngOptimizerPath)) {
+                Write-RunLog -Level INFO -Message ("Album art block skipped | File: {0} | Block: {1} | Kind: PNG | Reason: PNG optimizer unavailable" -f $Path, $block.BlockNumber)
+                Safe-RemoveFile -Path $picturePath
+                Safe-RemoveFile -Path $jpegOutputPath
+                continue
+            }
+
+            $pngTool = [System.IO.Path]::GetFileNameWithoutExtension($PngOptimizerPath).ToLowerInvariant()
+            $pngOutput = @()
+            try {
+                if ($pngTool -eq 'pngcrush') {
+                    $pngOutput = @(& $PngOptimizerPath '-q' '-ow' $picturePath 2>&1)
+                }
+                else {
+                    $pngOutput = @(& $PngOptimizerPath '-o' '4' '-q' $picturePath 2>&1)
+                }
+            }
+            catch {
+                Write-RunLog -Level WARN -Message ("Album art PNG optimization failed | File: {0} | Block: {1} | Tool: {2} | Detail: {3}" -f $Path, $block.BlockNumber, $PngOptimizerPath, $_.Exception.Message)
+                Safe-RemoveFile -Path $picturePath
+                Safe-RemoveFile -Path $jpegOutputPath
+                continue
+            }
+
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $picturePath)) {
+                Write-RunLog -Level WARN -Message ("Album art PNG optimization failed | File: {0} | Block: {1} | Tool: {2} | Exit: {3}" -f $Path, $block.BlockNumber, $PngOptimizerPath, $LASTEXITCODE)
+                Safe-RemoveFile -Path $picturePath
+                Safe-RemoveFile -Path $jpegOutputPath
+                continue
+            }
+
+            if ($pngOutput.Count -gt 0) {
+                Write-VerboseUi -Message ("PNG optimizer | File: {0} | Block: {1} | Output: {2}" -f $Path, $block.BlockNumber, (Format-ErrSnippet -Text ([string]::Join(' ', @($pngOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
+            }
+
+            $afterSize = (Get-Item -LiteralPath $picturePath -Force).Length
+        }
+        elseif ($pictureKind -eq 'JPEG') {
+            if ([string]::IsNullOrWhiteSpace($JpegOptimizerPath)) {
+                Write-RunLog -Level INFO -Message ("Album art block skipped | File: {0} | Block: {1} | Kind: JPEG | Reason: JPEG optimizer unavailable" -f $Path, $block.BlockNumber)
+                Safe-RemoveFile -Path $picturePath
+                Safe-RemoveFile -Path $jpegOutputPath
+                continue
+            }
+
+            $jpegOutput = @()
+            try {
+                $jpegOutput = @(& $JpegOptimizerPath '-copy' 'all' '-optimize' '-outfile' $jpegOutputPath $picturePath 2>&1)
+            }
+            catch {
+                Write-RunLog -Level WARN -Message ("Album art JPEG optimization failed | File: {0} | Block: {1} | Tool: {2} | Detail: {3}" -f $Path, $block.BlockNumber, $JpegOptimizerPath, $_.Exception.Message)
+                Safe-RemoveFile -Path $picturePath
+                Safe-RemoveFile -Path $jpegOutputPath
+                continue
+            }
+
+            if ($jpegOutput.Count -gt 0) {
+                Write-VerboseUi -Message ("JPEG optimizer | File: {0} | Block: {1} | Output: {2}" -f $Path, $block.BlockNumber, (Format-ErrSnippet -Text ([string]::Join(' ', @($jpegOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
+            }
+
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $jpegOutputPath)) {
+                Write-RunLog -Level WARN -Message ("Album art JPEG optimization failed | File: {0} | Block: {1} | Tool: {2} | Exit: {3}" -f $Path, $block.BlockNumber, $JpegOptimizerPath, $LASTEXITCODE)
+                Safe-RemoveFile -Path $picturePath
+                Safe-RemoveFile -Path $jpegOutputPath
+                continue
+            }
+
+            $candidateSize = (Get-Item -LiteralPath $jpegOutputPath -Force).Length
+            if ($candidateSize -lt $beforeSize) {
+                try {
+                    Move-Item -LiteralPath $jpegOutputPath -Destination $picturePath -Force
+                }
+                catch {
+                    Write-RunLog -Level WARN -Message ("Album art JPEG optimization failed | File: {0} | Block: {1} | Detail: {2}" -f $Path, $block.BlockNumber, $_.Exception.Message)
+                    Safe-RemoveFile -Path $picturePath
+                    Safe-RemoveFile -Path $jpegOutputPath
+                    continue
+                }
+                $afterSize = $candidateSize
+            }
+            else {
+                Safe-RemoveFile -Path $jpegOutputPath
+            }
+        }
+        else {
+            Write-RunLog -Level INFO -Message ("Album art block skipped | File: {0} | Block: {1} | MIME: {2} | Reason: Unsupported/undetected image type" -f $Path, $block.BlockNumber, $block.MimeType)
+            Safe-RemoveFile -Path $picturePath
+            Safe-RemoveFile -Path $jpegOutputPath
+            continue
+        }
+
+        $pictureSaved = $beforeSize - $afterSize
+        if ($pictureSaved -le 0) {
+            Write-RunLog -Level INFO -Message ("Album art block produced no gain | File: {0} | Block: {1} | Kind: {2} | Before: {3} | After: {4}" -f $Path, $block.BlockNumber, $pictureKind, (Format-Bytes $beforeSize), (Format-Bytes $afterSize))
+            Safe-RemoveFile -Path $picturePath
+            Safe-RemoveFile -Path $jpegOutputPath
+            continue
+        }
+
+        $blockSavedMessage = ("Album art block optimized | File: {0} | Block: {1} | Kind: {2} | Before: {3} | After: {4} | Saved: {5}" -f $Path, $block.BlockNumber, $pictureKind, (Format-Bytes $beforeSize), (Format-Bytes $afterSize), (Format-Bytes $pictureSaved))
+        Write-RunLog -Level INFO -Message $blockSavedMessage
+        Write-VerboseUi -Message $blockSavedMessage
+
+        $pictureSpec = New-MetaflacPictureSpec -Block $block -FilePath $picturePath
+        if ([string]::IsNullOrWhiteSpace($pictureSpec)) {
+            Write-RunLog -Level WARN -Message ("Album art optimization skipped due to unsupported picture metadata | File: {0} | Block: {1}" -f $Path, $block.BlockNumber)
+            Safe-RemoveFile -Path $picturePath
+            Safe-RemoveFile -Path $jpegOutputPath
+            continue
+        }
+
+        $stagedPictures.Add([PSCustomObject]@{
+                BlockNumber = $block.BlockNumber
+                FilePath    = $picturePath
+                SavedBytes  = $pictureSaved
+                Spec        = $pictureSpec
+            }) | Out-Null
+    }
+
+    $candidateSavingsMeasure = ($stagedPictures | Measure-Object -Property SavedBytes -Sum)
+    $candidateSavedBytes = 0L
+    if ($null -ne $candidateSavingsMeasure -and $candidateSavingsMeasure.PSObject.Properties.Name -contains 'Sum' -and $null -ne $candidateSavingsMeasure.Sum) {
+        $candidateSavedBytes = [long]$candidateSavingsMeasure.Sum
+    }
+    $result.RawSavedBytes = $candidateSavedBytes
+    $result.CandidateSavedBytes = $candidateSavedBytes
+    if ($stagedPictures.Count -eq 0) {
+        Write-RunLog -Level INFO -Message ("Metadata cleanup proceeding with padding-only pass | File: {0} | Reason: No smaller image payload was found" -f $Path)
+    }
+
+    $stagingMessage = ("Metadata cleanup staging | File: {0} | Blocks: {1} | Candidate Image Savings: {2}" -f $Path, $stagedPictures.Count, (Format-Bytes $candidateSavedBytes))
+    Write-RunLog -Level INFO -Message $stagingMessage
+    Write-VerboseUi -Message $stagingMessage
+
+    $workingPath = "{0}.arttmp" -f $Path
+    Safe-RemoveFile -Path $workingPath
+
+    try {
+        Copy-Item -LiteralPath $Path -Destination $workingPath -Force
+    }
+    catch {
+        $result.Summary = ("MetadataCleanup skipped (stage copy failed; raw image {0})" -f (Format-Bytes $candidateSavedBytes))
+        Write-RunLog -Level WARN -Message ("Album art optimization skipped; could not stage FLAC metadata rewrite | File: {0} | Detail: {1}" -f $Path, $_.Exception.Message)
+        foreach ($staged in $stagedPictures) {
+            Safe-RemoveFile -Path $staged.FilePath
+        }
+        return $result
+    }
+
+    $applyError = $null
+    foreach ($staged in @($stagedPictures | Sort-Object -Property BlockNumber -Descending)) {
+        $insertAfter = [Math]::Max(0, ([int]$staged.BlockNumber - 1))
+        try {
+            $removeOutput = @(& $MetaflacExePath --preserve-modtime --dont-use-padding "--block-number=$($staged.BlockNumber)" --remove -- $workingPath 2>&1)
+        }
+        catch {
+            $applyError = "remove block $($staged.BlockNumber): $($_.Exception.Message)"
+            break
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            $applyError = "remove block $($staged.BlockNumber): $(Format-ErrSnippet -Text ([string]::Join(' ', @($removeOutput | ForEach-Object { [string]$_ }))))"
+            break
+        }
+
+        if ($removeOutput.Count -gt 0) {
+            Write-VerboseUi -Message ("metaflac remove picture | File: {0} | Block: {1} | Output: {2}" -f $Path, $staged.BlockNumber, (Format-ErrSnippet -Text ([string]::Join(' ', @($removeOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
+        }
+
+        try {
+            $importOutput = @(& $MetaflacExePath --preserve-modtime --dont-use-padding "--block-number=$insertAfter" "--import-picture-from=$($staged.Spec)" -- $workingPath 2>&1)
+        }
+        catch {
+            $applyError = "import block $($staged.BlockNumber): $($_.Exception.Message)"
+            break
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            $applyError = "import block $($staged.BlockNumber): $(Format-ErrSnippet -Text ([string]::Join(' ', @($importOutput | ForEach-Object { [string]$_ }))))"
+            break
+        }
+
+        if ($importOutput.Count -gt 0) {
+            Write-VerboseUi -Message ("metaflac import picture | File: {0} | Block: {1} | InsertAfter: {2} | Output: {3}" -f $Path, $staged.BlockNumber, $insertAfter, (Format-ErrSnippet -Text ([string]::Join(' ', @($importOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($applyError)) {
+        $result.Summary = ("MetadataCleanup skipped (rewrite failed; raw image {0})" -f (Format-Bytes $candidateSavedBytes))
+        Write-RunLog -Level WARN -Message ("Album art optimization skipped; could not rewrite picture blocks | File: {0} | Detail: {1}" -f $Path, $applyError)
+        Safe-RemoveFile -Path $workingPath
+        foreach ($staged in $stagedPictures) {
+            Safe-RemoveFile -Path $staged.FilePath
+        }
+        return $result
+    }
+
+    $paddingOutput = @()
+    $paddingWarning = $null
+    try {
+        $paddingOutput = @(& $MetaflacExePath --dont-use-padding --remove --block-type=PADDING -- $workingPath 2>&1)
+    }
+    catch {
+        $paddingWarning = $_.Exception.Message
+    }
+
+    if ([string]::IsNullOrWhiteSpace($paddingWarning) -and $LASTEXITCODE -ne 0) {
+        $paddingWarning = Format-ErrSnippet -Text ([string]::Join(' ', @($paddingOutput | ForEach-Object { [string]$_ })))
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($paddingWarning)) {
+        Write-RunLog -Level WARN -Message ("Album art padding cleanup skipped after rewrite | File: {0} | Detail: {1}" -f $Path, $paddingWarning)
+        Write-VerboseUi -Message ("metaflac strip padding skipped | File: {0} | Detail: {1}" -f $Path, (Format-ErrSnippet -Text $paddingWarning -MaxLength 250))
+    }
+
+    if ($paddingOutput.Count -gt 0) {
+        Write-VerboseUi -Message ("metaflac strip padding | File: {0} | Output: {1}" -f $Path, (Format-ErrSnippet -Text ([string]::Join(' ', @($paddingOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
+    }
+
+    $originalSize = (Get-Item -LiteralPath $Path -Force).Length
+    $optimizedSize = (Get-Item -LiteralPath $workingPath -Force).Length
+    $netSaved = $originalSize - $optimizedSize
+
+    $rewriteResultMessage = ("Metadata cleanup result | File: {0} | FLAC Before: {1} | FLAC After: {2} | Net Saved: {3} | Candidate Image Savings: {4}" -f $Path, (Format-Bytes $originalSize), (Format-Bytes $optimizedSize), (Format-Bytes $netSaved), (Format-Bytes $candidateSavedBytes))
+    Write-RunLog -Level INFO -Message $rewriteResultMessage
+    Write-VerboseUi -Message $rewriteResultMessage
+
+    if ($netSaved -le 0) {
+        if ($stagedPictures.Count -gt 0) {
+            $result.Summary = ("MetadataCleanup {0} net ({1} raw image, discarded)" -f (Format-Bytes $netSaved), (Format-Bytes $candidateSavedBytes))
+        }
+        else {
+            $result.Summary = ("MetadataCleanup {0} net (padding-only, discarded)" -f (Format-Bytes $netSaved))
+        }
+        Write-RunLog -Level INFO -Message ("Metadata cleanup discarded | File: {0} | Reason: Rewritten FLAC did not shrink after metadata rewrite" -f $Path)
+        Safe-RemoveFile -Path $workingPath
+        foreach ($staged in $stagedPictures) {
+            Safe-RemoveFile -Path $staged.FilePath
+        }
+        return $result
+    }
+
+    try {
+        Move-Item -LiteralPath $workingPath -Destination $Path -Force
+    }
+    catch {
+        $result.Summary = ("MetadataCleanup skipped (swap failed; raw image {0})" -f (Format-Bytes $candidateSavedBytes))
+        Write-RunLog -Level WARN -Message ("Album art optimization skipped; could not swap optimized temp FLAC | File: {0} | Detail: {1}" -f $Path, $_.Exception.Message)
+        Safe-RemoveFile -Path $workingPath
+        foreach ($staged in $stagedPictures) {
+            Safe-RemoveFile -Path $staged.FilePath
+        }
+        return $result
+    }
+
+    foreach ($staged in $stagedPictures) {
+        Safe-RemoveFile -Path $staged.FilePath
+    }
+
+    $result.Changed = $true
+    $result.SavedBytes = [long]$netSaved
+    $result.BlocksOptimized = $stagedPictures.Count
+    if ($stagedPictures.Count -gt 0) {
+        $result.Summary = ("MetadataCleanup {0} net ({1} raw image, {2} block{3})" -f (Format-Bytes $netSaved), (Format-Bytes $candidateSavedBytes), $stagedPictures.Count, $(if ($stagedPictures.Count -eq 1) { '' } else { 's' }))
+    }
+    else {
+        $result.Summary = ("MetadataCleanup {0} net (padding-only)" -f (Format-Bytes $netSaved))
+    }
+    return $result
 }
 
 # UI and status helper functions
@@ -569,6 +1278,7 @@ function Get-WorkerStateColor {
     )
 
     switch ($State) {
+        'ART' { return 'Magenta' }
         'HASHIN' { return 'Yellow' }
         'HASHOUT' { return 'DarkYellow' }
         'HASHING' { return 'DarkYellow' }
@@ -580,6 +1290,7 @@ function Get-WorkerStateColor {
         'IDLE' { return 'DarkGray' }
         default {
             if ($Stage -eq 'HASHING') { return 'DarkYellow' }
+            if ($Stage -eq 'ARTWORK') { return 'Magenta' }
             return 'White'
         }
     }
@@ -600,12 +1311,22 @@ function Render-InteractiveUi {
         [Parameter(Mandatory)][int]$TotalFiles,
         [Parameter(Mandatory)][int]$Failed,
         [Parameter(Mandatory)][long]$TotalSavedBytes,
+        [Parameter(Mandatory)][long]$TotalMetadataSavedBytes,
+        [Parameter(Mandatory)][long]$TotalPaddingTrimSavedBytes,
+        [Parameter(Mandatory)][int]$PaddingTrimFiles,
+        [Parameter(Mandatory)][long]$TotalArtworkSavedBytes,
+        [Parameter(Mandatory)][long]$TotalArtworkRawSavedBytes,
+        [Parameter(Mandatory)][int]$ArtworkOptimizedFiles,
+        [Parameter(Mandatory)][int]$ArtworkOptimizedBlocks,
         [Parameter(Mandatory)][int]$QueueCount,
         [Parameter(Mandatory)][int]$MaxAttemptsPerFile,
         [Parameter(Mandatory)][object[]]$Workers,
         [AllowNull()][System.Collections.Generic.List[object]]$RecentEvents,
         [AllowNull()][object[]]$TopCompression,
         [Parameter(Mandatory)][hashtable]$ProgressCache,
+        [AllowNull()][System.Collections.Generic.List[string]]$VerboseMessages,
+        [string]$PngToolStatus = 'OFF',
+        [string]$JpegToolStatus = 'OFF',
         [int]$PreviousRows = 0,
         [switch]$ForceClear,
         [string]$Banner = ''
@@ -649,10 +1370,14 @@ function Render-InteractiveUi {
     $elapsed = [DateTime]::UtcNow - $RunStartedUtc
     if ($elapsed.Ticks -lt 0) { $elapsed = [TimeSpan]::Zero }
     $elapsedText = Format-Elapsed -Elapsed $elapsed
+    $audioSavedBytes = [Math]::Max(0L, ($TotalSavedBytes - $TotalMetadataSavedBytes))
 
     Write-UiLine -Text ("Exact Flac Cruncher | {0}" -f $AlbumName) -Color Cyan
     Write-UiLine -Text ("Progress {0}/{1} | Failed {2} | Elapsed {3} | Queue {4} | Active {5}/{6}" -f $Processed, $TotalFiles, $Failed, $elapsedText, $QueueCount, $activeCount, $Workers.Count) -Color White
-    Write-UiLine -Text ("TOTAL SAVED: {0}" -f (Format-Bytes $TotalSavedBytes)) -Color DarkCyan
+    Write-UiLine -Text ("TOTAL SAVED (ALL METHODS): {0}" -f (Format-Bytes $TotalSavedBytes)) -Color DarkCyan
+    Write-UiLine -Text ("AUDIO RECOMPRESS: {0} | FLAC PADDING TRIM: {1} | ALBUM ART CLEANUP (NET): {2}" -f (Format-Bytes $audioSavedBytes), (Format-Bytes $TotalPaddingTrimSavedBytes), (Format-Bytes $TotalArtworkSavedBytes)) -Color DarkGreen
+    Write-UiLine -Text ("ALBUM ART (RAW): {0} | PADDING FILES: {1} | ART FILES: {2} | BLOCKS: {3}" -f (Format-Bytes $TotalArtworkRawSavedBytes), $PaddingTrimFiles, $ArtworkOptimizedFiles, $ArtworkOptimizedBlocks) -Color DarkGreen
+    Write-UiLine -Text ("ART TOOLS: PNG={0} | JPEG={1}" -f $PngToolStatus, $JpegToolStatus) -Color DarkGray
     if ([string]::IsNullOrWhiteSpace($Banner)) {
         Write-UiLine -Text "Ctrl+C: Cancel safely. Will clean up temp files and restore original files on exit." -Color DarkGray
     }
@@ -676,7 +1401,9 @@ function Render-InteractiveUi {
     }
     Write-UiLine -Text ("-" * $width) -Color DarkGray
 
-    $fixedRows = 19
+    $showVerboseTrace = ($null -ne $VerboseMessages -and $VerboseMessages.Count -gt 0)
+    $verboseRows = if ($showVerboseTrace) { 6 } else { 0 }
+    $fixedRows = 22 + $verboseRows
     $remainingRows = [Math]::Max(6, $maxRows - $fixedRows)
     $workerRows = [Math]::Min($Workers.Count, [Math]::Max(4, [int][Math]::Floor($remainingRows * 0.45)))
     $eventRows = [Math]::Max(4, $remainingRows - $workerRows)
@@ -728,6 +1455,10 @@ function Render-InteractiveUi {
         $fileSuffix = ''
 
         switch ($stage) {
+            'ARTWORK' {
+                $stateText = 'ART'
+                $fileSuffix = ' [artwork]'
+            }
             'HASHING' {
                 $stateText = 'HASHING'
                 $phase = [string]$w.Job.HashPhase
@@ -757,7 +1488,7 @@ function Render-InteractiveUi {
         $attempt = ("{0}/{1}" -f $w.Job.Attempt, $MaxAttemptsPerFile)
 
         $barLen = [Math]::Max(8, $wBar - 2)
-        $fill = if ($stage -eq 'HASHING') { [int](($script:__uiRowsWritten + $i) % ($barLen + 1)) } else { [int][Math]::Floor(($pct / 100.0) * $barLen) }
+        $fill = if ($stage -eq 'HASHING' -or $stage -eq 'ARTWORK') { [int](($script:__uiRowsWritten + $i) % ($barLen + 1)) } else { [int][Math]::Floor(($pct / 100.0) * $barLen) }
         if ($fill -lt 0) { $fill = 0 }
         if ($fill -gt $barLen) { $fill = $barLen }
         $bar = ('[' + ('#' * $fill).PadRight($barLen, '.') + ']')
@@ -778,6 +1509,19 @@ function Render-InteractiveUi {
         Write-UiLine -Text ("... {0} more workers not shown (resize taller to view)." -f ($Workers.Count - $workerRows)) -Color DarkGray
     }
     else {
+        Write-UiLine -Text ("-" * $width) -Color DarkGray
+    }
+
+    if ($showVerboseTrace) {
+        Write-UiLine -Text "Verbose Trace (-Verbose)" -Color Yellow
+        $traceRows = [Math]::Max(4, $verboseRows - 2)
+        $traceCount = [Math]::Min($traceRows, $VerboseMessages.Count)
+        for ($i = 0; $i -lt $traceCount; $i++) {
+            Write-UiLine -Text ([string]$VerboseMessages[$i]) -Color DarkYellow
+        }
+        for ($i = $traceCount; $i -lt $traceRows; $i++) {
+            Write-UiLine -Text '' -Color DarkGray
+        }
         Write-UiLine -Text ("-" * $width) -Color DarkGray
     }
 
@@ -933,9 +1677,6 @@ function Stop-ActiveJobsAndCleanup {
         if (-not [string]::IsNullOrWhiteSpace($job.StdErrCapture) -and (Test-Path -LiteralPath $job.StdErrCapture)) {
             Safe-RemoveFile -Path $job.StdErrCapture
         }
-        if (-not [string]::IsNullOrWhiteSpace($job.StdOutCapture) -and (Test-Path -LiteralPath $job.StdOutCapture)) {
-            Safe-RemoveFile -Path $job.StdOutCapture
-        }
 
         try {
             if ($null -ne $job.Proc) { $job.Proc.Dispose() }
@@ -963,6 +1704,18 @@ if (-not $rootItem.PSIsContainer) { throw "RootFolder is not a directory: $RootF
 $flacCmd = Get-Command flac -ErrorAction SilentlyContinue
 $metaflacCmd = Get-Command metaflac -ErrorAction SilentlyContinue
 if (-not $flacCmd -or -not $metaflacCmd) { throw "'flac' and/or 'metaflac' not found in PATH." }
+$toolBaseDirectory = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($toolBaseDirectory)) {
+    try {
+        $toolBaseDirectory = Split-Path -Path $PSCommandPath -Parent
+    }
+    catch {
+        $toolBaseDirectory = (Get-Location).Path
+    }
+}
+
+$pngOptimizerCmd = Resolve-OptionalTool -Names @('oxipng.exe', 'pngcrush.exe') -BaseDirectory $toolBaseDirectory
+$jpegOptimizerCmd = Resolve-OptionalTool -Names @('jpegtran.exe') -BaseDirectory $toolBaseDirectory
 
 $albumName = Get-RootDisplayName -Path $RootFolder -Item $rootItem
 $safeAlbumName = Get-SafeName -Value $albumName
@@ -986,6 +1739,18 @@ New-Item -ItemType Directory -Path $runtimeCaptureDir -Force | Out-Null
 
 $logFile = Join-Path -Path $runLogDir -ChildPath ("{0}_{1}.log" -f $safeAlbumName, $runStamp)
 $script:LogFile = $logFile
+$verboseLogFile = $null
+if (Test-VerboseUiEnabled) {
+    $verboseLogFile = Join-Path -Path $runLogDir -ChildPath ("verbose-trace_{0}.log" -f $runStamp)
+    $script:VerboseLogFile = $verboseLogFile
+    @"
+Exact Flac Cruncher Verbose Trace
+Target: $RootFolder
+Run Logs: $runLogDir
+Started: $($runStartedLocal.ToString('o'))
+===================================================================
+"@ | Out-File -LiteralPath $verboseLogFile -Encoding UTF8
+}
 
 @"
 Exact Flac Cruncher v20250225.codex5.3
@@ -1201,9 +1966,16 @@ $nullHash = '00000000000000000000000000000000'
 [long]$totalOriginalBytes = 0
 [long]$totalNewBytes = 0
 [long]$totalSavedBytes = 0
+[long]$totalMetadataSavedBytes = 0
+[long]$totalPaddingTrimSavedBytes = 0
+[int]$paddingTrimFiles = 0
+[long]$totalArtworkSavedBytes = 0
+[long]$totalArtworkRawSavedBytes = 0
 [int]$processed = 0
 [int]$failed = 0
 [int]$conversionAttempts = 0
+[int]$artworkOptimizedFiles = 0
+[int]$artworkOptimizedBlocks = 0
 
 $compressionResults = [System.Collections.Generic.List[object]]::new()
 $failedResults = [System.Collections.Generic.List[object]]::new()
@@ -1237,6 +2009,52 @@ $workers = for ($i = 0; $i -lt $maxWorkers; $i++) {
 $interactive = ($Host.Name -eq 'ConsoleHost')
 if ($interactive) {
     try { [Console]::CursorVisible = $false; Clear-Host } catch { $interactive = $false }
+}
+$script:UiInteractiveMode = $interactive
+
+$installPromptResult = Invoke-OptionalOptimizerInstallPrompt `
+    -PngOptimizerCommand $pngOptimizerCmd `
+    -JpegOptimizerCommand $jpegOptimizerCmd `
+    -BaseDirectory $toolBaseDirectory `
+    -Interactive:$interactive
+$pngOptimizerCmd = $installPromptResult.PngOptimizerCommand
+$jpegOptimizerCmd = $installPromptResult.JpegOptimizerCommand
+
+$pngToolStatus = if ($pngOptimizerCmd) { [System.IO.Path]::GetFileNameWithoutExtension([string]$pngOptimizerCmd.Source) } else { 'OFF' }
+$jpegToolStatus = if ($jpegOptimizerCmd) { [System.IO.Path]::GetFileNameWithoutExtension([string]$jpegOptimizerCmd.Source) } else { 'OFF' }
+
+if ($installPromptResult.Prompted) {
+    if ($pngOptimizerCmd) {
+        Write-Host ("PNG optimizer ready: {0}" -f $pngOptimizerCmd.Source) -ForegroundColor Green
+    }
+    else {
+        Write-Host "PNG optimizer still unavailable; continuing without PNG album-art optimization." -ForegroundColor Yellow
+    }
+
+    if ($jpegOptimizerCmd) {
+        Write-Host ("JPEG optimizer ready: {0}" -f $jpegOptimizerCmd.Source) -ForegroundColor Green
+    }
+    else {
+        Write-Host "JPEG optimizer still unavailable; continuing without JPEG album-art optimization." -ForegroundColor Yellow
+    }
+}
+
+if ($pngOptimizerCmd) {
+    Write-RunLog -Level INFO -Message ("Optional PNG album-art optimizer enabled: {0}" -f $pngOptimizerCmd.Source)
+}
+else {
+    $pngWarn = "Optional PNG album-art optimization disabled; add 'oxipng' (preferred) or 'pngcrush' to PATH or place the EXE beside this script."
+    Write-Warning $pngWarn
+    Write-RunLog -Level WARN -Message $pngWarn
+}
+
+if ($jpegOptimizerCmd) {
+    Write-RunLog -Level INFO -Message ("Optional JPEG album-art optimizer enabled: {0}" -f $jpegOptimizerCmd.Source)
+}
+else {
+    $jpegWarn = "Optional JPEG album-art optimization disabled; add 'jpegtran' to PATH or place the EXE beside this script."
+    Write-Warning $jpegWarn
+    Write-RunLog -Level WARN -Message $jpegWarn
 }
 
 $script:CancelRequested = $false
@@ -1293,6 +2111,13 @@ try {
                     -TotalFiles $totalFiles `
                     -Failed $failed `
                     -TotalSavedBytes $totalSavedBytes `
+                    -TotalMetadataSavedBytes $totalMetadataSavedBytes `
+                    -TotalPaddingTrimSavedBytes $totalPaddingTrimSavedBytes `
+                    -PaddingTrimFiles $paddingTrimFiles `
+                    -TotalArtworkSavedBytes $totalArtworkSavedBytes `
+                    -TotalArtworkRawSavedBytes $totalArtworkRawSavedBytes `
+                    -ArtworkOptimizedFiles $artworkOptimizedFiles `
+                    -ArtworkOptimizedBlocks $artworkOptimizedBlocks `
                     -QueueCount $queue.Count `
                     -MaxAttemptsPerFile $maxAttemptsPerFile `
                     -Workers @($workers) `
@@ -1304,6 +2129,9 @@ try {
                     Select-Object -First 3
                 ) `
                     -ProgressCache $progressCache `
+                    -VerboseMessages $script:VerboseUiMessages `
+                    -PngToolStatus $pngToolStatus `
+                    -JpegToolStatus $jpegToolStatus `
                     -PreviousRows $lastUiRenderRows `
                     -ForceClear:$sizeChanged `
                     -Banner $uiBanner
@@ -1324,6 +2152,13 @@ try {
                     -TotalFiles $totalFiles `
                     -Failed $failed `
                     -TotalSavedBytes $totalSavedBytes `
+                    -TotalMetadataSavedBytes $totalMetadataSavedBytes `
+                    -TotalPaddingTrimSavedBytes $totalPaddingTrimSavedBytes `
+                    -PaddingTrimFiles $paddingTrimFiles `
+                    -TotalArtworkSavedBytes $totalArtworkSavedBytes `
+                    -TotalArtworkRawSavedBytes $totalArtworkRawSavedBytes `
+                    -ArtworkOptimizedFiles $artworkOptimizedFiles `
+                    -ArtworkOptimizedBlocks $artworkOptimizedBlocks `
                     -QueueCount $queue.Count `
                     -MaxAttemptsPerFile $maxAttemptsPerFile `
                     -Workers @($workers) `
@@ -1335,6 +2170,9 @@ try {
                     Select-Object -First 3
                 ) `
                     -ProgressCache $progressCache `
+                    -VerboseMessages $script:VerboseUiMessages `
+                    -PngToolStatus $pngToolStatus `
+                    -JpegToolStatus $jpegToolStatus `
                     -PreviousRows $lastUiRenderRows `
                     -Banner $uiBanner
             }
@@ -1390,8 +2228,11 @@ try {
                                 $job.PostCalcHash = $decodedHash
                                 if ([string]::IsNullOrWhiteSpace($job.PostCalcHash)) {
                                     $job.FailureReason = "Could not calculate decoded-audio hash (post)"
+                                    $job.Stage = 'FINALIZING'
                                 }
-                                $job.Stage = 'FINALIZING'
+                                else {
+                                    $job.Stage = 'ARTWORK'
+                                }
                             }
                             else {
                                 $job.FailureReason = "Unknown hash phase state"
@@ -1400,6 +2241,7 @@ try {
                             $uiDirty = $true
                         }
                     }
+                    if ($job.Stage -eq 'ARTWORK') { continue }
                     if ($job.Stage -ne 'FINALIZING') { continue }
                 }
 
@@ -1415,6 +2257,9 @@ try {
                         try { $errText = (Get-Content -LiteralPath $job.StdErrCapture -Raw -ErrorAction SilentlyContinue).Trim() } catch { }
                     }
                     $job.ErrText = $errText
+                    if (-not [string]::IsNullOrWhiteSpace($errText)) {
+                        Write-VerboseUi -Message ("flac stderr | File: {0} | Exit: {1} | Output: {2}" -f $job.Original, $job.ConvertExitCode, (Format-ErrSnippet -Text $errText -MaxLength 250))
+                    }
 
                     if ($job.ConvertExitCode -ne 0) {
                         $job.FailureReason = "flac exit $($job.ConvertExitCode)"
@@ -1460,6 +2305,61 @@ try {
                     if ($job.Stage -ne 'FINALIZING') { continue }
                 }
 
+                if ($job.Stage -eq 'ARTWORK') {
+                    $failureReason = $job.FailureReason
+                    $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
+                    if ([string]::IsNullOrWhiteSpace($job.PreCalcHash) -and $embeddedPresent) {
+                        # Embedded stream MD5 already reflects decoded source audio.
+                        $job.PreCalcHash = $job.EmbeddedHash
+                    }
+
+                    $postCalcHash = $null
+                    if (-not [string]::IsNullOrWhiteSpace($job.PostCalcHash)) { $postCalcHash = [string]$job.PostCalcHash }
+
+                    $hashOK = $false
+                    $calcBeforeOk = -not [string]::IsNullOrWhiteSpace($job.PreCalcHash)
+                    $calcAfterOk = -not [string]::IsNullOrWhiteSpace($postCalcHash)
+                    $calcMatch = $calcBeforeOk -and $calcAfterOk -and ($job.PreCalcHash -eq $postCalcHash)
+
+                    if ($calcMatch) {
+                        $hashOK = $true
+                    }
+
+                    if ($hashOK) {
+                        if (-not $embeddedPresent) {
+                            $md5Embedded = Set-FlacMd5IfMissing -Path $job.Temp -ExpectedMd5 $postCalcHash -NullHash $nullHash
+                            if (-not $md5Embedded) {
+                                $failureReason = "Could not embed MD5 into output FLAC"
+                                $hashOK = $false
+                            }
+                        }
+                    }
+
+                    if ($hashOK) {
+                        $job.PreMetadataSize = (Get-Item -LiteralPath $job.Temp -Force).Length
+                        $job.ArtworkResult = Optimize-FlacAlbumArt `
+                            -Path $job.Temp `
+                            -MetaflacExePath $metaflacCmd.Source `
+                            -PngOptimizerPath $(if ($pngOptimizerCmd) { $pngOptimizerCmd.Source } else { $null }) `
+                            -JpegOptimizerPath $(if ($jpegOptimizerCmd) { $jpegOptimizerCmd.Source } else { $null }) `
+                            -ScratchDir $runtimeCaptureDir `
+                            -JobId $job.JobId
+                    }
+                    else {
+                        if (-not $calcBeforeOk -or -not $calcAfterOk) {
+                            $failureReason = "Could not calculate decoded-audio hash (pre or post)"
+                        }
+                        else {
+                            $failureReason = "Decoded-audio hash mismatch (original vs converted)"
+                        }
+                    }
+
+                    $job.FailureReason = $failureReason
+                    $job.Stage = 'FINALIZING'
+                    $uiDirty = $true
+                    continue
+                }
+
                 if ($job.Stage -eq 'FINALIZING') {
                     $exitCode = if ($null -ne $job.ConvertExitCode) { [int]$job.ConvertExitCode } else { 1 }
                     $errText = [string]$job.ErrText
@@ -1470,113 +2370,145 @@ try {
                     $failureReason = $job.FailureReason
                     $newSize = 0
                     $saved = 0
+                    $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
+                    $artResult = $job.ArtworkResult
+                    $preMetadataSize = 0L
+                    if ($job.PSObject.Properties.Name -contains 'PreMetadataSize' -and $null -ne $job.PreMetadataSize) {
+                        $preMetadataSize = [long]$job.PreMetadataSize
+                    }
 
-                    if ($exitCode -eq 0 -and (Test-Path -LiteralPath $job.Temp)) {
-                        $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
-                        if ([string]::IsNullOrWhiteSpace($job.PreCalcHash) -and $embeddedPresent) {
-                            # Embedded stream MD5 already reflects decoded source audio.
-                            $job.PreCalcHash = $job.EmbeddedHash
-                        }
-                        if ([string]::IsNullOrWhiteSpace($postCalcHash) -and -not [string]::IsNullOrWhiteSpace($job.PostCalcHash)) {
-                            $postCalcHash = [string]$job.PostCalcHash
-                        }
-                        $hashOK = $false
-                        $calcBeforeOk = -not [string]::IsNullOrWhiteSpace($job.PreCalcHash)
-                        $calcAfterOk = -not [string]::IsNullOrWhiteSpace($postCalcHash)
-                        $calcMatch = $calcBeforeOk -and $calcAfterOk -and ($job.PreCalcHash -eq $postCalcHash)
+                    if ($exitCode -eq 0 -and (Test-Path -LiteralPath $job.Temp) -and [string]::IsNullOrWhiteSpace($failureReason)) {
+                        $newSize = (Get-Item -LiteralPath $job.Temp -Force).Length
+                        $saved = $job.OrigSize - $newSize
 
-                        if ($calcMatch) {
-                            $hashOK = $true
-                        }
-
-                        if ($hashOK) {
-                            if (-not $embeddedPresent) {
-                                $md5Embedded = Set-FlacMd5IfMissing -Path $job.Temp -ExpectedMd5 $postCalcHash -NullHash $nullHash
-                                if (-not $md5Embedded) {
-                                    $failureReason = "Could not embed MD5 into output FLAC"
-                                    $hashOK = $false
-                                }
+                        # Replace original file, retrying to tolerate transient locks.
+                        $replaced = $false
+                        $lastMoveException = $null
+                        for ($attempt = 1; $attempt -le 5 -and -not $replaced; $attempt++) {
+                            try {
+                                Move-Item -LiteralPath $job.Temp -Destination $job.Original -Force
+                                $replaced = $true
+                            }
+                            catch {
+                                $lastMoveException = $_.Exception
                             }
                         }
 
-                        if ($hashOK) {
-                            $newSize = (Get-Item -LiteralPath $job.Temp -Force).Length
-                            $saved = $job.OrigSize - $newSize
-
-                            # Replace original file, retrying to tolerate transient locks.
-                            $replaced = $false
-                            $lastMoveException = $null
-                            for ($attempt = 1; $attempt -le 5 -and -not $replaced; $attempt++) {
-                                try {
-                                    Move-Item -LiteralPath $job.Temp -Destination $job.Original -Force
-                                    $replaced = $true
+                        if ($replaced) {
+                            $processed++
+                            $totalOriginalBytes += $job.OrigSize
+                            $totalNewBytes += $newSize
+                            $totalSavedBytes += $saved
+                            $audioNetSaved = [long]$saved
+                            $metadataNetCredited = 0L
+                            if ($preMetadataSize -gt 0 -and $preMetadataSize -ge $newSize) {
+                                $rawMetadataDelta = [long]($preMetadataSize - $newSize)
+                                if ($rawMetadataDelta -gt 0 -and $saved -gt 0) {
+                                    $metadataNetCredited = [Math]::Min($rawMetadataDelta, [long]$saved)
+                                    $audioNetSaved = [Math]::Max(0L, ([long]$saved - $metadataNetCredited))
                                 }
-                                catch {
-                                    $lastMoveException = $_.Exception
+                                elseif ($saved -le 0) {
+                                    $audioNetSaved = 0L
                                 }
                             }
 
-                            if ($replaced) {
-                                $processed++
-                                $totalOriginalBytes += $job.OrigSize
-                                $totalNewBytes += $newSize
-                                $totalSavedBytes += $saved
-
-                                $savedPct = 0.0
-                                if ($job.OrigSize -gt 0) {
-                                    $savedPctRaw = [Math]::Round((($saved / [double]$job.OrigSize) * 100.0), 2)
-                                    $savedPct = [Math]::Max(0.0, $savedPctRaw)
-                                }
-                                $compressionResults.Add([PSCustomObject]@{
-                                        Path       = $job.Original
-                                        SavedBytes = $saved
-                                        SavedPct   = $savedPct
-                                        OrigBytes  = $job.OrigSize
-                                        NewBytes   = $newSize
-                                    }) | Out-Null
-
-                                $verification = if ($embeddedPresent) { 'MATCH' } else { 'MATCH|NEW' }
-                                Push-RecentEvent -List $recentEvents `
-                                    -Status 'OK' `
-                                    -File $job.Name `
-                                    -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
-                                    -EmbeddedHash (Format-HashForUi -Hash $job.EmbeddedHash -NullHash $nullHash) `
-                                    -CalculatedBeforeHash (Format-HashForUi -Hash $job.PreCalcHash -NullHash $nullHash) `
-                                    -CalculatedAfterHash (Format-HashForUi -Hash $postCalcHash -NullHash $nullHash) `
-                                    -Verification $verification `
-                                    -BeforeAfter ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) `
-                                    -Saved (Format-Bytes $saved) `
-                                    -CompressionPct ("{0:N2}%" -f $savedPct) `
-                                    -Detail 'Replaced original'
-
-                                Write-RunLog -Level SUCCESS -Message ("File: {0} | Attempt: {1}/{2} | Embedded: {3} | CalcPre: {4} | CalcPost: {5} | Verification: {6} | Size: {7}->{8} | Saved: {9} ({10:N2}%)" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-Bytes $job.OrigSize), (Format-Bytes $newSize), (Format-Bytes $saved), $savedPct)
-                                $finalized = $true
+                            if ($metadataNetCredited -gt 0) {
+                                $totalMetadataSavedBytes += $metadataNetCredited
                             }
-                            else {
-                                $permissionFailure = Get-FriendlyPermissionMessage -Operation 'replacing original file' -Path $job.Original -Exception $lastMoveException
-                                if (-not [string]::IsNullOrWhiteSpace($permissionFailure)) {
-                                    $failureReason = $permissionFailure
+                            if ($null -ne $artResult -and $artResult.RawSavedBytes -gt 0) {
+                                $totalArtworkRawSavedBytes += $artResult.RawSavedBytes
+                            }
+                            if ($null -ne $artResult -and $artResult.Changed -and $metadataNetCredited -gt 0) {
+                                if ($artResult.BlocksOptimized -gt 0) {
+                                    $totalArtworkSavedBytes += $metadataNetCredited
+                                    $artworkOptimizedFiles++
+                                    $artworkOptimizedBlocks += $artResult.BlocksOptimized
                                 }
                                 else {
-                                    $failureReason = "Could not replace original after retries (file may be locked)"
+                                    $totalPaddingTrimSavedBytes += $metadataNetCredited
+                                    $paddingTrimFiles++
                                 }
                             }
+
+                            $artSummary = 'none'
+                            if ($null -ne $artResult) {
+                                if ($metadataNetCredited -gt 0) {
+                                    if ($artResult.BlocksOptimized -gt 0) {
+                                        $artSummary = ("MetadataCleanup {0} net ({1} raw image, {2} block{3})" -f (Format-Bytes $metadataNetCredited), (Format-Bytes $artResult.RawSavedBytes), $artResult.BlocksOptimized, $(if ($artResult.BlocksOptimized -eq 1) { '' } else { 's' }))
+                                    }
+                                    else {
+                                        $artSummary = ("MetadataCleanup {0} net (padding-only)" -f (Format-Bytes $metadataNetCredited))
+                                    }
+                                }
+                                elseif ($artResult.Changed) {
+                                    if ($artResult.BlocksOptimized -gt 0) {
+                                        $artSummary = ("MetadataCleanup 00.00 B net ({0} raw image, no final-size change)" -f (Format-Bytes $artResult.RawSavedBytes))
+                                    }
+                                    else {
+                                        $artSummary = "MetadataCleanup 00.00 B net (padding-only, no final-size change)"
+                                    }
+                                }
+                                elseif (-not [string]::IsNullOrWhiteSpace($artResult.Summary)) {
+                                    $artSummary = $artResult.Summary
+                                }
+                            }
+
+                            $savedPct = 0.0
+                            if ($job.OrigSize -gt 0) {
+                                $savedPctRaw = [Math]::Round((($saved / [double]$job.OrigSize) * 100.0), 2)
+                                $savedPct = [Math]::Max(0.0, $savedPctRaw)
+                            }
+                            $compressionResults.Add([PSCustomObject]@{
+                                    Path       = $job.Original
+                                    SavedBytes = $saved
+                                    SavedPct   = $savedPct
+                                    OrigBytes  = $job.OrigSize
+                                    NewBytes   = $newSize
+                                }) | Out-Null
+
+                            $verification = if ($embeddedPresent) { 'MATCH' } else { 'MATCH|NEW' }
+                            $detailText = 'Replaced original'
+                            if ($null -ne $artResult -and $artResult.Changed) {
+                                $detailText = "Replaced original | $artSummary"
+                            }
+                            elseif ($null -ne $artResult -and $artSummary -ne 'none') {
+                                $detailText = "Replaced original | $artSummary"
+                            }
+                            Push-RecentEvent -List $recentEvents `
+                                -Status 'OK' `
+                                -File $job.Name `
+                                -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
+                                -EmbeddedHash (Format-HashForUi -Hash $job.EmbeddedHash -NullHash $nullHash) `
+                                -CalculatedBeforeHash (Format-HashForUi -Hash $job.PreCalcHash -NullHash $nullHash) `
+                                -CalculatedAfterHash (Format-HashForUi -Hash $postCalcHash -NullHash $nullHash) `
+                                -Verification $verification `
+                                -BeforeAfter ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) `
+                                -Saved (Format-Bytes $saved) `
+                                -CompressionPct ("{0:N2}%" -f $savedPct) `
+                                -Detail $detailText
+
+                            Write-RunLog -Level SUCCESS -Message ("File: {0} | Attempt: {1}/{2} | Embedded: {3} | CalcPre: {4} | CalcPost: {5} | Verification: {6} | Size: {7}->{8} | Saved: {9} ({10:N2}%) | MetadataCleanup: {11}" -f $job.Original, $job.Attempt, $maxAttemptsPerFile, $job.EmbeddedHash, $job.PreCalcHash, $postCalcHash, $verification, (Format-Bytes $job.OrigSize), (Format-Bytes $newSize), (Format-Bytes $saved), $savedPct, $artSummary)
+                            Write-VerboseUi -Message ("Finalized | File: {0} | Total Saved: {1} | Audio+Container Before/After: {2}->{3} | MetadataCleanup: {4}" -f $job.Original, (Format-Bytes $saved), (Format-Bytes $job.OrigSize), (Format-Bytes $newSize), $artSummary)
+                            $finalized = $true
                         }
                         else {
-                            if (-not $calcBeforeOk -or -not $calcAfterOk) {
-                                $failureReason = "Could not calculate decoded-audio hash (pre or post)"
+                            $permissionFailure = Get-FriendlyPermissionMessage -Operation 'replacing original file' -Path $job.Original -Exception $lastMoveException
+                            if (-not [string]::IsNullOrWhiteSpace($permissionFailure)) {
+                                $failureReason = $permissionFailure
                             }
                             else {
-                                $failureReason = "Decoded-audio hash mismatch (original vs converted)"
+                                $failureReason = "Could not replace original after retries (file may be locked)"
                             }
                         }
                     }
                     else {
-                        if ($exitCode -ne 0) {
-                            $failureReason = "flac exit $exitCode"
-                        }
-                        else {
-                            $failureReason = "flac produced no temp output"
+                        if ([string]::IsNullOrWhiteSpace($failureReason)) {
+                            if ($exitCode -ne 0) {
+                                $failureReason = "flac exit $exitCode"
+                            }
+                            else {
+                                $failureReason = "flac produced no temp output"
+                            }
                         }
                     }
 
@@ -1669,7 +2601,6 @@ try {
                     }
 
                     Safe-RemoveFile -Path $job.StdErrCapture
-                    Safe-RemoveFile -Path $job.StdOutCapture
                     $w.Job = $null
                     $uiDirty = $true
                 }
@@ -1685,13 +2616,10 @@ try {
 
                 $jobId = "{0:D5}_{1}_a{2}" -f $queueItem.FileId, ([guid]::NewGuid().ToString('N').Substring(0, 8)), $queueItem.Attempts
                 $stdErrCapture = Join-Path -Path $runtimeCaptureDir -ChildPath "$jobId.stderr.tmp"
-                $stdOutCapture = Join-Path -Path $runtimeCaptureDir -ChildPath "$jobId.stdout.tmp"
                 $stdErrRedirect = Escape-WildcardPath -Path $stdErrCapture
-                $stdOutRedirect = Escape-WildcardPath -Path $stdOutCapture
 
                 Safe-RemoveFile -Path $temp
                 Safe-RemoveFile -Path $stdErrCapture
-                Safe-RemoveFile -Path $stdOutCapture
 
                 try {
                     # Snapshot source metadata needed for verification and accounting.
@@ -1702,18 +2630,18 @@ try {
 
                     # Build one properly quoted ArgumentList; include "--" to end options.
                     $argString =
-                    "-8 -V -f -o " +
+                    "-8 -e -p -V -f -o " +
                     (Quote-WinArg $temp) +
                     " -- " +
                     (Quote-WinArg $original)
 
                     $conversionAttempts++
+                    Write-VerboseUi -Message ("Starting flac | File: {0} | Attempt: {1}/{2} | Command: {3} {4}" -f $original, $queueItem.Attempts, $maxAttemptsPerFile, $flacCmd.Source, $argString)
                     $proc = Start-Process -FilePath $flacCmd.Source `
                         -ArgumentList $argString `
                         -NoNewWindow `
                         -PassThru `
-                        -RedirectStandardError $stdErrRedirect `
-                        -RedirectStandardOutput $stdOutRedirect
+                        -RedirectStandardError $stdErrRedirect
 
                     Set-SingleCoreAffinity -Process $proc -CoreIndexZeroBased $w.CoreIdx
 
@@ -1721,8 +2649,8 @@ try {
                         Proc            = $proc
                         Original        = $original
                         Temp            = $temp
+                        JobId           = $jobId
                         StdErrCapture   = $stdErrCapture
-                        StdOutCapture   = $stdOutCapture
                         FileId          = $queueItem.FileId
                         Name            = $queueItem.Name
                         Attempt         = $queueItem.Attempts
@@ -1736,13 +2664,14 @@ try {
                         ConvertExitCode = $null
                         ErrText         = ''
                         FailureReason   = $null
+                        ArtworkResult   = $null
+                        PreMetadataSize = 0L
                     }
                     $uiDirty = $true
                 }
                 catch {
                     Safe-RemoveFile -Path $temp
                     Safe-RemoveFile -Path $stdErrCapture
-                    Safe-RemoveFile -Path $stdOutCapture
 
                     $failed++
                     $processed++
@@ -1787,7 +2716,8 @@ try {
             if (($nowUtc - $lastStatusUtc) -ge $statusInterval) {
                 $lastStatusUtc = $nowUtc
                 $elapsedText = Format-Elapsed -Elapsed ($nowUtc - $runStartedUtc)
-                Write-Host ("Progress: {0}/{1}  Failed: {2}  Elapsed: {3}  Saved: {4}" -f $processed, $totalFiles, $failed, $elapsedText, (Format-Bytes $totalSavedBytes))
+                $audioSavedStatus = [Math]::Max(0L, ($totalSavedBytes - $totalMetadataSavedBytes))
+                Write-Host ("Progress: {0}/{1}  Failed: {2}  Elapsed: {3}  Saved(All): {4}  Audio: {5}  Pad: {6}  Art(Net): {7}  Art(Raw): {8}" -f $processed, $totalFiles, $failed, $elapsedText, (Format-Bytes $totalSavedBytes), (Format-Bytes $audioSavedStatus), (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes))
             }
         }
 
@@ -1824,6 +2754,7 @@ $totalElapsedText = Format-Elapsed -Elapsed $totalElapsed
 $overallReductionPct = if ($totalOriginalBytes -gt 0) { [Math]::Round((($totalSavedBytes / [double]$totalOriginalBytes) * 100.0), 2) } else { 0.0 }
 $successRatePct = if ($totalFiles -gt 0) { [Math]::Round((($successful / [double]$totalFiles) * 100.0), 2) } else { 0.0 }
 $avgSavedPerSuccessBytes = if ($successful -gt 0) { [long][Math]::Round(($totalSavedBytes / [double]$successful), 0) } else { 0L }
+$audioSavedBytes = [Math]::Max(0L, ($totalSavedBytes - $totalMetadataSavedBytes))
 
 $failedLines = [System.Collections.Generic.List[string]]::new()
 $failedLines.Add("Exact Flac Cruncher - Failed Files") | Out-Null
@@ -1862,10 +2793,15 @@ $summaryLines.Add(("Success Rate         : {0:N2}%" -f $successRatePct)) | Out-N
 $summaryLines.Add(("Total Script Time    : {0}" -f $totalElapsedText)) | Out-Null
 $summaryLines.Add(("Total Original Size  : {0}" -f (Format-Bytes $totalOriginalBytes))) | Out-Null
 $summaryLines.Add(("Total New Size       : {0}" -f (Format-Bytes $totalNewBytes))) | Out-Null
-$summaryLines.Add(("TOTAL SPACE SAVED    : *** {0} ({1:N2}% of original) ***" -f (Format-Bytes $totalSavedBytes), $overallReductionPct)) | Out-Null
+$summaryLines.Add(("TOTAL SAVED (ALL)    : *** {0} ({1:N2}% of original) ***" -f (Format-Bytes $totalSavedBytes), $overallReductionPct)) | Out-Null
+$summaryLines.Add(("Audio Recompress     : {0}" -f (Format-Bytes $audioSavedBytes))) | Out-Null
+$summaryLines.Add(("FLAC Padding Trim    : {0} across {1} file(s)" -f (Format-Bytes $totalPaddingTrimSavedBytes), $paddingTrimFiles)) | Out-Null
+$summaryLines.Add(("Album Art Cleanup    : Net {0} across {1} file(s), {2} block(s)" -f (Format-Bytes $totalArtworkSavedBytes), $artworkOptimizedFiles, $artworkOptimizedBlocks)) | Out-Null
+$summaryLines.Add(("Album Art Raw Trim   : {0}" -f (Format-Bytes $totalArtworkRawSavedBytes))) | Out-Null
 $summaryLines.Add(("Avg Saved / Success  : {0}" -f (Format-Bytes $avgSavedPerSuccessBytes))) | Out-Null
 $summaryLines.Add(("Failed File Log      : {0}" -f $(if ($failedListPath) { $failedListPath } else { '(none)' }))) | Out-Null
 $summaryLines.Add(("EFC Final Log        : {0}" -f $efcFinalLogPath)) | Out-Null
+$summaryLines.Add(("Verbose Trace Log    : {0}" -f $(if ($verboseLogFile) { $verboseLogFile } else { '(disabled)' }))) | Out-Null
 $summaryLines.Add("Top 3 Compression    :") | Out-Null
 
 if ($topCompression.Count -eq 0) {
@@ -1897,7 +2833,9 @@ else {
 }
 Write-Host ("Processed: {0}/{1}  Success: {2}  Failed: {3}  Pending: {4}" -f $processed, $totalFiles, $successful, $failed, $pending)
 Write-Host ("Elapsed: {0}" -f $totalElapsedText)
-Write-Host ("TOTAL SAVED: {0} ({1:N2}% of original)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct) -ForegroundColor Green
+Write-Host ("TOTAL SAVED (ALL): {0} ({1:N2}% of original)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct) -ForegroundColor Green
+Write-Host ("Audio Recompress: {0} | FLAC Padding Trim: {1} | Album Art Cleanup (Net): {2}" -f (Format-Bytes $audioSavedBytes), (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes))
+Write-Host ("Album Art (Raw): {0} | Padding Files: {1} | Art Files: {2} | Blocks: {3}" -f (Format-Bytes $totalArtworkRawSavedBytes), $paddingTrimFiles, $artworkOptimizedFiles, $artworkOptimizedBlocks)
 Write-Host ("Success Rate: {0:N2}%  Avg Saved/Success: {1}" -f $successRatePct, (Format-Bytes $avgSavedPerSuccessBytes))
 Write-Host "Top 3 Compression:"
 if ($topCompression.Count -eq 0) {
@@ -1917,5 +2855,11 @@ else {
     Write-Host "Failed List: (none)"
 }
 Write-Host ("EFC Final Log: {0}" -f $efcFinalLogPath)
+if ($verboseLogFile) {
+    Write-Host ("Verbose Trace Log: {0}" -f $verboseLogFile)
+}
+else {
+    Write-Host "Verbose Trace Log: (disabled)"
+}
 Write-Host ("Logs:  {0}" -f $runLogDir)
 Write-Host ("Log:   {0}" -f $logFile)

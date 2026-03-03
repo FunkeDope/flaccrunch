@@ -16,6 +16,7 @@ It recursively scans a folder, runs `flac -8 -V` for each file, verifies decoded
 - Handles both 3-way verification (embedded + pre + post) and 2-way verification (pre + post when embedded MD5 is null).
 - Embeds MD5 into output if source embedded MD5 is null and post hash is available.
 - Replaces original only after verification succeeds.
+- Optionally inspects embedded picture blocks after audio verification and losslessly optimizes PNG/JPEG album art when supported tools are available.
 - Relies on FLAC default metadata preservation (timestamps/permissions) and preserves modtime when writing missing MD5 metadata.
 - Supports safe cancellation (`Ctrl+C` in interactive console): active jobs are stopped and temp files are cleaned.
 
@@ -24,7 +25,11 @@ It recursively scans a folder, runs `flac -8 -V` for each file, verifies decoded
 - Windows PowerShell host (script is written/tested for Windows behavior).
 - `flac` in `PATH`.
 - `metaflac` in `PATH`.
+- Optional for embedded PNG album art: `oxipng` (preferred) or `pngcrush` in `PATH`.
+- Optional for embedded JPEG album art: `jpegtran` in `PATH`.
 - Read/write permissions to target files and log folder.
+
+If the optional picture optimizers are not installed, the script logs a warning and continues the normal FLAC recompression flow. The optional EXEs can also be placed beside the script instead of being added to `PATH`. In interactive console runs, the script can offer a best-effort `winget` install prompt for missing optional image tools using exact package IDs (currently `Shssoichiro.Oxipng` and `libjpeg-turbo.libjpeg-turbo.VC`).
 
 ## Parameters
 
@@ -97,6 +102,7 @@ At the end, the script prints and logs:
 - Processed/success/failed/pending counts
 - Total elapsed time
 - Total bytes saved and reduction percentage
+- Separate album-art bytes saved totals when embedded picture optimization helped
 - Success rate
 - Top 3 per-file space savings
 - Log file locations
