@@ -328,6 +328,91 @@ function Safe-RemoveFile {
     catch { }
 }
 
+function Get-FileMetadataSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [System.IO.FileSystemInfo]$Item
+    )
+
+    if ($null -eq $Item) {
+        try {
+            $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        }
+        catch {
+            return $null
+        }
+    }
+
+    $acl = $null
+    try {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    }
+    catch { }
+
+    return [PSCustomObject]@{
+        CreationTimeUtc   = [DateTime]$Item.CreationTimeUtc
+        LastAccessTimeUtc = [DateTime]$Item.LastAccessTimeUtc
+        LastWriteTimeUtc  = [DateTime]$Item.LastWriteTimeUtc
+        Attributes        = [System.IO.FileAttributes]$Item.Attributes
+        Acl               = $acl
+    }
+}
+
+function Restore-FileMetadata {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [AllowNull()]$Snapshot
+    )
+
+    if ($null -eq $Snapshot) { return $true }
+
+    $issues = [System.Collections.Generic.List[string]]::new()
+
+    try {
+        [System.IO.File]::SetCreationTimeUtc($Path, [DateTime]$Snapshot.CreationTimeUtc)
+    }
+    catch {
+        $issues.Add(("CreationTime: {0}" -f $_.Exception.Message)) | Out-Null
+    }
+
+    try {
+        [System.IO.File]::SetLastAccessTimeUtc($Path, [DateTime]$Snapshot.LastAccessTimeUtc)
+    }
+    catch {
+        $issues.Add(("LastAccessTime: {0}" -f $_.Exception.Message)) | Out-Null
+    }
+
+    try {
+        [System.IO.File]::SetLastWriteTimeUtc($Path, [DateTime]$Snapshot.LastWriteTimeUtc)
+    }
+    catch {
+        $issues.Add(("LastWriteTime: {0}" -f $_.Exception.Message)) | Out-Null
+    }
+
+    if ($Snapshot.PSObject.Properties.Name -contains 'Acl' -and $null -ne $Snapshot.Acl) {
+        try {
+            Set-Acl -LiteralPath $Path -AclObject $Snapshot.Acl -ErrorAction Stop
+        }
+        catch {
+            $issues.Add(("ACL: {0}" -f $_.Exception.Message)) | Out-Null
+        }
+    }
+
+    try {
+        [System.IO.File]::SetAttributes($Path, [System.IO.FileAttributes]$Snapshot.Attributes)
+    }
+    catch {
+        $issues.Add(("Attributes: {0}" -f $_.Exception.Message)) | Out-Null
+    }
+
+    if ($issues.Count -eq 0) { return $true }
+
+    $issueText = [string]::Join(' | ', $issues)
+    Write-RunLog -Level WARN -Message ("File metadata restore was only partially successful | File: {0} | Detail: {1}" -f $Path, $issueText)
+    Write-VerboseUi -Message ("Metadata restore partial | File: {0} | Detail: {1}" -f $Path, (Format-ErrSnippet -Text $issueText -MaxLength 250))
+    return $false
+}
+
 function Quote-WinArg {
     <#
       Windows CreateProcess-style quoting for Start-Process when UseShellExecute is false
@@ -2515,6 +2600,7 @@ try {
                         for ($attempt = 1; $attempt -le 5 -and -not $replaced; $attempt++) {
                             try {
                                 Move-Item -LiteralPath $job.Temp -Destination $job.Original -Force
+                                $null = Restore-FileMetadata -Path $job.Original -Snapshot $job.SourceMetadata
                                 $replaced = $true
                             }
                             catch {
@@ -2762,6 +2848,7 @@ try {
                 try {
                     # Snapshot source metadata needed for verification and accounting.
                     $origItem = Get-Item -LiteralPath $original -Force
+                    $sourceMetadata = Get-FileMetadataSnapshot -Path $original -Item $origItem
                     $embeddedHash = Try-GetFlacMd5 -Path $original
                     if ($null -eq $embeddedHash) { $embeddedHash = $nullHash }
                     $preCalcHash = $null
@@ -2802,6 +2889,7 @@ try {
                         EmbeddedHash    = $embeddedHash
                         PreCalcHash     = $preCalcHash
                         OrigSize        = $origItem.Length
+                        SourceMetadata  = $sourceMetadata
                         Stage           = 'CONVERTING'
                         HashPhase       = ''
                         HashJob         = $null
