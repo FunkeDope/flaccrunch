@@ -61,27 +61,31 @@ catch { }
 # Core helper functions
 
 function Format-Bytes {
-    param([Parameter(Mandatory)][long]$Bytes)
-    if ($Bytes -lt 0) { $Bytes = 0 }
+    param(
+        [Parameter(Mandatory)][long]$Bytes,
+        [switch]$Signed
+    )
+
+    if ($Signed) {
+        $displayBytes = $Bytes
+        $valueBytes = [Math]::Abs($Bytes)
+    }
+    else {
+        $displayBytes = [Math]::Max(0, $Bytes)
+        $valueBytes = $displayBytes
+    }
+
     $units = @('B', 'KB', 'MB', 'GB', 'TB', 'PB')
     $i = 0
-    $v = [double]$Bytes
+    $v = [double]$valueBytes
     while ($v -ge 1024 -and $i -lt ($units.Count - 1)) { $v /= 1024; $i++ }
     $number = $v.ToString('00.00', [System.Globalization.CultureInfo]::InvariantCulture)
-    '{0,8} {1}' -f $number, $units[$i]
-}
+    if ($Signed) {
+        $sign = if ($displayBytes -lt 0) { '-' } else { ' ' }
+        return ('{0}{1,7} {2}' -f $sign, $number, $units[$i])
+    }
 
-function Format-SignedBytes {
-    param([Parameter(Mandatory)][long]$Bytes)
-
-    $absBytes = [Math]::Abs($Bytes)
-    $units = @('B', 'KB', 'MB', 'GB', 'TB', 'PB')
-    $i = 0
-    $v = [double]$absBytes
-    while ($v -ge 1024 -and $i -lt ($units.Count - 1)) { $v /= 1024; $i++ }
-    $number = $v.ToString('00.00', [System.Globalization.CultureInfo]::InvariantCulture)
-    $sign = if ($Bytes -lt 0) { '-' } else { ' ' }
-    '{0}{1,7} {2}' -f $sign, $number, $units[$i]
+    return ('{0,8} {1}' -f $number, $units[$i])
 }
 
 function Format-HeaderCount {
@@ -113,6 +117,21 @@ function Format-LabelValue {
     )
 
     return ("{0}: {1}" -f $Label.PadRight($LabelWidth), $Value)
+}
+
+function Format-TopCompressionLine {
+    param(
+        [Parameter(Mandatory)][int]$Rank,
+        [Parameter(Mandatory)][psobject]$Entry,
+        [switch]$LeafName
+    )
+
+    $displayPath = [string]$Entry.Path
+    if ($LeafName) {
+        $displayPath = [System.IO.Path]::GetFileName($displayPath)
+    }
+
+    return ("  {0}. Saved {1} ({2:N2}%) | {3}" -f $Rank, (Format-Bytes $Entry.SavedBytes), $Entry.SavedPct, $displayPath)
 }
 
 function Format-Elapsed {
@@ -1568,7 +1587,7 @@ function Render-InteractiveUi {
     Write-UiLine -Text ("Progress {0}/{1} | Failed {2} | Elapsed {3} | Queue {4} | Active {5}/{6}" -f $Processed, $TotalFiles, $Failed, $elapsedText, $QueueCount, $activeCount, $Workers.Count) -Color White
     Write-UiLine -Text (Format-HeaderMetricRow -Metrics @(
             (Format-LabelValue -Label 'TOTAL SAVED' -Value (Format-Bytes $TotalSavedBytes) -LabelWidth 15),
-            (Format-LabelValue -Label 'AUDIO DELTA' -Value (Format-SignedBytes $audioDeltaBytes) -LabelWidth 15),
+            (Format-LabelValue -Label 'AUDIO DELTA' -Value (Format-Bytes $audioDeltaBytes -Signed) -LabelWidth 15),
             (Format-LabelValue -Label 'METADATA NET' -Value (Format-Bytes $metadataNetSavedBytes) -LabelWidth 15)
         )) -Color DarkCyan
     Write-UiLine -Text (Format-HeaderMetricRow -Metrics @(
@@ -1603,7 +1622,7 @@ function Render-InteractiveUi {
         foreach ($entry in $TopCompression) {
             $rank++
             $entryColor = Get-CompressionColor -CompressionPct ("{0:N2}%" -f $entry.SavedPct)
-            $line = ("  {0}. Saved {1} ({2:N2}%) | {3}" -f $rank, (Format-Bytes $entry.SavedBytes), $entry.SavedPct, ([System.IO.Path]::GetFileName([string]$entry.Path)))
+            $line = Format-TopCompressionLine -Rank $rank -Entry $entry -LeafName
             Write-UiLine -Text $line -Color $entryColor
             if ($rank -ge 3) { break }
         }
@@ -2181,7 +2200,7 @@ if ($totalFiles -eq 0) {
     return
 }
 
-# Conservative default worker count.
+# Default worker count: reserve one logical processor for the main thread/UI unless overridden.
 $availableWorkerSlots = if ($PSBoundParameters.ContainsKey('Threads')) {
     $Threads
 }
@@ -2716,7 +2735,7 @@ try {
                                 $audioSavedPct = [Math]::Round((($audioNetSaved / [double]$job.OrigSize) * 100.0), 2)
                             }
                             $detailParts = [System.Collections.Generic.List[string]]::new()
-                            $detailParts.Add(("Audio {0} ({1:N2}%)" -f (Format-SignedBytes $audioNetSaved), $audioSavedPct)) | Out-Null
+                            $detailParts.Add(("Audio {0} ({1:N2}%)" -f (Format-Bytes $audioNetSaved -Signed), $audioSavedPct)) | Out-Null
                             if ($null -ne $artResult -and $artResult.Changed) {
                                 $detailParts.Add($artDetailText) | Out-Null
                             }
@@ -2983,7 +3002,7 @@ try {
                 $elapsedText = Format-Elapsed -Elapsed ($nowUtc - $runStartedUtc)
                 $metadataSavedStatus = $totalMetadataSavedBytes
                 $audioSavedStatus = $totalSavedBytes - $metadataSavedStatus
-                Write-Host ("Progress: {0}/{1}  Failed: {2}  Elapsed: {3}  Saved(All): {4}  Audio Delta: {5}  Pad: {6}  Art(Net): {7}  Art(Raw): {8}" -f $processed, $totalFiles, $failed, $elapsedText, (Format-Bytes $totalSavedBytes), (Format-SignedBytes $audioSavedStatus), (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes))
+                Write-Host ("Progress: {0}/{1}  Failed: {2}  Elapsed: {3}  Saved(All): {4}  Audio Delta: {5}  Pad: {6}  Art(Net): {7}  Art(Raw): {8}" -f $processed, $totalFiles, $failed, $elapsedText, (Format-Bytes $totalSavedBytes), (Format-Bytes $audioSavedStatus -Signed), (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes))
             }
         }
 
@@ -3058,7 +3077,7 @@ $summaryLines.Add((Format-LabelValue -Label 'Files/Attempts/Rate' -Value ("{0}/{
 $summaryLines.Add((Format-LabelValue -Label 'Elapsed' -Value $totalElapsedText)) | Out-Null
 $summaryLines.Add((Format-LabelValue -Label 'Size In -> Out' -Value ("{0} -> {1}" -f (Format-Bytes $totalOriginalBytes), (Format-Bytes $totalNewBytes)))) | Out-Null
 $summaryLines.Add((Format-LabelValue -Label 'Saved Total' -Value ("{0} | {1} of original" -f (Format-Bytes $totalSavedBytes), (Format-Percent -Value $overallReductionPct)))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Audio Delta' -Value ("{0} | {1} of original" -f (Format-SignedBytes $audioSavedBytes), (Format-Percent -Value $audioReductionPct)))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Audio Delta' -Value ("{0} | {1} of original" -f (Format-Bytes $audioSavedBytes -Signed), (Format-Percent -Value $audioReductionPct)))) | Out-Null
 $summaryLines.Add((Format-LabelValue -Label 'Metadata Net' -Value (Format-Bytes $metadataNetSavedBytes))) | Out-Null
 $summaryLines.Add((Format-LabelValue -Label 'Padding Trim' -Value (Format-Bytes $totalPaddingTrimSavedBytes))) | Out-Null
 $summaryLines.Add((Format-LabelValue -Label 'Padding Files' -Value (Format-HeaderCount -Value $paddingTrimFiles))) | Out-Null
@@ -3082,7 +3101,7 @@ else {
     $rank = 0
     foreach ($entry in $topCompression) {
         $rank++
-        $summaryLines.Add(("  {0}. Saved {1} ({2:N2}%) | {3}" -f $rank, (Format-Bytes $entry.SavedBytes), $entry.SavedPct, $entry.Path)) | Out-Null
+        $summaryLines.Add((Format-TopCompressionLine -Rank $rank -Entry $entry)) | Out-Null
     }
 }
 
@@ -3105,7 +3124,7 @@ else {
 Write-Host (Format-LabelValue -Label 'Processed' -Value ("{0}/{1} | Success {2} | Failed {3} | Pending {4}" -f $processed, $totalFiles, $successful, $failed, $pending))
 Write-Host (Format-LabelValue -Label 'Elapsed' -Value $totalElapsedText)
 Write-Host (Format-LabelValue -Label 'Total Saved' -Value ("{0} | {1} of original" -f (Format-Bytes $totalSavedBytes), (Format-Percent -Value $overallReductionPct))) -ForegroundColor Green
-Write-Host (Format-LabelValue -Label 'Audio Delta' -Value ("{0} | {1} of original" -f (Format-SignedBytes $audioSavedBytes), (Format-Percent -Value $audioReductionPct)))
+Write-Host (Format-LabelValue -Label 'Audio Delta' -Value ("{0} | {1} of original" -f (Format-Bytes $audioSavedBytes -Signed), (Format-Percent -Value $audioReductionPct)))
 Write-Host (Format-LabelValue -Label 'Metadata Net' -Value (Format-Bytes $metadataNetSavedBytes))
 Write-Host (Format-LabelValue -Label 'Padding Trim' -Value (Format-Bytes $totalPaddingTrimSavedBytes))
 Write-Host (Format-LabelValue -Label 'Padding Files' -Value (Format-HeaderCount -Value $paddingTrimFiles))
@@ -3125,7 +3144,7 @@ else {
     $rank = 0
     foreach ($entry in $topCompression) {
         $rank++
-        Write-Host ("  {0}. Saved {1} ({2:N2}%) | {3}" -f $rank, (Format-Bytes $entry.SavedBytes), $entry.SavedPct, $entry.Path)
+        Write-Host (Format-TopCompressionLine -Rank $rank -Entry $entry)
     }
 }
 if ($failedListPath) {
