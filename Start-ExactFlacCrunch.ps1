@@ -27,7 +27,12 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$LogFolder = (Join-Path -Path ([Environment]::GetFolderPath('Desktop')) -ChildPath 'flaccruch-logs')
+    [string]$LogFolder = (Join-Path -Path ([Environment]::GetFolderPath('Desktop')) -ChildPath 'EFC-logs'),
+
+    [Parameter(Mandatory = $false)]
+    [Alias('Workers')]
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$Threads
 )
 
 if (($null -eq $PSVersionTable) -or ($null -eq $PSVersionTable.PSVersion) -or ($PSVersionTable.PSVersion.Major -lt 7)) {
@@ -153,10 +158,10 @@ function Get-DefaultLogFolder {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($desktopPath) -and (Test-Path -LiteralPath $desktopPath)) {
-        return (Join-Path -Path $desktopPath -ChildPath 'flaccruch-logs')
+        return (Join-Path -Path $desktopPath -ChildPath 'EFC-logs')
     }
 
-    return (Join-Path -Path $homePath -ChildPath 'flaccruch-logs')
+    return (Join-Path -Path $homePath -ChildPath 'EFC-logs')
 }
 
 function Test-DirectoryWriteAccess {
@@ -2062,9 +2067,16 @@ if ($totalFiles -eq 0) {
 }
 
 # Conservative default worker count.
-$availableWorkerSlots = [Environment]::ProcessorCount
-if ($availableWorkerSlots -gt 1) {
-    $availableWorkerSlots--
+$availableWorkerSlots = if ($PSBoundParameters.ContainsKey('Threads')) {
+    $Threads
+}
+else {
+    $defaultWorkerSlots = [Environment]::ProcessorCount
+    if ($defaultWorkerSlots -gt 1) {
+        $defaultWorkerSlots--
+    }
+
+    $defaultWorkerSlots
 }
 $maxWorkers = [Math]::Min($availableWorkerSlots, $totalFiles)
 if ($maxWorkers -lt 1) { $maxWorkers = 1 }

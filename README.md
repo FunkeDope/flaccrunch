@@ -49,11 +49,11 @@ Optional. This is the parent folder for log output.
 
 If not provided, the script uses:
 
-`Desktop\flaccruch-logs`
+`Desktop\EFC-logs`
 
 If no Desktop folder is available, it falls back to:
 
-`%USERPROFILE%\flaccruch-logs`
+`%USERPROFILE%\EFC-logs`
 
 ## Usage
 
