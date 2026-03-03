@@ -1,120 +1,78 @@
 # Exact FLAC Cruncher
 
-`Start-ExactFlacCrunch.ps1` recompresses FLAC files in place while protecting audio integrity.
-
-It recursively scans a folder, runs `flac -8 -V` for each file, verifies decoded-audio MD5 before and after conversion, and only replaces the original file when verification passes.
-
-## What It Does
-
-- Finds all `*.flac` files under `-RootFolder` (recursive).
-- Uses per-file temp outputs with `.tmp` extension (for example `track.tmp`).
-- Runs multiple workers in parallel (up to CPU count or file count, whichever is smaller).
-- Keeps one rolling run log for the full script execution.
-- Verifies integrity with decoded-audio MD5 checks:
-- Uses embedded FLAC MD5 when present.
-- Computes decoded-audio MD5 hashes before and after conversion.
-- Handles both 3-way verification (embedded + pre + post) and 2-way verification (pre + post when embedded MD5 is null).
-- Embeds MD5 into output if source embedded MD5 is null and post hash is available.
-- Replaces original only after verification succeeds.
-- Optionally inspects embedded picture blocks after audio verification and losslessly optimizes PNG/JPEG album art when supported tools are available.
-- Relies on FLAC default metadata preservation (timestamps/permissions) and preserves modtime when writing missing MD5 metadata.
-- Supports safe cancellation (`Ctrl+C` in interactive console): active jobs are stopped and temp files are cleaned.
+`Start-ExactFlacCrunch.ps1` scans a folder for `.flac` files, recompresses them, verifies the audio, and replaces the original file only after the check passes.
 
 ## Requirements
 
-- Windows PowerShell host (script is written/tested for Windows behavior).
-- `flac` in `PATH`.
-- `metaflac` in `PATH`.
-- Optional for embedded PNG album art: `oxipng` (preferred) or `pngcrush` in `PATH`.
-- Optional for embedded JPEG album art: `jpegtran` in `PATH`.
-- Read/write permissions to target files and log folder.
+- Windows PowerShell
+- `flac` in `PATH`
+- `metaflac` in `PATH`
+- Read and write access to the target music folder
 
-If the optional picture optimizers are not installed, the script logs a warning and continues the normal FLAC recompression flow. The optional EXEs can also be placed beside the script instead of being added to `PATH`. In interactive console runs, the script can offer a best-effort `winget` install prompt for missing optional image tools using exact package IDs (currently `Shssoichiro.Oxipng` and `libjpeg-turbo.libjpeg-turbo.VC`).
+Optional:
+
+- `oxipng` or `pngcrush` in `PATH` for PNG album art optimization
+- `jpegtran` in `PATH` for JPEG album art optimization
+
+The optional tools can also be placed in the same folder as `Start-ExactFlacCrunch.ps1`.
+
+## What Must Be In PATH
+
+Required:
+
+- `flac`
+- `metaflac`
+
+Optional:
+
+- `oxipng` or `pngcrush`
+- `jpegtran`
+
+If `flac` or `metaflac` are not available, the script stops.
+
+## Installation
+
+1. Install the FLAC command line tools so `flac.exe` and `metaflac.exe` are available.
+2. Make sure those executables are in your system `PATH`, or place them beside `Start-ExactFlacCrunch.ps1`.
+3. Optional: install `oxipng`, `pngcrush`, or `jpegtran` if you want album art optimization.
+4. Save `Start-ExactFlacCrunch.ps1` somewhere you can run it from PowerShell.
 
 ## Parameters
 
-### `-RootFolder` (required)
+### `-RootFolder`
 
-Root directory to process.
+Required. This is the folder the script scans recursively for `.flac` files.
 
-### `-LogFolder` (optional)
+### `-LogFolder`
 
-Log root folder. A per-run timestamped subfolder is created under this location.
+Optional. This is the parent folder for log output.
 
-Default value in script:
+If not provided, the script uses:
 
-`$Desktop\flaccruch-logs`
+`Desktop\flaccruch-logs`
 
-Note: the folder name is spelled `flaccruch-logs` in the script.
+If no Desktop folder is available, it falls back to:
+
+`%USERPROFILE%\flaccruch-logs`
 
 ## Usage
 
-### Basic
+Run from PowerShell:
 
 ```powershell
-.\Start-ExactFlacCrunch.ps1 -RootFolder "D:\Music\Album"
+.\Start-ExactFlacCrunch.ps1 -RootFolder "D:\Music"
 ```
 
-### Custom log location
+With a custom log folder:
 
 ```powershell
-.\Start-ExactFlacCrunch.ps1 `
-  -RootFolder "D:\Music" `
-  -LogFolder "D:\Logs\FlacCrunch"
+.\Start-ExactFlacCrunch.ps1 -RootFolder "D:\Music" -LogFolder "D:\Logs\FlacCrunch"
 ```
 
-## Runtime Behavior
+## Basic Behavior
 
-- Interactive console (`ConsoleHost`):
-- Renders a live dashboard with worker status, progress, recent results, and total saved space.
-- `Ctrl+C` triggers graceful cancellation and cleanup.
-- Non-interactive host:
-- Prints throttled status updates approximately every 10 seconds.
-
-## Verification Logic
-
-For a successful replacement, the script expects:
-
-- `flac` exits with code `0`.
-- Temp output exists.
-- Hash verification passes:
-- If embedded source MD5 exists:
-- Embedded MD5 == pre-conversion decoded-audio MD5 == post-conversion decoded-audio MD5.
-- If embedded source MD5 is null:
-- pre-conversion decoded-audio MD5 == post-conversion decoded-audio MD5.
-
-If verification fails:
-
-- Temp file is deleted.
-- File may be retried (up to 3 attempts total), except known non-retryable decode corruption cases.
-- Final failures are recorded in a failed-files log.
-
-## Logging and Output
-
-Each run creates:
-
-- Main run log (`<album>_<timestamp>.log`)
-- EFC-style final summary log (`efc-final_<timestamp>.log`)
-- Failed files report (`failed-files_<timestamp>.log`) only when there are permanent failures
-
-At the end, the script prints and logs:
-
-- Processed/success/failed/pending counts
-- Total elapsed time
-- Total bytes saved and reduction percentage
-- Separate album-art bytes saved totals when embedded picture optimization helped
-- Success rate
-- Top 3 per-file space savings
-- Log file locations
-
-## Safety Notes
-
-- Originals are only replaced after verification success.
-- On cancellation, originals remain untouched for in-flight jobs.
-- Script deletes stale `.tmp` files only when a same-base `.flac` exists.
-
-## Exit Conditions
-
-- No FLAC files found: exits cleanly.
-- Missing `flac`/`metaflac` in `PATH`: throws and stops.
-- Invalid `RootFolder`: throws and stops.
+- The script scans `-RootFolder` recursively for `.flac` files.
+- It creates logs in a timestamped subfolder under `-LogFolder`.
+- It uses `.tmp` files during conversion.
+- It checks the converted audio before replacing the original file.
+- If verification fails, the original file is not replaced.

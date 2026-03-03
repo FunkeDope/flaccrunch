@@ -62,6 +62,26 @@ function Format-Bytes {
     '{0,8} {1}' -f $number, $units[$i]
 }
 
+function Format-SignedBytes {
+    param([Parameter(Mandatory)][long]$Bytes)
+
+    if ($Bytes -lt 0) {
+        return ('-{0}' -f (Format-Bytes -Bytes ([Math]::Abs($Bytes))))
+    }
+
+    return (Format-Bytes -Bytes $Bytes)
+}
+
+function Format-LabelValue {
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value,
+        [int]$LabelWidth = 20
+    )
+
+    return ("{0}: {1}" -f $Label.PadRight($LabelWidth), $Value)
+}
+
 function Format-Elapsed {
     param([Parameter(Mandatory)][TimeSpan]$Elapsed)
 
@@ -1401,18 +1421,47 @@ function Render-InteractiveUi {
         $script:__uiRowsWritten++
     }
 
+    function Format-HeaderMetricRow {
+        param([Parameter(Mandatory)][string[]]$Metrics)
+
+        $metricList = @($Metrics | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($metricList.Count -eq 0) { return '' }
+
+        $separatorWidth = 3
+        $availableWidth = [Math]::Max(1, ($width - (($metricList.Count - 1) * $separatorWidth)))
+        $columnWidth = [Math]::Max(24, [int][Math]::Floor($availableWidth / $metricList.Count))
+        $columns = foreach ($metric in $metricList) {
+            Fit-DisplayText -Text $metric -Width $columnWidth
+        }
+
+        return [string]::Join(' | ', $columns)
+    }
+
     $script:__uiRowsWritten = 0
 
     $elapsed = [DateTime]::UtcNow - $RunStartedUtc
     if ($elapsed.Ticks -lt 0) { $elapsed = [TimeSpan]::Zero }
     $elapsedText = Format-Elapsed -Elapsed $elapsed
-    $audioSavedBytes = [Math]::Max(0L, ($TotalSavedBytes - $TotalMetadataSavedBytes))
+    $metadataNetSavedBytes = $TotalMetadataSavedBytes
+    $audioDeltaBytes = $TotalSavedBytes - $metadataNetSavedBytes
 
     Write-UiLine -Text ("Exact Flac Cruncher | {0}" -f $AlbumName) -Color Cyan
     Write-UiLine -Text ("Progress {0}/{1} | Failed {2} | Elapsed {3} | Queue {4} | Active {5}/{6}" -f $Processed, $TotalFiles, $Failed, $elapsedText, $QueueCount, $activeCount, $Workers.Count) -Color White
-    Write-UiLine -Text ("TOTAL SAVED (ALL METHODS): {0}" -f (Format-Bytes $TotalSavedBytes)) -Color DarkCyan
-    Write-UiLine -Text ("AUDIO RECOMPRESS: {0} | FLAC PADDING TRIM: {1} | ALBUM ART CLEANUP (NET): {2}" -f (Format-Bytes $audioSavedBytes), (Format-Bytes $TotalPaddingTrimSavedBytes), (Format-Bytes $TotalArtworkSavedBytes)) -Color DarkGreen
-    Write-UiLine -Text ("ALBUM ART (RAW): {0} | PADDING FILES: {1} | ART FILES: {2} | BLOCKS: {3}" -f (Format-Bytes $TotalArtworkRawSavedBytes), $PaddingTrimFiles, $ArtworkOptimizedFiles, $ArtworkOptimizedBlocks) -Color DarkGreen
+    Write-UiLine -Text (Format-HeaderMetricRow -Metrics @(
+            (Format-LabelValue -Label 'TOTAL SAVED' -Value (Format-Bytes $TotalSavedBytes) -LabelWidth 14),
+            (Format-LabelValue -Label 'AUDIO DELTA' -Value (Format-SignedBytes $audioDeltaBytes) -LabelWidth 14),
+            (Format-LabelValue -Label 'METADATA NET' -Value (Format-Bytes $metadataNetSavedBytes) -LabelWidth 14)
+        )) -Color DarkCyan
+    Write-UiLine -Text (Format-HeaderMetricRow -Metrics @(
+            (Format-LabelValue -Label 'PADDING TRIM' -Value (Format-Bytes $TotalPaddingTrimSavedBytes) -LabelWidth 14),
+            (Format-LabelValue -Label 'ARTWORK NET' -Value (Format-Bytes $TotalArtworkSavedBytes) -LabelWidth 14),
+            (Format-LabelValue -Label 'ARTWORK RAW' -Value (Format-Bytes $TotalArtworkRawSavedBytes) -LabelWidth 14)
+        )) -Color DarkGreen
+    Write-UiLine -Text (Format-HeaderMetricRow -Metrics @(
+            (Format-LabelValue -Label 'PAD FILES' -Value ([string]$PaddingTrimFiles) -LabelWidth 14),
+            (Format-LabelValue -Label 'ART FILES' -Value ([string]$ArtworkOptimizedFiles) -LabelWidth 14),
+            (Format-LabelValue -Label 'ART BLOCKS' -Value ([string]$ArtworkOptimizedBlocks) -LabelWidth 14)
+        )) -Color DarkGreen
     Write-UiLine -Text ("ART TOOLS: PNG={0} | JPEG={1}" -f $PngToolStatus, $JpegToolStatus) -Color DarkGray
     if ([string]::IsNullOrWhiteSpace($Banner)) {
         Write-UiLine -Text "Ctrl+C: Cancel safely. Will clean up temp files and restore original files on exit." -Color DarkGray
@@ -2404,7 +2453,6 @@ try {
                     }
 
                     if ($hashOK) {
-                        $job.PreMetadataSize = (Get-Item -LiteralPath $job.Temp -Force).Length
                         $job.ArtworkResult = Optimize-FlacAlbumArt `
                             -Path $job.Temp `
                             -MetaflacExePath $metaflacCmd.Source `
@@ -2440,10 +2488,6 @@ try {
                     $saved = 0
                     $embeddedPresent = ($job.EmbeddedHash -ne $nullHash)
                     $artResult = $job.ArtworkResult
-                    $preMetadataSize = 0L
-                    if ($job.PSObject.Properties.Name -contains 'PreMetadataSize' -and $null -ne $job.PreMetadataSize) {
-                        $preMetadataSize = [long]$job.PreMetadataSize
-                    }
 
                     if ($exitCode -eq 0 -and (Test-Path -LiteralPath $job.Temp) -and [string]::IsNullOrWhiteSpace($failureReason)) {
                         $newSize = (Get-Item -LiteralPath $job.Temp -Force).Length
@@ -2468,32 +2512,26 @@ try {
                             $totalNewBytes += $newSize
                             $totalSavedBytes += $saved
                             $audioNetSaved = [long]$saved
-                            $metadataNetCredited = 0L
-                            if ($preMetadataSize -gt 0 -and $preMetadataSize -ge $newSize) {
-                                $rawMetadataDelta = [long]($preMetadataSize - $newSize)
-                                if ($rawMetadataDelta -gt 0 -and $saved -gt 0) {
-                                    $metadataNetCredited = [Math]::Min($rawMetadataDelta, [long]$saved)
-                                    $audioNetSaved = [Math]::Max(0L, ([long]$saved - $metadataNetCredited))
-                                }
-                                elseif ($saved -le 0) {
-                                    $audioNetSaved = 0L
-                                }
+                            $metadataNetSaved = 0L
+                            if ($null -ne $artResult -and $artResult.Changed -and $artResult.SavedBytes -gt 0) {
+                                $metadataNetSaved = [long]$artResult.SavedBytes
+                                $audioNetSaved = [long]$saved - $metadataNetSaved
                             }
 
-                            if ($metadataNetCredited -gt 0) {
-                                $totalMetadataSavedBytes += $metadataNetCredited
+                            if ($metadataNetSaved -gt 0) {
+                                $totalMetadataSavedBytes += $metadataNetSaved
                             }
                             if ($null -ne $artResult -and $artResult.RawSavedBytes -gt 0) {
                                 $totalArtworkRawSavedBytes += $artResult.RawSavedBytes
                             }
-                            if ($null -ne $artResult -and $artResult.Changed -and $metadataNetCredited -gt 0) {
+                            if ($null -ne $artResult -and $artResult.Changed -and $metadataNetSaved -gt 0) {
                                 if ($artResult.BlocksOptimized -gt 0) {
-                                    $totalArtworkSavedBytes += $metadataNetCredited
+                                    $totalArtworkSavedBytes += $metadataNetSaved
                                     $artworkOptimizedFiles++
                                     $artworkOptimizedBlocks += $artResult.BlocksOptimized
                                 }
                                 else {
-                                    $totalPaddingTrimSavedBytes += $metadataNetCredited
+                                    $totalPaddingTrimSavedBytes += $metadataNetSaved
                                     $paddingTrimFiles++
                                 }
                             }
@@ -2501,14 +2539,14 @@ try {
                             $artSummary = 'none'
                             $artDetailText = 'none'
                             if ($null -ne $artResult) {
-                                if ($metadataNetCredited -gt 0) {
+                                if ($metadataNetSaved -gt 0) {
                                     if ($artResult.BlocksOptimized -gt 0) {
-                                        $artSummary = ("MetadataCleanup {0} net ({1} raw image, {2} block{3})" -f (Format-Bytes $metadataNetCredited), (Format-Bytes $artResult.RawSavedBytes), $artResult.BlocksOptimized, $(if ($artResult.BlocksOptimized -eq 1) { '' } else { 's' }))
-                                        $artDetailText = ("Meta {0} ({1} raw, {2} blk{3})" -f (Format-Bytes $metadataNetCredited), (Format-Bytes $artResult.RawSavedBytes), $artResult.BlocksOptimized, $(if ($artResult.BlocksOptimized -eq 1) { '' } else { 's' }))
+                                        $artSummary = ("MetadataCleanup {0} net ({1} raw image, {2} block{3})" -f (Format-Bytes $metadataNetSaved), (Format-Bytes $artResult.RawSavedBytes), $artResult.BlocksOptimized, $(if ($artResult.BlocksOptimized -eq 1) { '' } else { 's' }))
+                                        $artDetailText = ("Meta {0} ({1} raw, {2} blk{3})" -f (Format-Bytes $metadataNetSaved), (Format-Bytes $artResult.RawSavedBytes), $artResult.BlocksOptimized, $(if ($artResult.BlocksOptimized -eq 1) { '' } else { 's' }))
                                     }
                                     else {
-                                        $artSummary = ("MetadataCleanup {0} net (padding-only)" -f (Format-Bytes $metadataNetCredited))
-                                        $artDetailText = ("Meta {0} (pad)" -f (Format-Bytes $metadataNetCredited))
+                                        $artSummary = ("MetadataCleanup {0} net (padding-only)" -f (Format-Bytes $metadataNetSaved))
+                                        $artDetailText = ("Meta {0} (pad)" -f (Format-Bytes $metadataNetSaved))
                                     }
                                 }
                                 elseif ($artResult.Changed) {
@@ -2546,7 +2584,7 @@ try {
                                 $audioSavedPct = [Math]::Round((($audioNetSaved / [double]$job.OrigSize) * 100.0), 2)
                             }
                             $detailParts = [System.Collections.Generic.List[string]]::new()
-                            $detailParts.Add(("Audio {0} ({1:N2}%)" -f (Format-Bytes $audioNetSaved), $audioSavedPct)) | Out-Null
+                            $detailParts.Add(("Audio {0} ({1:N2}%)" -f (Format-SignedBytes $audioNetSaved), $audioSavedPct)) | Out-Null
                             if ($null -ne $artResult -and $artResult.Changed) {
                                 $detailParts.Add($artDetailText) | Out-Null
                             }
@@ -2632,7 +2670,7 @@ try {
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'RETRY' `
                                 -File $job.Name `
-                                -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
+                                -Attempt ("{0}/{1}" -f $nextAttempt, $maxAttemptsPerFile) `
                                 -EmbeddedHash (Format-HashForUi -Hash $job.EmbeddedHash -NullHash $nullHash) `
                                 -CalculatedBeforeHash (Format-HashForUi -Hash $job.PreCalcHash -NullHash $nullHash) `
                                 -CalculatedAfterHash (Format-HashForUi -Hash $postCalcHash -NullHash $nullHash) `
@@ -2756,7 +2794,6 @@ try {
                         ErrText         = ''
                         FailureReason   = $null
                         ArtworkResult   = $null
-                        PreMetadataSize = 0L
                     }
                     $uiDirty = $true
                 }
@@ -2810,8 +2847,9 @@ try {
             if (($nowUtc - $lastStatusUtc) -ge $statusInterval) {
                 $lastStatusUtc = $nowUtc
                 $elapsedText = Format-Elapsed -Elapsed ($nowUtc - $runStartedUtc)
-                $audioSavedStatus = [Math]::Max(0L, ($totalSavedBytes - $totalMetadataSavedBytes))
-                Write-Host ("Progress: {0}/{1}  Failed: {2}  Elapsed: {3}  Saved(All): {4}  Audio: {5}  Pad: {6}  Art(Net): {7}  Art(Raw): {8}" -f $processed, $totalFiles, $failed, $elapsedText, (Format-Bytes $totalSavedBytes), (Format-Bytes $audioSavedStatus), (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes))
+                $metadataSavedStatus = $totalMetadataSavedBytes
+                $audioSavedStatus = $totalSavedBytes - $metadataSavedStatus
+                Write-Host ("Progress: {0}/{1}  Failed: {2}  Elapsed: {3}  Saved(All): {4}  Audio Delta: {5}  Pad: {6}  Art(Net): {7}  Art(Raw): {8}" -f $processed, $totalFiles, $failed, $elapsedText, (Format-Bytes $totalSavedBytes), (Format-SignedBytes $audioSavedStatus), (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes))
             }
         }
 
@@ -2848,7 +2886,8 @@ $totalElapsedText = Format-Elapsed -Elapsed $totalElapsed
 $overallReductionPct = if ($totalOriginalBytes -gt 0) { [Math]::Round((($totalSavedBytes / [double]$totalOriginalBytes) * 100.0), 2) } else { 0.0 }
 $successRatePct = if ($totalFiles -gt 0) { [Math]::Round((($successful / [double]$totalFiles) * 100.0), 2) } else { 0.0 }
 $avgSavedPerSuccessBytes = if ($successful -gt 0) { [long][Math]::Round(($totalSavedBytes / [double]$successful), 0) } else { 0L }
-$audioSavedBytes = [Math]::Max(0L, ($totalSavedBytes - $totalMetadataSavedBytes))
+$metadataNetSavedBytes = $totalMetadataSavedBytes
+$audioSavedBytes = $totalSavedBytes - $metadataNetSavedBytes
 $audioReductionPct = if ($totalOriginalBytes -gt 0) { [Math]::Round((($audioSavedBytes / [double]$totalOriginalBytes) * 100.0), 2) } else { 0.0 }
 
 $failedLines = [System.Collections.Generic.List[string]]::new()
@@ -2878,21 +2917,23 @@ if ($failedResults.Count -gt 0) {
 }
 
 $summaryLines = [System.Collections.Generic.List[string]]::new()
-$summaryLines.Add("===================================================================") | Out-Null
+$summaryLines.Add(("=" * 79)) | Out-Null
 $summaryLines.Add("SUMMARY: $albumName") | Out-Null
-$summaryLines.Add(("Done/OK/Fail/Pend    : {0}/{1}/{2}/{3}" -f $processed, $successful, $failed, $pending)) | Out-Null
-$summaryLines.Add(("Files/Attempts/Rate  : {0}/{1}/{2:N2}%%" -f $totalFiles, $conversionAttempts, $successRatePct)) | Out-Null
-$summaryLines.Add(("Elapsed              : {0}" -f $totalElapsedText)) | Out-Null
-$summaryLines.Add(("Size In -> Out       : {0} -> {1}" -f (Format-Bytes $totalOriginalBytes), (Format-Bytes $totalNewBytes))) | Out-Null
-$summaryLines.Add(("Saved Total          : {0} ({1:N2}%%)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct)) | Out-Null
-$summaryLines.Add(("Saved Audio          : {0} ({1:N2}%%)" -f (Format-Bytes $audioSavedBytes), $audioReductionPct)) | Out-Null
-$summaryLines.Add(("Saved Pad/Art        : {0} / {1}" -f (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes))) | Out-Null
-$summaryLines.Add(("Art Raw | Files/Blk  : {0} | {1}/{2}" -f (Format-Bytes $totalArtworkRawSavedBytes), $artworkOptimizedFiles, $artworkOptimizedBlocks)) | Out-Null
-$summaryLines.Add(("Avg / Success        : {0}" -f (Format-Bytes $avgSavedPerSuccessBytes))) | Out-Null
-$summaryLines.Add(("Failed Log           : {0}" -f $(if ($failedListPath) { $failedListPath } else { '(none)' }))) | Out-Null
-$summaryLines.Add(("Final Log            : {0}" -f $efcFinalLogPath)) | Out-Null
-$summaryLines.Add(("Verbose Log          : {0}" -f $(if ($verboseLogFile) { $verboseLogFile } else { '(disabled)' }))) | Out-Null
-$summaryLines.Add("Top 3 Compression    :") | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Done/OK/Fail/Pend' -Value ("{0}/{1}/{2}/{3}" -f $processed, $successful, $failed, $pending))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Files/Attempts/Rate' -Value ("{0}/{1}/{2:N2}%%" -f $totalFiles, $conversionAttempts, $successRatePct))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Elapsed' -Value $totalElapsedText)) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Size In -> Out' -Value ("{0} -> {1}" -f (Format-Bytes $totalOriginalBytes), (Format-Bytes $totalNewBytes)))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Saved Total' -Value ("{0} ({1:N2}%%)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Audio Delta' -Value ("{0} ({1:N2}%%)" -f (Format-SignedBytes $audioSavedBytes), $audioReductionPct))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Metadata Net' -Value (Format-Bytes $metadataNetSavedBytes))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Padding Trim' -Value ("{0} | Files {1}" -f (Format-Bytes $totalPaddingTrimSavedBytes), $paddingTrimFiles))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Artwork Net/Raw' -Value ("{0} / {1}" -f (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes)))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Artwork Files/Blk' -Value ("{0}/{1}" -f $artworkOptimizedFiles, $artworkOptimizedBlocks))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Avg / Success' -Value (Format-Bytes $avgSavedPerSuccessBytes))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Failed Log' -Value $(if ($failedListPath) { $failedListPath } else { '(none)' }))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Final Log' -Value $efcFinalLogPath)) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Verbose Log' -Value $(if ($verboseLogFile) { $verboseLogFile } else { '(disabled)' }))) | Out-Null
+$summaryLines.Add("Top 3 Compression:") | Out-Null
 
 if ($topCompression.Count -eq 0) {
     $summaryLines.Add("  (No successful file conversions)") | Out-Null
@@ -2905,9 +2946,9 @@ else {
     }
 }
 
-$summaryLines.Add(("Finished             : {0}" -f ($finishedLocal.ToString('o')))) | Out-Null
-$summaryLines.Add("Logs                 : $runLogDir") | Out-Null
-$summaryLines.Add("===================================================================") | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Finished' -Value ($finishedLocal.ToString('o')))) | Out-Null
+$summaryLines.Add((Format-LabelValue -Label 'Logs' -Value $runLogDir)) | Out-Null
+$summaryLines.Add(("=" * 79)) | Out-Null
 
 $summaryText = [string]::Join([Environment]::NewLine, $summaryLines)
 Flush-RunLog -Force
@@ -2923,10 +2964,13 @@ else {
 }
 Write-Host ("Processed: {0}/{1}  Success: {2}  Failed: {3}  Pending: {4}" -f $processed, $totalFiles, $successful, $failed, $pending)
 Write-Host ("Elapsed: {0}" -f $totalElapsedText)
-Write-Host ("TOTAL SAVED (ALL): {0} ({1:N2}% of original)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct) -ForegroundColor Green
-Write-Host ("Audio Recompress: {0} ({1:N2}% of original) | FLAC Padding Trim: {2} | Album Art Cleanup (Net): {3}" -f (Format-Bytes $audioSavedBytes), $audioReductionPct, (Format-Bytes $totalPaddingTrimSavedBytes), (Format-Bytes $totalArtworkSavedBytes))
-Write-Host ("Album Art (Raw): {0} | Padding Files: {1} | Art Files: {2} | Blocks: {3}" -f (Format-Bytes $totalArtworkRawSavedBytes), $paddingTrimFiles, $artworkOptimizedFiles, $artworkOptimizedBlocks)
-Write-Host ("Success Rate: {0:N2}%  Avg Saved/Success: {1}" -f $successRatePct, (Format-Bytes $avgSavedPerSuccessBytes))
+Write-Host (Format-LabelValue -Label 'Total Saved' -Value ("{0} ({1:N2}% of original)" -f (Format-Bytes $totalSavedBytes), $overallReductionPct)) -ForegroundColor Green
+Write-Host (Format-LabelValue -Label 'Audio Delta' -Value ("{0} ({1:N2}% of original)" -f (Format-SignedBytes $audioSavedBytes), $audioReductionPct))
+Write-Host (Format-LabelValue -Label 'Metadata Net' -Value (Format-Bytes $metadataNetSavedBytes))
+Write-Host (Format-LabelValue -Label 'Padding Trim' -Value ("{0} | Files {1}" -f (Format-Bytes $totalPaddingTrimSavedBytes), $paddingTrimFiles))
+Write-Host (Format-LabelValue -Label 'Artwork Net/Raw' -Value ("{0} / {1}" -f (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes)))
+Write-Host (Format-LabelValue -Label 'Artwork Files/Blk' -Value ("{0}/{1}" -f $artworkOptimizedFiles, $artworkOptimizedBlocks))
+Write-Host (Format-LabelValue -Label 'Success / Avg' -Value ("{0:N2}% | {1}" -f $successRatePct, (Format-Bytes $avgSavedPerSuccessBytes)))
 Write-Host "Top 3 Compression:"
 if ($topCompression.Count -eq 0) {
     Write-Host "  (No successful file conversions)"
