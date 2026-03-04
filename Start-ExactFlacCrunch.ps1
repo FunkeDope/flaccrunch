@@ -71,7 +71,8 @@ function Format-Bytes {
         $valueBytes = [Math]::Abs($Bytes)
     }
     else {
-        $displayBytes = [Math]::Max(0, $Bytes)
+        # Use the Int64 overload so large byte counts (e.g., multi-GB totals) don't overflow Int32
+        $displayBytes = [Math]::Max([long]0, $Bytes)
         $valueBytes = $displayBytes
     }
 
