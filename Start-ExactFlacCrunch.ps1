@@ -1439,6 +1439,12 @@ function Fit-DisplayText {
 
     if ($Width -lt 1) { return '' }
     if ($null -eq $Text) { $Text = '' }
+    elseif ($Text.Length -gt 0) {
+        # Keep every rendered UI row physically single-line. Control characters are
+        # zero-width for layout, but if emitted verbatim they still move the cursor
+        # and can force the whole frame to scroll.
+        $Text = [regex]::Replace($Text, '[\x00-\x1F\x7F-\x9F]+', ' ')
+    }
 
     $currentWidth = Get-DisplayTextWidth -Text $Text
     if ($currentWidth -le $Width) {
@@ -1581,20 +1587,21 @@ function Render-InteractiveUi {
         [string]$Banner = ''
     )
 
-    $width = 120
-    $height = 30
+    $frameWidth = 120
+    $frameHeight = 30
     try {
-        $width = [Math]::Max(100, [Console]::WindowWidth - 1)
-        $height = [Math]::Max(24, [Console]::WindowHeight)
+        # Keep one spare column and row so Windows Terminal never auto-wraps at the
+        # last cell and turns a repaint into a scroll.
+        $frameWidth = [Math]::Max(40, [Console]::WindowWidth - 1)
+        $frameHeight = [Math]::Max(12, [Console]::WindowHeight - 1)
     }
     catch { }
 
-    $maxRows = [Math]::Max(18, $height - 1)
-    if ($ForceClear) {
-        try { Clear-Host } catch { }
-    }
-
-    try { [Console]::SetCursorPosition(0, 0) } catch { }
+    $width = [Math]::Max(10, $frameWidth - 2)
+    # Leave one extra guard row inside the viewport. In Windows Terminal, a single
+    # unexpectedly wrapped row in the bottom section can still trigger a scroll if
+    # the frame fully consumes the drawable height.
+    $maxRows = [Math]::Max(2, $frameHeight - 3)
 
     if ($null -eq $RecentEvents) {
         $RecentEvents = [System.Collections.Generic.List[object]]::new()
@@ -1604,13 +1611,73 @@ function Render-InteractiveUi {
     $activeCount = $activeWorkers.Count
 
     $rowsWritten = 0
+    $renderLines = [System.Collections.Generic.List[object]]::new()
+
+    function Get-AnsiForeground {
+        param([ConsoleColor]$Color)
+
+        switch ($Color) {
+            ([ConsoleColor]::Black) { return '30' }
+            ([ConsoleColor]::DarkRed) { return '31' }
+            ([ConsoleColor]::DarkGreen) { return '32' }
+            ([ConsoleColor]::DarkYellow) { return '33' }
+            ([ConsoleColor]::DarkBlue) { return '34' }
+            ([ConsoleColor]::DarkMagenta) { return '35' }
+            ([ConsoleColor]::DarkCyan) { return '36' }
+            ([ConsoleColor]::Gray) { return '37' }
+            ([ConsoleColor]::DarkGray) { return '90' }
+            ([ConsoleColor]::Red) { return '91' }
+            ([ConsoleColor]::Green) { return '92' }
+            ([ConsoleColor]::Yellow) { return '93' }
+            ([ConsoleColor]::Blue) { return '94' }
+            ([ConsoleColor]::Magenta) { return '95' }
+            ([ConsoleColor]::Cyan) { return '96' }
+            ([ConsoleColor]::White) { return '97' }
+            default { return '39' }
+        }
+    }
+
+    function Write-UiBorder {
+        $renderLines.Add([PSCustomObject]@{
+                Text  = ('+' + ('-' * $width) + '+')
+                Color = [ConsoleColor]::DarkGray
+            }) | Out-Null
+    }
+
     function Write-UiLine {
         param(
             [AllowNull()][string]$Text = '',
             [ConsoleColor]$Color = [ConsoleColor]::Gray
         )
         $content = Fit-DisplayText -Text $Text -Width $width -UseEllipsis
-        Write-Host $content -ForegroundColor $Color
+        $renderLines.Add([PSCustomObject]@{
+                Text  = ('|' + $content + '|')
+                Color = $Color
+            }) | Out-Null
+        $script:__uiRowsWritten++
+    }
+
+    function Write-UiSegmentLine {
+        param([Parameter(Mandatory)][object[]]$Segments)
+
+        $fullSegments = [System.Collections.Generic.List[object]]::new()
+        $fullSegments.Add([PSCustomObject]@{
+                Text  = '|'
+                Color = [ConsoleColor]::DarkGray
+            }) | Out-Null
+
+        foreach ($segment in $Segments) {
+            $fullSegments.Add($segment) | Out-Null
+        }
+
+        $fullSegments.Add([PSCustomObject]@{
+                Text  = '|'
+                Color = [ConsoleColor]::DarkGray
+            }) | Out-Null
+
+        $renderLines.Add([PSCustomObject]@{
+                Segments = @($fullSegments)
+            }) | Out-Null
         $script:__uiRowsWritten++
     }
 
@@ -1631,6 +1698,7 @@ function Render-InteractiveUi {
     }
 
     $script:__uiRowsWritten = 0
+    Write-UiBorder
 
     $elapsed = [DateTime]::UtcNow - $RunStartedUtc
     if ($elapsed.Ticks -lt 0) { $elapsed = [TimeSpan]::Zero }
@@ -1675,6 +1743,9 @@ function Render-InteractiveUi {
         else {
             Write-UiLine -Text "  (No successful file conversions yet)" -Color DarkGray
         }
+        for ($i = 1; $i -lt 3; $i++) {
+            Write-UiLine -Text '' -Color DarkGray
+        }
     }
     else {
         $rank = 0
@@ -1685,15 +1756,35 @@ function Render-InteractiveUi {
             Write-UiLine -Text $line -Color $entryColor
             if ($rank -ge 3) { break }
         }
+        for ($i = $rank; $i -lt 3; $i++) {
+            Write-UiLine -Text '' -Color DarkGray
+        }
     }
     Write-UiLine -Text ("-" * $width) -Color DarkGray
 
     $showVerboseTrace = ($null -ne $VerboseMessages -and $VerboseMessages.Count -gt 0)
-    $verboseRows = if ($showVerboseTrace) { 6 } else { 0 }
-    $fixedRows = 22 + $verboseRows
-    $remainingRows = [Math]::Max(6, $maxRows - $fixedRows)
-    $workerRows = [Math]::Min($Workers.Count, [Math]::Max(4, [int][Math]::Floor($remainingRows * 0.45)))
-    $eventRows = [Math]::Max(4, $remainingRows - $workerRows)
+    $workerChromeRows = 3
+    $eventChromeRows = 2
+    $verboseChromeRows = if ($showVerboseTrace) { 2 } else { 0 }
+    $desiredTraceRows = if ($showVerboseTrace) { 4 } else { 0 }
+    $bodyRowsRemaining = [Math]::Max(0, $maxRows - $script:__uiRowsWritten)
+    $workerRows = 0
+    if ($bodyRowsRemaining -gt $workerChromeRows) {
+        $workerRows = [Math]::Min($Workers.Count, $bodyRowsRemaining - $workerChromeRows)
+    }
+    $rowsAfterWorkers = [Math]::Max(0, $bodyRowsRemaining - ($workerChromeRows + $workerRows))
+    $traceRows = 0
+    $showVerboseSection = $false
+    if ($showVerboseTrace -and $rowsAfterWorkers -ge ($eventChromeRows + 1 + $verboseChromeRows + 1)) {
+        $maxTraceRows = $rowsAfterWorkers - ($eventChromeRows + 1 + $verboseChromeRows)
+        if ($maxTraceRows -gt 0) {
+            $showVerboseSection = $true
+            $traceRows = [Math]::Min($desiredTraceRows, $maxTraceRows)
+        }
+    }
+    $rowsForEvents = $rowsAfterWorkers - $(if ($showVerboseSection) { $verboseChromeRows + $traceRows } else { 0 })
+    $showEventSection = ($rowsForEvents -ge ($eventChromeRows + 1))
+    $eventRows = if ($showEventSection) { [Math]::Max(0, $rowsForEvents - $eventChromeRows) } else { 0 }
 
     $wCore = 6
     $wState = 7
@@ -1793,15 +1884,14 @@ function Render-InteractiveUi {
     }
 
     if ($Workers.Count -gt $workerRows) {
-        Write-UiLine -Text ("... {0} more workers not shown (resize taller to view)." -f ($Workers.Count - $workerRows)) -Color DarkGray
+        Write-UiLine -Text ("... {0} more workers not shown (expand to show more; resize taller to view)." -f ($Workers.Count - $workerRows)) -Color DarkGray
     }
     else {
         Write-UiLine -Text ("-" * $width) -Color DarkGray
     }
 
-    if ($showVerboseTrace) {
+    if ($showVerboseSection) {
         Write-UiLine -Text "Verbose Trace (-Verbose)" -Color Yellow
-        $traceRows = [Math]::Max(4, $verboseRows - 2)
         $traceCount = [Math]::Min($traceRows, $VerboseMessages.Count)
         for ($i = 0; $i -lt $traceCount; $i++) {
             Write-UiLine -Text ([string]$VerboseMessages[$i]) -Color DarkYellow
@@ -1812,76 +1902,197 @@ function Render-InteractiveUi {
         Write-UiLine -Text ("-" * $width) -Color DarkGray
     }
 
-    $wTime = 8
-    $wStat = 6
-    $wTry2 = 7
-    $wComp = 13
-    $wSaved = 12
-    $wHash = 10
-    $eventFixed = $wTime + $wStat + $wTry2 + $wComp + $wSaved + $wHash
-    $eventSep = 7
-    $wTextTotal = [Math]::Max(34, $width - ($eventFixed + $eventSep))
-    $wFile = [int][Math]::Floor($wTextTotal * 0.52)
-    if ($wFile -lt 18) { $wFile = 18 }
-    if ($wFile -gt ($wTextTotal - 18)) { $wFile = $wTextTotal - 18 }
-    $wDetail = $wTextTotal - $wFile
+    if ($showEventSection) {
+        $wTime = 8
+        $wStat = 6
+        $wTry2 = 7
+        $wComp = 13
+        $wSaved = 12
+        $wHash = 10
+        $eventFixed = $wTime + $wStat + $wTry2 + $wComp + $wSaved + $wHash
+        $eventSep = 7
+        $minFullEventTextWidth = 36
+        $fullEventWidthNeeded = $eventFixed + $eventSep + $minFullEventTextWidth
+        $useCompactEvents = ($width -lt $fullEventWidthNeeded)
+        $wTextTotal = 0
+        $wFile = 0
+        $wDetail = 0
 
-    Write-UiLine -Text "Recent Results (latest first)" -Color Cyan
-    Write-UiLine -Text (('Time'.PadRight($wTime) + '|' +
-            'Status'.PadRight($wStat) + '|' +
-            'Attempt'.PadRight($wTry2) + '|' +
-            'Compression %'.PadRight($wComp) + '|' +
-            'Saved'.PadRight($wSaved) + '|' +
-            'Verify'.PadRight($wHash) + '|' +
-            'File'.PadRight($wFile) + '|' +
-            'Detail'.PadRight($wDetail))) -Color DarkCyan
+        if (-not $useCompactEvents) {
+            $wTextTotal = $width - ($eventFixed + $eventSep)
+            $wFile = [int][Math]::Floor($wTextTotal * 0.52)
+            if ($wFile -lt 18) { $wFile = 18 }
+            if ($wFile -gt ($wTextTotal - 18)) { $wFile = $wTextTotal - 18 }
+            $wDetail = $wTextTotal - $wFile
+        }
 
-    $rowsToPrint = [Math]::Min($eventRows, $RecentEvents.Count)
-    for ($i = 0; $i -lt $rowsToPrint; $i++) {
-        $row = $RecentEvents[$i]
-        $statusColor = Get-StatusColor -Status $row.Status
-        $cmpColor = Get-CompressionColor -CompressionPct $row.CompressionPct
-        $savedColor = $cmpColor
-        $verificationDisplay = Format-VerificationText -Verification ([string]$row.Verification)
-        $verificationColor = Get-VerificationColor -Verification $row.Verification
-        $timeText = Fit-DisplayText -Text ([string]$row.Time) -Width $wTime
-        $statusText = Fit-DisplayText -Text ([string]$row.Status) -Width $wStat
-        $attemptText = Fit-DisplayText -Text ([string]$row.Attempt) -Width $wTry2
-        $cmpText = Fit-DisplayText -Text ([string]$row.CompressionPct) -Width $wComp
-        $savedText = Fit-DisplayText -Text ([string]$row.Saved) -Width $wSaved
-        $verifyText = Fit-DisplayText -Text $verificationDisplay -Width $wHash -UseEllipsis
-        $fileText = Fit-DisplayText -Text ([string]$row.File) -Width $wFile -UseEllipsis
-        $detailText = Fit-DisplayText -Text ([string]$row.Detail) -Width $wDetail -UseEllipsis
+        if ($useCompactEvents) {
+            Write-UiLine -Text "Recent Results (compact)" -Color Cyan
+            Write-UiLine -Text "Time     Status Attempt File / Detail" -Color DarkCyan
+        }
+        else {
+            Write-UiLine -Text "Recent Results (latest first)" -Color Cyan
+            Write-UiLine -Text (('Time'.PadRight($wTime) + '|' +
+                    'Status'.PadRight($wStat) + '|' +
+                    'Attempt'.PadRight($wTry2) + '|' +
+                    'Compression %'.PadRight($wComp) + '|' +
+                    'Saved'.PadRight($wSaved) + '|' +
+                    'Verify'.PadRight($wHash) + '|' +
+                    'File'.PadRight($wFile) + '|' +
+                    'Detail'.PadRight($wDetail))) -Color DarkCyan
+        }
 
-        Write-Host $timeText -NoNewline -ForegroundColor DarkGray
-        Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $statusText -NoNewline -ForegroundColor $statusColor
-        Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $attemptText -NoNewline -ForegroundColor Gray
-        Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $cmpText -NoNewline -ForegroundColor $cmpColor
-        Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $savedText -NoNewline -ForegroundColor $savedColor
-        Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $verifyText -NoNewline -ForegroundColor $verificationColor
-        Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $fileText -NoNewline -ForegroundColor Gray
-        Write-Host '|' -NoNewline -ForegroundColor DarkGray
-        Write-Host $detailText -ForegroundColor DarkGray
-        $script:__uiRowsWritten++
-    }
+        $rowsToPrint = [Math]::Min($eventRows, $RecentEvents.Count)
+        for ($i = 0; $i -lt $rowsToPrint; $i++) {
+            $row = $RecentEvents[$i]
+            $statusColor = Get-StatusColor -Status $row.Status
+            $cmpColor = Get-CompressionColor -CompressionPct $row.CompressionPct
+            $savedColor = $cmpColor
+            $verificationDisplay = Format-VerificationText -Verification ([string]$row.Verification)
+            $verificationColor = Get-VerificationColor -Verification $row.Verification
+            if ($useCompactEvents) {
+                $compactText = "{0} {1} {2} {3} | {4}" -f [string]$row.Time, [string]$row.Status, [string]$row.Attempt, [string]$row.File, [string]$row.Detail
+                Write-UiLine -Text $compactText -Color $statusColor
+            }
+            else {
+                $timeText = Fit-DisplayText -Text ([string]$row.Time) -Width $wTime
+                $statusText = Fit-DisplayText -Text ([string]$row.Status) -Width $wStat
+                $attemptText = Fit-DisplayText -Text ([string]$row.Attempt) -Width $wTry2
+                $cmpText = Fit-DisplayText -Text ([string]$row.CompressionPct) -Width $wComp
+                $savedText = Fit-DisplayText -Text ([string]$row.Saved) -Width $wSaved
+                $verifyText = Fit-DisplayText -Text $verificationDisplay -Width $wHash -UseEllipsis
+                $fileText = Fit-DisplayText -Text ([string]$row.File) -Width $wFile -UseEllipsis
+                $detailText = Fit-DisplayText -Text ([string]$row.Detail) -Width $wDetail -UseEllipsis
 
-    for ($i = $rowsToPrint; $i -lt $eventRows; $i++) {
-        Write-UiLine -Text '' -Color DarkGray
+                Write-UiSegmentLine -Segments @(
+                    [PSCustomObject]@{
+                        Text  = $timeText
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $statusText
+                        Color = $statusColor
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $attemptText
+                        Color = [ConsoleColor]::Gray
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $cmpText
+                        Color = $cmpColor
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $savedText
+                        Color = $savedColor
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $verifyText
+                        Color = $verificationColor
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $fileText
+                        Color = [ConsoleColor]::Gray
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $detailText
+                        Color = [ConsoleColor]::DarkGray
+                    }
+                )
+            }
+        }
+
+        for ($i = $rowsToPrint; $i -lt $eventRows; $i++) {
+            Write-UiLine -Text '' -Color DarkGray
+        }
     }
 
     $rowsWritten = $script:__uiRowsWritten
-    $targetRows = [Math]::Max($rowsWritten, $PreviousRows)
-    for ($i = $rowsWritten; $i -lt $targetRows; $i++) {
-        Write-Host ''.PadRight($width)
+    for ($i = $rowsWritten; $i -lt $maxRows; $i++) {
+        Write-UiLine -Text '' -Color DarkGray
     }
 
-    return [Math]::Min($maxRows, $targetRows)
+    Write-UiBorder
+
+    $esc = [char]27
+    $buffer = [System.Text.StringBuilder]::new()
+    [void]$buffer.Append($esc).Append('[H')
+    if ($ForceClear) {
+        [void]$buffer.Append($esc).Append('[J')
+    }
+    for ($i = 0; $i -lt $renderLines.Count; $i++) {
+        $line = $renderLines[$i]
+        if (($line.PSObject.Properties.Name -contains 'Segments') -and $null -ne $line.Segments) {
+            foreach ($segment in $line.Segments) {
+                $ansiColor = Get-AnsiForeground -Color $segment.Color
+                [void]$buffer.Append($esc).Append('[').Append($ansiColor).Append('m')
+                [void]$buffer.Append([string]$segment.Text)
+            }
+            [void]$buffer.Append($esc).Append('[0m')
+        }
+        else {
+            $ansiColor = Get-AnsiForeground -Color $line.Color
+            [void]$buffer.Append($esc).Append('[').Append($ansiColor).Append('m')
+            [void]$buffer.Append([string]$line.Text)
+            [void]$buffer.Append($esc).Append('[0m')
+        }
+        if ($i -lt ($renderLines.Count - 1)) {
+            [void]$buffer.Append("`r`n")
+        }
+    }
+
+    [Console]::Write($buffer.ToString())
+    return $maxRows
+}
+
+function Sync-ConsoleBufferToWindow {
+    try {
+        $windowWidth = [Console]::WindowWidth
+        $windowHeight = [Console]::WindowHeight
+        if ($windowWidth -lt 1 -or $windowHeight -lt 1) { return }
+
+        if ([Console]::BufferWidth -lt $windowWidth) {
+            [Console]::BufferWidth = $windowWidth
+        }
+        if ([Console]::BufferHeight -lt $windowHeight) {
+            [Console]::BufferHeight = $windowHeight
+        }
+
+        if ([Console]::BufferHeight -ne $windowHeight) {
+            [Console]::BufferHeight = $windowHeight
+        }
+        if ([Console]::BufferWidth -ne $windowWidth) {
+            [Console]::BufferWidth = $windowWidth
+        }
+    }
+    catch { }
 }
 
 function Push-RecentEvent {
@@ -1920,7 +2131,7 @@ function Push-RecentEvent {
             Detail         = $Detail
         })
 
-    if ($List.Count -gt 25) { $List.RemoveRange(25, $List.Count - 25) }
+    if ($List.Count -gt 250) { $List.RemoveRange(250, $List.Count - 250) }
 }
 
 function Add-FinalLogEvent {
@@ -2408,8 +2619,9 @@ ForEach-Object {
 
 $fileScanErrors = @()
 $files = @(
-    Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +fileScanErrors -Filter *.flac
-) | Sort-Object -Property @{ Expression = 'Length'; Descending = $true }, @{ Expression = 'FullName'; Descending = $false }
+    Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +fileScanErrors -Filter *.flac |
+    Sort-Object -Property @{ Expression = 'Length'; Descending = $true }, @{ Expression = 'FullName'; Descending = $false }
+)
 
 $permissionScanPaths = @(
     @($cleanupScanErrors) + @($fileScanErrors) |
@@ -2439,9 +2651,10 @@ if ($permissionScanPaths.Count -gt 0) {
 
 $totalFiles = $files.Count
 if ($totalFiles -eq 0) {
-    Write-RunLog -Level INFO -Message "No FLAC files found. Exiting."
+    $noFlacMessage = "No FLAC files found under: $RootFolder"
+    Write-RunLog -Level WARN -Message $noFlacMessage
     Flush-RunLog -Force
-    Write-Host "No FLAC files found. Exiting."
+    Write-Host ("ERROR: {0}" -f $noFlacMessage) -ForegroundColor Red
     return
 }
 
@@ -2521,7 +2734,12 @@ $workers = for ($i = 0; $i -lt $maxWorkers; $i++) {
 
 $interactive = ($Host.Name -eq 'ConsoleHost')
 if ($interactive) {
-    try { [Console]::CursorVisible = $false; Clear-Host } catch { $interactive = $false }
+    try {
+        [Console]::CursorVisible = $false
+        Clear-Host
+        Sync-ConsoleBufferToWindow
+    }
+    catch { $interactive = $false }
 }
 $script:UiInteractiveMode = $interactive
 
@@ -2590,7 +2808,6 @@ $progressCache = @{}
 $lastUiFrameUtc = [DateTime]::MinValue
 $uiFrameInterval = [TimeSpan]::FromMilliseconds(250)
 $lastUiRenderRows = 0
-$lastUiSizeKey = ''
 $uiBanner = ''
 $uiDirty = $interactive
 
@@ -2656,12 +2873,7 @@ try {
 
         if ($interactive) {
             $nowUtc = [DateTime]::UtcNow
-            $sizeKey = ''
-            try { $sizeKey = '{0}x{1}' -f [Console]::WindowWidth, [Console]::WindowHeight } catch { }
-            $sizeChanged = ($sizeKey -ne $lastUiSizeKey)
-            if ($sizeChanged) { $lastUiSizeKey = $sizeKey }
-
-            if ($uiDirty -or $sizeChanged -or (($nowUtc - $lastUiFrameUtc) -ge $uiFrameInterval)) {
+            if ($uiDirty -or (($nowUtc - $lastUiFrameUtc) -ge $uiFrameInterval)) {
                 $lastUiRenderRows = Render-InteractiveUi `
                     -AlbumName $albumName `
                     -RunStartedUtc $runStartedUtc `
@@ -2691,7 +2903,6 @@ try {
                     -PngToolStatus $pngToolStatus `
                     -JpegToolStatus $jpegToolStatus `
                     -PreviousRows $lastUiRenderRows `
-                    -ForceClear:$sizeChanged `
                     -Banner $uiBanner
                 $lastUiFrameUtc = $nowUtc
                 $uiDirty = $false
