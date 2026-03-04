@@ -3428,7 +3428,7 @@ Write-SummaryLine -Label 'Padding Trim' -Value (Format-Bytes $totalPaddingTrimSa
 Write-SummaryLine -Label 'Padding Files' -Value ("{0}" -f $paddingTrimFiles) -ValueColor $paddingColor
 Write-SummaryLine -Label 'Artwork Net/Raw' -Value ("{0} / {1}" -f (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes)) -ValueColor $artworkColor
 Write-SummaryLine -Label 'Artwork Files/Blk' -Value ("{0}/{1}" -f $artworkOptimizedFiles, $artworkOptimizedBlocks) -ValueColor $artworkColor
-Write-SummaryLine -Label 'Avg / Success' -Value ("{0} | {1}" -f (Format-Percent -Value $successRatePct), (Format-Bytes $avgSavedPerSuccessBytes)) -ValueColor Gray
+Write-SummaryLine -Label 'Success / Avg' -Value ("{0} | {1}" -f (Format-Percent -Value $successRatePct), (Format-Bytes $avgSavedPerSuccessBytes)) -ValueColor Gray
 Write-Host "Top 3 Compression:"
 if ($topCompression.Count -eq 0) {
     if ($successful -gt 0) {
