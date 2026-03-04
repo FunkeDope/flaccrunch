@@ -120,6 +120,16 @@ function Format-LabelValue {
     return ("{0}: {1}" -f $Label.PadRight($LabelWidth), $Value)
 }
 
+function Format-EacValueLine {
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value,
+        [int]$LabelWidth = 18
+    )
+
+    return ("     {0} {1}" -f $Label.PadRight($LabelWidth), $Value)
+}
+
 function Write-SummaryLine {
     param(
         [Parameter(Mandatory)][string]$Label,
@@ -157,6 +167,26 @@ function Format-Elapsed {
         return ('{0}d {1:00}:{2:00}:{3:00}' -f $Elapsed.Days, $Elapsed.Hours, $Elapsed.Minutes, $Elapsed.Seconds)
     }
     return ('{0:00}:{1:00}:{2:00}' -f [int]$Elapsed.TotalHours, $Elapsed.Minutes, $Elapsed.Seconds)
+}
+
+function Format-EacLogDateTime {
+    param([Parameter(Mandatory)][DateTime]$Value)
+
+    return $Value.ToString('d. MMMM yyyy, H:mm', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-TextSha256 {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+        $hashBytes = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '')
+    }
+    finally {
+        $sha.Dispose()
+    }
 }
 
 function Get-SafeName {
@@ -1329,6 +1359,17 @@ function Format-HashForUi {
     return ('{0}...{1}' -f $h.Substring(0, 10), $h.Substring($h.Length - 6))
 }
 
+function Format-HashForLog {
+    param(
+        [AllowNull()][string]$Hash,
+        [Parameter(Mandatory)][string]$NullHash
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Hash)) { return 'N/A' }
+    if ($Hash -eq $NullHash) { return 'NULL-EMBEDDED' }
+    return $Hash.ToLowerInvariant()
+}
+
 function Truncate-Text {
     param(
         [AllowNull()][string]$Text,
@@ -1882,6 +1923,192 @@ function Push-RecentEvent {
     if ($List.Count -gt 25) { $List.RemoveRange(25, $List.Count - 25) }
 }
 
+function Add-FinalLogEvent {
+    param(
+        [Parameter(Mandatory)][object]$List,
+        [Parameter(Mandatory)][ValidateSet('OK', 'RETRY', 'FAIL', 'CANCELED')][string]$EventType,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$File,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$FullPath,
+        [Parameter(Mandatory)][string]$Attempt,
+        [string]$Verification = 'N/A',
+        [string]$EmbeddedHash = 'N/A',
+        [string]$CalcPreHash = 'N/A',
+        [string]$CalcPostHash = 'N/A',
+        [string]$OrigBytes = 'N/A',
+        [string]$NewBytes = 'N/A',
+        [string]$SavedBytes = 'N/A',
+        [string]$SavedPct = 'N/A',
+        [string]$AudioSavedBytes = 'N/A',
+        [string]$MetadataSummary = '',
+        [string]$FailureReason = ''
+    )
+
+    if ($null -eq $List) { throw 'Add-FinalLogEvent: event list is null.' }
+    if (-not ($List -is [System.Collections.Generic.List[object]])) {
+        throw ("Add-FinalLogEvent: expected List[object], got {0}" -f $List.GetType().FullName)
+    }
+
+    $List.Add([PSCustomObject]@{
+            Timestamp       = Get-Date
+            File            = $File
+            FullPath        = $FullPath
+            Attempt         = $Attempt
+            EventType       = $EventType
+            Verification    = $Verification
+            EmbeddedHash    = $EmbeddedHash
+            CalcPreHash     = $CalcPreHash
+            CalcPostHash    = $CalcPostHash
+            OrigBytes       = $OrigBytes
+            NewBytes        = $NewBytes
+            SavedBytes      = $SavedBytes
+            SavedPct        = $SavedPct
+            AudioSavedBytes = $AudioSavedBytes
+            MetadataSummary = $MetadataSummary
+            FailureReason   = $FailureReason
+        }) | Out-Null
+}
+
+function New-EfcStatusReportLines {
+    param(
+        [Parameter(Mandatory)][int]$Successful,
+        [Parameter(Mandatory)][int]$Failed,
+        [Parameter(Mandatory)][int]$Pending,
+        [Parameter(Mandatory)][bool]$RunCanceled
+    )
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if ($Successful -gt 0) {
+        $lines.Add((" {0} file(s) processed successfully" -f $Successful)) | Out-Null
+    }
+    if ($Failed -gt 0) {
+        $lines.Add((" {0} file(s) failed" -f $Failed)) | Out-Null
+    }
+    if ($Pending -gt 0) {
+        $lines.Add((" {0} file(s) pending" -f $Pending)) | Out-Null
+    }
+    if ($lines.Count -eq 0) {
+        $lines.Add(' 0 file(s) processed') | Out-Null
+    }
+
+    $lines.Add('') | Out-Null
+    if ($RunCanceled -and $Pending -gt 0) {
+        $lines.Add('Processing canceled by user') | Out-Null
+    }
+    elseif ($Failed -gt 0) {
+        $lines.Add('Some files could not be verified') | Out-Null
+    }
+    elseif ($Successful -gt 0 -and $Pending -eq 0) {
+        $lines.Add('All files processed successfully') | Out-Null
+    }
+    else {
+        $lines.Add('Processing complete') | Out-Null
+    }
+
+    $lines.Add('') | Out-Null
+    if ($Failed -gt 0 -or ($RunCanceled -and $Pending -gt 0)) {
+        $lines.Add('There were errors') | Out-Null
+    }
+    else {
+        $lines.Add('No errors occurred') | Out-Null
+    }
+    $lines.Add('') | Out-Null
+    $lines.Add('End of status report') | Out-Null
+
+    return $lines
+}
+
+function New-EfcFinalLogText {
+    param(
+        [Parameter(Mandatory)][string]$AlbumName,
+        [Parameter(Mandatory)][string]$RootFolder,
+        [Parameter(Mandatory)][DateTime]$RunStartedLocal,
+        [Parameter(Mandatory)][DateTime]$FinishedLocal,
+        [Parameter(Mandatory)][int]$MaxWorkers,
+        [Parameter(Mandatory)][int]$MaxAttemptsPerFile,
+        [Parameter(Mandatory)][int]$TotalFiles,
+        [Parameter(Mandatory)][int]$Processed,
+        [Parameter(Mandatory)][int]$Successful,
+        [Parameter(Mandatory)][int]$Failed,
+        [Parameter(Mandatory)][int]$Pending,
+        [Parameter(Mandatory)][bool]$RunCanceled,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Events,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TopCompression
+    )
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('Exact Flac Cruncher') | Out-Null
+    $lines.Add('') | Out-Null
+    $lines.Add(("EFC processing logfile from {0}" -f (Format-EacLogDateTime -Value $FinishedLocal))) | Out-Null
+    $lines.Add('') | Out-Null
+    $lines.Add($AlbumName) | Out-Null
+    $lines.Add('') | Out-Null
+    $lines.Add((Format-EacValueLine -Label 'Source folder' -Value $RootFolder)) | Out-Null
+    $lines.Add((Format-EacValueLine -Label 'Run started' -Value (Format-EacLogDateTime -Value $RunStartedLocal))) | Out-Null
+    $lines.Add((Format-EacValueLine -Label 'Run finished' -Value (Format-EacLogDateTime -Value $FinishedLocal))) | Out-Null
+    $lines.Add((Format-EacValueLine -Label 'Worker threads' -Value ("{0}" -f $MaxWorkers))) | Out-Null
+    $lines.Add((Format-EacValueLine -Label 'Retry limit' -Value ("{0}" -f $MaxAttemptsPerFile))) | Out-Null
+    $lines.Add((Format-EacValueLine -Label 'Files discovered' -Value ("{0}" -f $TotalFiles))) | Out-Null
+    $lines.Add('') | Out-Null
+
+    foreach ($event in $Events) {
+        $lines.Add('File') | Out-Null
+        $lines.Add('') | Out-Null
+        $lines.Add(("     Filename {0}" -f $event.FullPath)) | Out-Null
+        $lines.Add('') | Out-Null
+        $lines.Add((Format-EacValueLine -Label 'Logged at' -Value (Format-EacLogDateTime -Value $event.Timestamp))) | Out-Null
+        $lines.Add((Format-EacValueLine -Label 'Attempt' -Value $event.Attempt)) | Out-Null
+        $lines.Add((Format-EacValueLine -Label 'Verification' -Value $event.Verification)) | Out-Null
+
+        if ($event.EventType -eq 'OK') {
+            $lines.Add((Format-EacValueLine -Label 'Original size' -Value $event.OrigBytes)) | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Compressed size' -Value $event.NewBytes)) | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Net saved' -Value ("{0} ({1})" -f $event.SavedBytes, $event.SavedPct))) | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Audio delta' -Value $event.AudioSavedBytes)) | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Embedded MD5' -Value $event.EmbeddedHash)) | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Calculated pre MD5' -Value $event.CalcPreHash)) | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Calculated post MD5' -Value $event.CalcPostHash)) | Out-Null
+            if (-not [string]::IsNullOrWhiteSpace($event.MetadataSummary) -and $event.MetadataSummary -ne 'none') {
+                $lines.Add((Format-EacValueLine -Label 'Metadata cleanup' -Value $event.MetadataSummary)) | Out-Null
+            }
+            $lines.Add('     Copy OK') | Out-Null
+        }
+        elseif ($event.EventType -eq 'RETRY') {
+            $lines.Add('     Copy aborted') | Out-Null
+            $lines.Add('     Retry scheduled') | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Reason' -Value $event.FailureReason)) | Out-Null
+        }
+        elseif ($event.EventType -eq 'CANCELED') {
+            $lines.Add('     Copy aborted') | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Reason' -Value $event.FailureReason)) | Out-Null
+        }
+        else {
+            $lines.Add('     Copy failed') | Out-Null
+            $lines.Add((Format-EacValueLine -Label 'Reason' -Value $event.FailureReason)) | Out-Null
+        }
+
+        $lines.Add('') | Out-Null
+    }
+
+    foreach ($statusLine in (New-EfcStatusReportLines -Successful $Successful -Failed $Failed -Pending $Pending -RunCanceled:$RunCanceled)) {
+        $lines.Add($statusLine) | Out-Null
+    }
+
+    if ($TopCompression.Count -gt 0) {
+        $lines.Add('') | Out-Null
+        $lines.Add('---- EFC Compression Notes') | Out-Null
+        $lines.Add('') | Out-Null
+        $rank = 0
+        foreach ($entry in $TopCompression) {
+            $rank++
+            $lines.Add((Format-TopCompressionLine -Rank $rank -Entry $entry)) | Out-Null
+        }
+    }
+
+    $body = [string]::Join([Environment]::NewLine, $lines)
+    $checksumLine = "==== Log checksum {0} ====" -f (Get-TextSha256 -Text $body)
+    return ($body + [Environment]::NewLine + [Environment]::NewLine + $checksumLine)
+}
+
 function Stop-ActiveJobsAndCleanup {
     param([Parameter(Mandatory)][object[]]$Workers)
 
@@ -2264,6 +2491,7 @@ $nullHash = '00000000000000000000000000000000'
 
 $compressionResults = [System.Collections.Generic.List[object]]::new()
 $failedResults = [System.Collections.Generic.List[object]]::new()
+$finalLogEvents = [System.Collections.Generic.List[object]]::new()
 
 $recentEvents = [System.Collections.Generic.List[object]]::new()
 for ($i = 1; $i -le 25; $i++) {
@@ -2761,6 +2989,21 @@ try {
                                 $detailParts.Add($artDetailText) | Out-Null
                             }
                             $detailText = [string]::Join(' | ', $detailParts)
+                            Add-FinalLogEvent -List $finalLogEvents `
+                                -EventType 'OK' `
+                                -File $job.Name `
+                                -FullPath $job.Original `
+                                -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
+                                -Verification $verification `
+                                -EmbeddedHash (Format-HashForLog -Hash $job.EmbeddedHash -NullHash $nullHash) `
+                                -CalcPreHash (Format-HashForLog -Hash $job.PreCalcHash -NullHash $nullHash) `
+                                -CalcPostHash (Format-HashForLog -Hash $postCalcHash -NullHash $nullHash) `
+                                -OrigBytes (Format-Bytes $job.OrigSize) `
+                                -NewBytes (Format-Bytes $newSize) `
+                                -SavedBytes (Format-Bytes $saved) `
+                                -SavedPct ("{0:N2}%" -f $savedPct) `
+                                -AudioSavedBytes (Format-Bytes $audioNetSaved -Signed) `
+                                -MetadataSummary $artSummary
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'OK' `
                                 -File $job.Name `
@@ -2836,6 +3079,18 @@ try {
                             }
                             else { 'MISMATCH' }
                             $beforeAfter = if ($newSize -gt 0) { ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) } else { ("{0} -> N/A" -f (Format-Bytes $job.OrigSize)) }
+                            Add-FinalLogEvent -List $finalLogEvents `
+                                -EventType 'RETRY' `
+                                -File $job.Name `
+                                -FullPath $job.Original `
+                                -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
+                                -Verification $verification `
+                                -EmbeddedHash (Format-HashForLog -Hash $job.EmbeddedHash -NullHash $nullHash) `
+                                -CalcPreHash (Format-HashForLog -Hash $job.PreCalcHash -NullHash $nullHash) `
+                                -CalcPostHash (Format-HashForLog -Hash $postCalcHash -NullHash $nullHash) `
+                                -OrigBytes (Format-Bytes $job.OrigSize) `
+                                -NewBytes $(if ($newSize -gt 0) { Format-Bytes $newSize } else { 'N/A' }) `
+                                -FailureReason $failureReason
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'RETRY' `
                                 -File $job.Name `
@@ -2860,6 +3115,18 @@ try {
                             }
                             else { 'MISMATCH' }
                             $beforeAfter = if ($newSize -gt 0) { ("{0} -> {1}" -f (Format-Bytes $job.OrigSize), (Format-Bytes $newSize)) } else { ("{0} -> N/A" -f (Format-Bytes $job.OrigSize)) }
+                            Add-FinalLogEvent -List $finalLogEvents `
+                                -EventType 'FAIL' `
+                                -File $job.Name `
+                                -FullPath $job.Original `
+                                -Attempt ("{0}/{1}" -f $job.Attempt, $maxAttemptsPerFile) `
+                                -Verification $verification `
+                                -EmbeddedHash (Format-HashForLog -Hash $job.EmbeddedHash -NullHash $nullHash) `
+                                -CalcPreHash (Format-HashForLog -Hash $job.PreCalcHash -NullHash $nullHash) `
+                                -CalcPostHash (Format-HashForLog -Hash $postCalcHash -NullHash $nullHash) `
+                                -OrigBytes (Format-Bytes $job.OrigSize) `
+                                -NewBytes $(if ($newSize -gt 0) { Format-Bytes $newSize } else { 'N/A' }) `
+                                -FailureReason $failureReason
                             Push-RecentEvent -List $recentEvents `
                                 -Status 'FAIL' `
                                 -File $job.Name `
@@ -2980,6 +3247,16 @@ try {
                         $failureReason = "Could not start conversion | Path: {0} | Detail: {1}" -f $original, $_.Exception.Message
                     }
 
+                    Add-FinalLogEvent -List $finalLogEvents `
+                        -EventType 'FAIL' `
+                        -File $queueItem.Name `
+                        -FullPath $original `
+                        -Attempt ("{0}/{1}" -f $queueItem.Attempts, $maxAttemptsPerFile) `
+                        -Verification 'MISMATCH' `
+                        -EmbeddedHash (Format-HashForLog -Hash $nullHash -NullHash $nullHash) `
+                        -CalcPreHash (Format-HashForLog -Hash $null -NullHash $nullHash) `
+                        -CalcPostHash (Format-HashForLog -Hash $null -NullHash $nullHash) `
+                        -FailureReason $failureReason
                     Push-RecentEvent -List $recentEvents `
                         -Status 'FAIL' `
                         -File $queueItem.Name `
@@ -3093,49 +3370,33 @@ if ($failedResults.Count -gt 0) {
     [string]::Join([Environment]::NewLine, $failedLines) | Out-File -LiteralPath $failedListPath -Encoding UTF8
 }
 
-$summaryLines = [System.Collections.Generic.List[string]]::new()
-$summaryLines.Add(("=" * 79)) | Out-Null
-$summaryLines.Add("SUMMARY: $albumName") | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Done/OK/Fail/Pend' -Value ("{0}/{1}/{2}/{3}" -f $processed, $successful, $failed, $pending))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Files/Attempts/Rate' -Value ("{0}/{1}/{2:N2}%%" -f $totalFiles, $conversionAttempts, $successRatePct))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Elapsed' -Value $totalElapsedText)) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Size In -> Out' -Value ("{0} -> {1}" -f (Format-Bytes $totalOriginalBytes), (Format-Bytes $totalNewBytes)))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Saved Total' -Value ("{0} | {1} of original" -f (Format-Bytes $totalSavedBytes), (Format-Percent -Value $overallReductionPct)))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Audio Delta' -Value ("{0} | {1} of original" -f (Format-Bytes $audioSavedBytes -Signed), (Format-Percent -Value $audioReductionPct)))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Metadata Net' -Value (Format-Bytes $metadataNetSavedBytes))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Padding Trim' -Value (Format-Bytes $totalPaddingTrimSavedBytes))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Padding Files' -Value (Format-HeaderCount -Value $paddingTrimFiles))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Artwork Net/Raw' -Value ("{0} / {1}" -f (Format-Bytes $totalArtworkSavedBytes), (Format-Bytes $totalArtworkRawSavedBytes)))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Artwork Files/Blk' -Value (Format-CountPair -Left $artworkOptimizedFiles -Right $artworkOptimizedBlocks))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Avg / Success' -Value ("{0} | {1}" -f (Format-Percent -Value $successRatePct), (Format-Bytes $avgSavedPerSuccessBytes)))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Failed Log' -Value $(if ($failedListPath) { $failedListPath } else { '(none)' }))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Final Log' -Value $efcFinalLogPath)) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Verbose Log' -Value $(if ($verboseLogFile) { $verboseLogFile } else { '(disabled)' }))) | Out-Null
-$summaryLines.Add("Top 3 Compression:") | Out-Null
-
-if ($topCompression.Count -eq 0) {
-    if ($successful -gt 0) {
-        $summaryLines.Add("  (No net-positive file reductions)") | Out-Null
-    }
-    else {
-        $summaryLines.Add("  (No successful file conversions)") | Out-Null
-    }
-}
-else {
-    $rank = 0
-    foreach ($entry in $topCompression) {
-        $rank++
-        $summaryLines.Add((Format-TopCompressionLine -Rank $rank -Entry $entry)) | Out-Null
-    }
+if ($runCanceled -and $pending -gt 0) {
+    Add-FinalLogEvent -List $finalLogEvents `
+        -EventType 'CANCELED' `
+        -File '(run canceled)' `
+        -FullPath $RootFolder `
+        -Attempt '-' `
+        -Verification 'N/A' `
+        -FailureReason ("Run canceled with {0} pending file(s)" -f $pending)
 }
 
-$summaryLines.Add((Format-LabelValue -Label 'Finished' -Value ($finishedLocal.ToString('o')))) | Out-Null
-$summaryLines.Add((Format-LabelValue -Label 'Logs' -Value $runLogDir)) | Out-Null
-$summaryLines.Add(("=" * 79)) | Out-Null
-
-$summaryText = [string]::Join([Environment]::NewLine, $summaryLines)
+$summaryText = New-EfcFinalLogText `
+    -AlbumName $albumName `
+    -RootFolder $RootFolder `
+    -RunStartedLocal $runStartedLocal `
+    -FinishedLocal $finishedLocal `
+    -MaxWorkers $maxWorkers `
+    -MaxAttemptsPerFile $maxAttemptsPerFile `
+    -TotalFiles $totalFiles `
+    -Processed $processed `
+    -Successful $successful `
+    -Failed $failed `
+    -Pending $pending `
+    -RunCanceled:$runCanceled `
+    -Events $finalLogEvents.ToArray() `
+    -TopCompression $topCompression
 Flush-RunLog -Force
-$summaryText | Out-File -LiteralPath $logFile -Append -Encoding UTF8
+([Environment]::NewLine + $summaryText) | Out-File -LiteralPath $logFile -Append -Encoding UTF8
 $summaryText | Out-File -LiteralPath $efcFinalLogPath -Encoding UTF8
 
 Write-Host ""
@@ -3181,8 +3442,38 @@ else {
     $rank = 0
     foreach ($entry in $topCompression) {
         $rank++
-        Write-Host (Format-TopCompressionLine -Rank $rank -Entry $entry)
+        $entryColor = Get-CompressionColor -CompressionPct ("{0:N2}%" -f $entry.SavedPct)
+        Write-Host (Format-TopCompressionLine -Rank $rank -Entry $entry) -ForegroundColor $entryColor
     }
+}
+Write-Host ""
+foreach ($statusLine in (New-EfcStatusReportLines -Successful $successful -Failed $failed -Pending $pending -RunCanceled:$runCanceled)) {
+    if ([string]::IsNullOrWhiteSpace($statusLine)) {
+        Write-Host ""
+        continue
+    }
+
+    if ($statusLine -eq 'There were errors') {
+        Write-Host $statusLine -ForegroundColor Yellow
+        continue
+    }
+
+    if ($statusLine -eq 'No errors occurred') {
+        Write-Host $statusLine -ForegroundColor Green
+        continue
+    }
+
+    if ($statusLine -eq 'All files processed successfully') {
+        Write-Host $statusLine -ForegroundColor Green
+        continue
+    }
+
+    if ($statusLine -eq 'Processing canceled by user' -or $statusLine -eq 'Some files could not be verified') {
+        Write-Host $statusLine -ForegroundColor Yellow
+        continue
+    }
+
+    Write-Host $statusLine
 }
 if ($failedListPath) {
     Write-SummaryLine -Label 'Failed List' -Value $failedListPath -ValueColor Gray
