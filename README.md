@@ -91,4 +91,4 @@ shell:sendto
 ### 3. Use it
 
 - In Explorer, select one or more music folders.
-- Right-click -> `Send to` -> `FLAC Crunc`.
+- Right-click -> `Send to` -> `FLAC Crunch`.
