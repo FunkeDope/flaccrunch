@@ -73,24 +73,7 @@ Custom logs and thread count:
 
 Use this when you want to right-click one or more folders in Explorer and run EFC from **Send to**.
 
-### 1. Create a wrapper command file
-
-Create `ExactFlacCrunch-SendTo.cmd` (for example in `C:\Tools`) with:
-
-```bat
-@echo off
-setlocal
-set "SCRIPT=C:\git\flaccrunch\Start-ExactFlacCrunch.ps1"
-set "LOGROOT=%USERPROFILE%\Desktop\EFC-logs"
-"C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" -Path %* -LogFolder "%LOGROOT%"
-```
-
-Notes:
-
-- `%*` forwards all selected items, so multi-folder SendTo works.
-- This script expects folders; sending files will fail validation.
-
-### 2. Open the SendTo folder
+### 1. Open the SendTo folder
 
 Press `Win+R`, run:
 
@@ -98,17 +81,14 @@ Press `Win+R`, run:
 shell:sendto
 ```
 
-### 3. Add a shortcut
+### 2. Add a shortcut
 
-- Create a shortcut in that folder pointing to `ExactFlacCrunch-SendTo.cmd`.
-- Rename it to something like `Exact FLAC Cruncher`.
+- Create a shortcut in that folder pointing to `pwsh.exe` (Powershell 7).
+- Rename it to something like `FLAC Crunch`.
+- Add these arguments: `-ExecutionPolicy Bypass -noexit -file "C:\Path\To\Script\Start-ExactFlacCrunch.ps1`
+- Shortcut target should look like: `"C:\Program Files\PowerShell\7\pwsh.exe" -ExecutionPolicy Bypass -noexit -file "C:\Scripts\Start-ExactFlacCrunch.ps1"`
 
-### 4. Use it
+### 3. Use it
 
 - In Explorer, select one or more music folders.
-- Right-click -> `Send to` -> `Exact FLAC Cruncher`.
-
-### 5. Optional customization
-
-- Change `LOGROOT` in the `.cmd` file to your preferred log location.
-- If PowerShell 7 is installed in a different path, update the `pwsh.exe` path.
+- Right-click -> `Send to` -> `FLAC Crunc`.
