@@ -23,8 +23,8 @@ Requires `flac` and `metaflac` in PATH.
 param(
     [Parameter(Mandatory = $false, Position = 0, ValueFromRemainingArguments = $true)]
     [Alias('Path')]
-    [AllowEmptyCollection()]
-    [string[]]$RootFolder,
+    [AllowNull()]
+    $RootFolder,
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
@@ -2409,7 +2409,7 @@ $script:IsWindowsHost = ($env:OS -eq 'Windows_NT')
 
 # Collect all root folders: $RootFolder is [string[]] with ValueFromRemainingArguments, so all positional args land here
 $RootFolders = [System.Collections.Generic.List[string]]::new()
-foreach ($a in $RootFolder) {
+foreach ($a in @($RootFolder)) {
     $trimmed = ([string]$a).TrimEnd('\', '/')
     if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
         $RootFolders.Add($trimmed) | Out-Null

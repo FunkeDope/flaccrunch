@@ -1,78 +1,114 @@
 # Exact FLAC Cruncher
 
-`Start-ExactFlacCrunch.ps1` scans a folder for `.flac` files, recompresses them, verifies the audio, and replaces the original file only after the check passes.
+`Start-ExactFlacCrunch.ps1` recompresses FLAC files in place, verifies decoded-audio integrity, and replaces originals only after verification succeeds.
 
 ## Requirements
 
-- Windows PowerShell
-- `flac` in `PATH`
-- `metaflac` in `PATH`
-- Read and write access to the target music folder
+- PowerShell 7+ (`pwsh`)
+- `flac` and `metaflac` available in `PATH` or in the script folder
+- Read/write access to every target folder
 
-Optional:
+Optional album-art tools:
 
-- `oxipng` or `pngcrush` in `PATH` for PNG album art optimization
-- `jpegtran` in `PATH` for JPEG album art optimization
-
-The optional tools can also be placed in the same folder as `Start-ExactFlacCrunch.ps1`.
-
-## What Must Be In PATH
-
-Required:
-
-- `flac`
-- `metaflac`
-
-Optional:
-
-- `oxipng` or `pngcrush`
-- `jpegtran`
-
-If `flac` or `metaflac` are not available, the script stops.
-
-## Installation
-
-1. Install the FLAC command line tools so `flac.exe` and `metaflac.exe` are available.
-2. Make sure those executables are in your system `PATH`, or place them beside `Start-ExactFlacCrunch.ps1`.
-3. Optional: install `oxipng`, `pngcrush`, or `jpegtran` if you want album art optimization.
-4. Save `Start-ExactFlacCrunch.ps1` somewhere you can run it from PowerShell.
+- `oxipng` or `pngcrush` (PNG)
+- `jpegtran` (JPEG)
 
 ## Parameters
 
-### `-RootFolder`
+### `-RootFolder` (alias: `-Path`)
 
-Required. This is the folder the script scans recursively for `.flac` files.
+- One or more folder paths to scan recursively for `.flac` files.
+- Multi-input is supported by passing multiple positional paths or multiple values to `-Path`.
+- Files are not valid input; each input must be a directory.
 
 ### `-LogFolder`
 
-Optional. This is the parent folder for log output.
+- Parent log directory.
+- Default: `Desktop\EFC-logs`
+- Fallback if Desktop is unavailable: `%USERPROFILE%\EFC-logs`
 
-If not provided, the script uses:
+### `-Threads` (alias: `-Workers`)
 
-`Desktop\EFC-logs`
-
-If no Desktop folder is available, it falls back to:
-
-`%USERPROFILE%\EFC-logs`
+- Optional worker count (`1..Int32.MaxValue`).
+- Default: logical CPU count minus one (minimum 1), capped by number of FLAC files found.
 
 ## Usage
 
-Run from PowerShell:
+Single folder:
 
 ```powershell
-.\Start-ExactFlacCrunch.ps1 -RootFolder "D:\Music"
+.\Start-ExactFlacCrunch.ps1 "D:\Music"
 ```
 
-With a custom log folder:
+Multiple folders:
 
 ```powershell
-.\Start-ExactFlacCrunch.ps1 -RootFolder "D:\Music" -LogFolder "D:\Logs\FlacCrunch"
+.\Start-ExactFlacCrunch.ps1 "D:\Music\A" "D:\Music\B" "E:\Archive\FLAC"
 ```
 
-## Basic Behavior
+Equivalent explicit multi-input form:
 
-- The script scans `-RootFolder` recursively for `.flac` files.
-- It creates logs in a timestamped subfolder under `-LogFolder`.
-- It uses `.tmp` files during conversion.
-- It checks the converted audio before replacing the original file.
-- If verification fails, the original file is not replaced.
+```powershell
+.\Start-ExactFlacCrunch.ps1 -Path "D:\Music\A","D:\Music\B"
+```
+
+Custom logs and thread count:
+
+```powershell
+.\Start-ExactFlacCrunch.ps1 "D:\Music" -LogFolder "D:\Logs\EFC" -Threads 8
+```
+
+## Behavior Summary
+
+- Recursively scans all provided folders for `.flac`.
+- Uses `.tmp` files for conversion work.
+- Verifies decoded audio before replacement.
+- Preserves timestamps/ACLs when replacing originals.
+- Writes:
+  - run log
+  - EFC-style final log
+  - failed-files log (only when failures occur)
+
+## Quick Tutorial: Add `shell:sendto` Support
+
+Use this when you want to right-click one or more folders in Explorer and run EFC from **Send to**.
+
+### 1. Create a wrapper command file
+
+Create `ExactFlacCrunch-SendTo.cmd` (for example in `C:\Tools`) with:
+
+```bat
+@echo off
+setlocal
+set "SCRIPT=C:\git\flaccrunch\Start-ExactFlacCrunch.ps1"
+set "LOGROOT=%USERPROFILE%\Desktop\EFC-logs"
+"C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" -Path %* -LogFolder "%LOGROOT%"
+```
+
+Notes:
+
+- `%*` forwards all selected items, so multi-folder SendTo works.
+- This script expects folders; sending files will fail validation.
+
+### 2. Open the SendTo folder
+
+Press `Win+R`, run:
+
+```text
+shell:sendto
+```
+
+### 3. Add a shortcut
+
+- Create a shortcut in that folder pointing to `ExactFlacCrunch-SendTo.cmd`.
+- Rename it to something like `Exact FLAC Cruncher`.
+
+### 4. Use it
+
+- In Explorer, select one or more music folders.
+- Right-click -> `Send to` -> `Exact FLAC Cruncher`.
+
+### 5. Optional customization
+
+- Change `LOGROOT` in the `.cmd` file to your preferred log location.
+- If PowerShell 7 is installed in a different path, update the `pwsh.exe` path.
