@@ -21,10 +21,10 @@ Requires `flac` and `metaflac` in PATH.
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $false, Position = 0)]
+    [Parameter(Mandatory = $false, Position = 0, ValueFromRemainingArguments = $true)]
     [Alias('Path')]
-    [ValidateNotNullOrEmpty()]
-    [string]$RootFolder,
+    [AllowEmptyCollection()]
+    [string[]]$RootFolder,
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
@@ -2407,17 +2407,28 @@ $script:IsWindowsHost = ($env:OS -eq 'Windows_NT')
 
 # Preconditions
 
-if ([string]::IsNullOrWhiteSpace($RootFolder) -and $args.Count -gt 0) {
-    $RootFolder = [string]$args[0]
+# Collect all root folders: $RootFolder is [string[]] with ValueFromRemainingArguments, so all positional args land here
+$RootFolders = [System.Collections.Generic.List[string]]::new()
+foreach ($a in $RootFolder) {
+    $trimmed = ([string]$a).TrimEnd('\', '/')
+    if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+        $RootFolders.Add($trimmed) | Out-Null
+    }
 }
 
-if ([string]::IsNullOrWhiteSpace($RootFolder)) {
+if ($RootFolders.Count -eq 0) {
     throw "RootFolder is required. Provide a folder path as the first argument."
 }
 
-if (-not (Test-Path -LiteralPath $RootFolder)) { throw "RootFolder does not exist: $RootFolder" }
+foreach ($folder in $RootFolders) {
+    if (-not (Test-Path -LiteralPath $folder)) { throw "RootFolder does not exist: $folder" }
+    $folderItem = Get-Item -LiteralPath $folder -Force
+    if (-not $folderItem.PSIsContainer) { throw "RootFolder is not a directory: $folder" }
+}
+
+$isMultiFolder = $RootFolders.Count -gt 1
+$RootFolder = $RootFolders[0]
 $rootItem = Get-Item -LiteralPath $RootFolder -Force
-if (-not $rootItem.PSIsContainer) { throw "RootFolder is not a directory: $RootFolder" }
 
 $toolBaseDirectory = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($toolBaseDirectory)) {
@@ -2438,8 +2449,14 @@ $metaflacCmd = Resolve-RequiredTool -Names @('metaflac', 'metaflac.exe') -BaseDi
 $pngOptimizerCmd = Resolve-OptionalTool -Names @('oxipng', 'oxipng.exe', 'pngcrush', 'pngcrush.exe') -BaseDirectory $toolBaseDirectory
 $jpegOptimizerCmd = Resolve-OptionalTool -Names @('jpegtran', 'jpegtran.exe') -BaseDirectory $toolBaseDirectory
 
-$albumName = Get-RootDisplayName -Path $RootFolder -Item $rootItem
-$safeAlbumName = Get-SafeName -Value $albumName
+if ($isMultiFolder) {
+    $albumName = '[multifolder]'
+    $safeAlbumName = '_multifolder_'
+} else {
+    $albumName = Get-RootDisplayName -Path $RootFolder -Item $rootItem
+    $safeAlbumName = Get-SafeName -Value $albumName
+}
+$targetDisplay = if ($isMultiFolder) { "[multifolder] ({0} folders)" -f $RootFolders.Count } else { $RootFolder }
 $runStartedLocal = Get-Date
 $runStartedUtc = $runStartedLocal.ToUniversalTime()
 $runStamp = $runStartedLocal.ToString('yyyyMMdd-HHmmss-fff')
@@ -2466,7 +2483,7 @@ if (Test-VerboseUiEnabled) {
     $script:VerboseLogFile = $verboseLogFile
     @"
 Exact Flac Cruncher Verbose Trace
-Target: $RootFolder
+Target: $targetDisplay
 Run Logs: $runLogDir
 Started: $($runStartedLocal.ToString('o'))
 ===================================================================
@@ -2475,7 +2492,7 @@ Started: $($runStartedLocal.ToString('o'))
 
 @"
 Exact Flac Cruncher v20250225.codex5.3
-Target: $RootFolder
+Target: $targetDisplay
 Log Root: $LogFolder
 Run Logs: $runLogDir
 Started: $($runStartedLocal.ToString('o'))
@@ -2595,12 +2612,14 @@ function Start-DecodedAudioHashJob {
     }
 }
 
-# Check root folder writability only. Subfolders may vary, so permission issues below are handled per item.
-$rootWritable = Test-DirectoryWriteAccess -Path $RootFolder
-if (-not $rootWritable) {
-    $warningText = "Root folder failed a temp write test. The run may still work for readable/writable subfolders, but permission-related failures will be reported clearly."
+# Check root folder writability. Subfolders may vary, so permission issues below are handled per item.
+$nonWritableFolders = @($RootFolders | Where-Object { -not (Test-DirectoryWriteAccess -Path $_) })
+if ($nonWritableFolders.Count -gt 0) {
+    $warningText = "One or more root folders failed a temp write test. The run may still work for readable/writable subfolders, but permission-related failures will be reported clearly."
     Write-Host $warningText -ForegroundColor Yellow
-    Write-RunLog -Level WARN -Message ("{0} | Path: {1}" -f $warningText, $RootFolder)
+    foreach ($nwf in $nonWritableFolders) {
+        Write-RunLog -Level WARN -Message ("{0} | Path: {1}" -f $warningText, $nwf)
+    }
 
     $continueAnswer = Read-Host "Continue anyway? [y/N]"
     if ($continueAnswer -notmatch '^(?i)y(?:es)?$') {
@@ -2615,12 +2634,14 @@ if (-not $rootWritable) {
 # Delete *.tmp only when same-base *.flac exists (track.tmp <-> track.flac).
 
 $cleanupScanErrors = @()
-Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +cleanupScanErrors |
-Where-Object { $_.Extension -ieq '.tmp' } |
-ForEach-Object {
-    $maybeFlac = [System.IO.Path]::ChangeExtension($_.FullName, '.flac')
-    if (Test-Path -LiteralPath $maybeFlac) {
-        Safe-RemoveFile -Path $_.FullName
+foreach ($folder in $RootFolders) {
+    Get-ChildItem -LiteralPath $folder -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +cleanupScanErrors |
+    Where-Object { $_.Extension -ieq '.tmp' } |
+    ForEach-Object {
+        $maybeFlac = [System.IO.Path]::ChangeExtension($_.FullName, '.flac')
+        if (Test-Path -LiteralPath $maybeFlac) {
+            Safe-RemoveFile -Path $_.FullName
+        }
     }
 }
 
@@ -2628,7 +2649,9 @@ ForEach-Object {
 
 $fileScanErrors = @()
 $files = @(
-    Get-ChildItem -LiteralPath $RootFolder -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +fileScanErrors -Filter *.flac |
+    $RootFolders | ForEach-Object {
+        Get-ChildItem -LiteralPath $_ -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +fileScanErrors -Filter *.flac
+    } |
     Sort-Object -Property @{ Expression = 'Length'; Descending = $true }, @{ Expression = 'FullName'; Descending = $false }
 )
 
@@ -2660,7 +2683,7 @@ if ($permissionScanPaths.Count -gt 0) {
 
 $totalFiles = $files.Count
 if ($totalFiles -eq 0) {
-    $noFlacMessage = "No FLAC files found under: $RootFolder"
+    $noFlacMessage = if ($isMultiFolder) { "No FLAC files found across {0} folders" -f $RootFolders.Count } else { "No FLAC files found under: $RootFolder" }
     Write-RunLog -Level WARN -Message $noFlacMessage
     Flush-RunLog -Force
     Write-Host ("ERROR: {0}" -f $noFlacMessage) -ForegroundColor Red
@@ -3594,7 +3617,7 @@ if ($runCanceled -and $pending -gt 0) {
     Add-FinalLogEvent -List $finalLogEvents `
         -EventType 'CANCELED' `
         -File '(run canceled)' `
-        -FullPath $RootFolder `
+        -FullPath $targetDisplay `
         -Attempt '-' `
         -Verification 'N/A' `
         -FailureReason ("Run canceled with {0} pending file(s)" -f $pending)
@@ -3602,7 +3625,7 @@ if ($runCanceled -and $pending -gt 0) {
 
 $summaryText = New-EfcFinalLogText `
     -AlbumName $albumName `
-    -RootFolder $RootFolder `
+    -RootFolder $targetDisplay `
     -RunStartedLocal $runStartedLocal `
     -FinishedLocal $finishedLocal `
     -MaxWorkers $maxWorkers `
