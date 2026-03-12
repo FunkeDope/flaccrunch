@@ -21,7 +21,8 @@ Requires `flac` and `metaflac` in PATH.
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false, Position = 0)]
+    [Alias('Path')]
     [ValidateNotNullOrEmpty()]
     [string]$RootFolder,
 
@@ -2405,6 +2406,14 @@ function Stop-ActiveJobsAndCleanup {
 $script:IsWindowsHost = ($env:OS -eq 'Windows_NT')
 
 # Preconditions
+
+if ([string]::IsNullOrWhiteSpace($RootFolder) -and $args.Count -gt 0) {
+    $RootFolder = [string]$args[0]
+}
+
+if ([string]::IsNullOrWhiteSpace($RootFolder)) {
+    throw "RootFolder is required. Provide a folder path as the first argument."
+}
 
 if (-not (Test-Path -LiteralPath $RootFolder)) { throw "RootFolder does not exist: $RootFolder" }
 $rootItem = Get-Item -LiteralPath $RootFolder -Force
