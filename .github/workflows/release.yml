@@ -5,6 +5,8 @@ on:
     tags:
       - 'v*'
       - 'V*'
+    branches:
+      - 'claude/**'
   workflow_dispatch:
 
 permissions:
@@ -65,8 +67,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'FlacCrunch ${{ github.ref_name }}'
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('FlacCrunch {0}', github.ref_name) || '' }}
           releaseBody: |
             Cross-platform lossless FLAC recompression with album art optimization.
             FLAC encoding is built natively into the app — no external dependencies required.
