@@ -5,13 +5,21 @@
 ## Requirements
 
 - PowerShell 7+ (`pwsh`)
-- `flac` and `metaflac` available in `PATH` or in the script folder
+- `flac` and `metaflac` available in `PATH` or in the script folder (or use `-InstallDeps` to auto-install)
 - Read/write access to every target folder
 
 Optional album-art tools:
 
 - `oxipng` or `pngcrush` (PNG)
 - `jpegtran` (JPEG)
+
+## Platform Support
+
+Works on both **Windows** and **Linux** with PowerShell 7+.
+
+**Windows**: Uses `winget` or `choco` for dependency installation.
+
+**Linux**: Detects `apt-get`, `dnf`, or `pacman` for dependency installation. Log files default to `$HOME/EFC-logs` (no Desktop folder required).
 
 ## Parameters
 
@@ -24,13 +32,27 @@ Optional album-art tools:
 ### `-LogFolder`
 
 - Parent log directory.
-- Default: `Desktop\EFC-logs`
-- Fallback if Desktop is unavailable: `%USERPROFILE%\EFC-logs`
+- Windows default: `Desktop\EFC-logs` (falls back to `%USERPROFILE%\EFC-logs`)
+- Linux default: `$HOME/EFC-logs`
 
 ### `-Threads` (alias: `-Workers`)
 
 - Optional worker count (`1..Int32.MaxValue`).
 - Default: logical CPU count minus one (minimum 1), capped by number of FLAC files found.
+
+### `-InstallDeps`
+
+- Automatically install required (`flac`, `metaflac`) and optional (`oxipng`, `jpegtran`) dependencies using the system package manager.
+- Windows: `winget` (preferred) or `choco` (fallback).
+- Linux: `apt-get`, `dnf`, or `pacman`.
+
+### `-RunTests`
+
+- Run the built-in Pester test suite and exit. Installs Pester 5+ if not present.
+
+### `-ShowVersion`
+
+- Display version information and exit.
 
 ## Usage
 
@@ -40,16 +62,22 @@ Single folder:
 .\Start-ExactFlacCrunch.ps1 "D:\Music"
 ```
 
+Linux:
+
+```powershell
+./Start-ExactFlacCrunch.ps1 ~/Music
+```
+
 Multiple folders:
 
 ```powershell
 .\Start-ExactFlacCrunch.ps1 "D:\Music\A" "D:\Music\B" "E:\Archive\FLAC"
 ```
 
-Equivalent explicit multi-input form:
+Auto-install dependencies and run:
 
 ```powershell
-.\Start-ExactFlacCrunch.ps1 -Path "D:\Music\A","D:\Music\B"
+.\Start-ExactFlacCrunch.ps1 "D:\Music" -InstallDeps
 ```
 
 Custom logs and thread count:
@@ -68,6 +96,25 @@ Custom logs and thread count:
   - run log
   - EFC-style final log
   - failed-files log (only when failures occur)
+
+## Development
+
+### Running Tests
+
+```powershell
+# Via build script
+./build.ps1
+
+# Via the script itself
+./Start-ExactFlacCrunch.ps1 -RunTests
+
+# Direct Pester invocation
+Invoke-Pester ./Tests -Output Detailed
+```
+
+### CI
+
+GitHub Actions runs tests on both Ubuntu and Windows. See `.github/workflows/ci.yml`.
 
 ## Quick Tutorial: Add `shell:sendto` Support
 
