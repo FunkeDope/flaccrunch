@@ -29,7 +29,8 @@ Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
 Write-Host "`nRunning Pester tests..." -ForegroundColor Cyan
 $config = [PesterConfiguration]::Default
 $config.Run.Path = Join-Path $PSScriptRoot 'Tests'
-$config.Run.Exit = $true
+$config.Run.Exit = $false
+$config.Run.PassThru = $true
 $config.Output.Verbosity = 'Detailed'
 $config.TestResult.Enabled = $true
 $config.TestResult.OutputPath = Join-Path $PSScriptRoot 'TestResults.xml'

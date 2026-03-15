@@ -17,5 +17,8 @@ Thumbs.db
 .env
 .env.local
 
+# Test output
+TestResults.xml
+
 # Tauri
 src-tauri/gen/
