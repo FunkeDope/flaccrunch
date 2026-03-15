@@ -70,22 +70,24 @@ jobs:
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('FlacCrunch {0}', github.ref_name) || '' }}
           releaseBody: |
-            Cross-platform lossless FLAC recompression with album art optimization.
-            FLAC encoding is built natively into the app — no external dependencies required.
+            Cross-platform FLAC optimizer with GUI and CLI. Losslessly recompresses at level 8 exhaustive, verifies decoded-audio MD5 integrity, and optimizes embedded album art. Statically linked libFLAC — no external binaries required.
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full release notes.
 
             ## Downloads
-            - **Windows**: `FlacCrunch.exe` portable · `.msi` installer · NSIS `.exe` setup
-            - **macOS**: `.dmg` disk image
-            - **Linux**: `.deb` package or `.AppImage`
-            - **Android**: `.apk`
+            | Platform | File |
+            |----------|------|
+            | Windows (portable) | `FlacCrunch.exe` |
+            | Windows (installer) | `.msi` or NSIS `.exe` |
+            | macOS (Apple Silicon) | `.dmg` |
+            | Linux | `.deb` or `.AppImage` |
+            | Android | `.apk` |
 
-            ## Features
-            - Lossless FLAC recompression at maximum compression (level 8, exhaustive)
-            - Decoded-audio MD5 verification for data integrity
-            - PNG optimization (oxipng) and JPEG optimization (jpegtran)
-            - Multi-threaded processing with configurable worker count
-            - Real-time progress dashboard
-            - Detailed logging with EFC-format summary
+            ## Quick start (CLI)
+            ```
+            FlacCrunch.exe -silent "D:\Music"
+            FlacCrunch.exe -silent -threads 4 "D:\Music" "E:\More"
+            ```
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
