@@ -1,0 +1,244 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: linux
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: macos-arm
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: macos-intel
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            flac
+
+      - name: Install FLAC (macOS)
+        if: runner.os == 'macOS'
+        run: brew install flac
+
+      - name: Install FLAC (Windows)
+        if: runner.os == 'Windows'
+        run: choco install flac -y
+
+      - name: Download & place sidecar binaries
+        shell: bash
+        run: |
+          # Find flac and metaflac in PATH and copy to binaries dir
+          FLAC_PATH=$(which flac || echo "")
+          METAFLAC_PATH=$(which metaflac || echo "")
+
+          if [ -n "$FLAC_PATH" ]; then
+            cp "$FLAC_PATH" "src-tauri/binaries/flac-${{ matrix.target }}$([ '${{ runner.os }}' = 'Windows' ] && echo '.exe' || echo '')"
+          fi
+          if [ -n "$METAFLAC_PATH" ]; then
+            cp "$METAFLAC_PATH" "src-tauri/binaries/metaflac-${{ matrix.target }}$([ '${{ runner.os }}' = 'Windows' ] && echo '.exe' || echo '')"
+          fi
+
+          # Ensure they're executable
+          chmod +x src-tauri/binaries/* 2>/dev/null || true
+          ls -la src-tauri/binaries/
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'FlacCrunch ${{ github.ref_name }}'
+          releaseBody: |
+            Cross-platform lossless FLAC recompression with album art optimization.
+
+            ## Downloads
+            - **Windows**: `.msi` installer or `.exe` setup
+            - **macOS**: `.dmg` disk image
+            - **Linux**: `.deb` package or `.AppImage`
+
+            ## Features
+            - Lossless FLAC recompression at maximum compression (level 8, exhaustive)
+            - Decoded-audio MD5 verification for data integrity
+            - PNG optimization (oxipng) and JPEG optimization (jpegtran)
+            - Multi-threaded processing with configurable worker count
+            - Real-time progress dashboard
+            - Detailed logging with EFC-format summary
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaccrunch-${{ matrix.artifact }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
+          if-no-files-found: ignore
+
+  build-android:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            flac
+
+      - name: Cross-compile FLAC for Android
+        run: |
+          # Download FLAC source and cross-compile for Android architectures
+          sudo apt-get install -y cmake
+          git clone --depth 1 --branch 1.4.3 https://github.com/xiph/flac.git /tmp/flac-src
+          cd /tmp/flac-src
+
+          for ARCH_ABI in arm64-v8a armeabi-v7a x86_64 x86; do
+            case $ARCH_ABI in
+              arm64-v8a)    TARGET=aarch64-linux-android ;;
+              armeabi-v7a)  TARGET=armv7-linux-androideabi ;;
+              x86_64)       TARGET=x86_64-linux-android ;;
+              x86)          TARGET=i686-linux-android ;;
+            esac
+
+            mkdir -p build-$ARCH_ABI && cd build-$ARCH_ABI
+            cmake .. \
+              -DCMAKE_TOOLCHAIN_FILE=$NDK_HOME/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=$ARCH_ABI \
+              -DANDROID_NATIVE_API_LEVEL=24 \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DBUILD_PROGRAMS=ON \
+              -DBUILD_EXAMPLES=OFF \
+              -DBUILD_TESTING=OFF \
+              -DBUILD_DOCS=OFF \
+              -DINSTALL_MANPAGES=OFF
+            cmake --build . -j$(nproc)
+
+            # Copy binaries with Tauri sidecar naming convention
+            cp src/flac/flac $GITHUB_WORKSPACE/src-tauri/binaries/flac-$TARGET
+            cp src/metaflac/metaflac $GITHUB_WORKSPACE/src-tauri/binaries/metaflac-$TARGET
+            chmod +x $GITHUB_WORKSPACE/src-tauri/binaries/flac-$TARGET
+            chmod +x $GITHUB_WORKSPACE/src-tauri/binaries/metaflac-$TARGET
+
+            cd /tmp/flac-src
+          done
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Initialize Tauri Android
+        run: npx tauri android init
+
+      - name: Build Android APK
+        run: npx tauri android build --apk
+        env:
+          NDK_HOME: ${{ env.NDK_HOME }}
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaccrunch-android
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+
+      - name: Upload APK to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Create release if triggered by tag
+  create-release:
+    needs: [build-desktop, build-android]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | head -50
+
+      - name: Release already created by tauri-action
+        run: echo "Release was created by tauri-action in the build-desktop job"

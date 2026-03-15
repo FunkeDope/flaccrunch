@@ -30,8 +30,6 @@ export function ProcessingDashboard({
   topCompression,
   onCancel,
 }: ProcessingDashboardProps) {
-  const isActive = status === "processing" || status === "cancelling";
-
   return (
     <div>
       <Header title="Processing" />
