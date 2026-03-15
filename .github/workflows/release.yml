@@ -133,9 +133,9 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
+      - name: Install Android NDK and SDK Platform
         run: |
-          sdkmanager --install "ndk;27.0.12077973"
+          sdkmanager --install "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
 
       - name: Install Linux dependencies
@@ -153,6 +153,16 @@ jobs:
 
       - name: Initialize Tauri Android project
         run: npx tauri android init
+
+      - name: Configure Android SDK versions for Pixel 9a (API 34+)
+        run: |
+          GRADLE_FILE="src-tauri/gen/android/app/build.gradle.kts"
+          if [ -f "$GRADLE_FILE" ]; then
+            # Set minSdk to 24 (Android 7+), targetSdk/compileSdk to 34 (Android 14)
+            sed -i 's/minSdk = [0-9]*/minSdk = 24/' "$GRADLE_FILE"
+            sed -i 's/targetSdk = [0-9]*/targetSdk = 34/' "$GRADLE_FILE"
+            sed -i 's/compileSdk = [0-9]*/compileSdk = 34/' "$GRADLE_FILE"
+          fi
 
       - name: Build Android APK
         run: npx tauri android build --apk
