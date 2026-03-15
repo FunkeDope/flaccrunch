@@ -1191,6 +1191,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "url",
  "uuid",
  "walkdir",
  "zune-jpeg",

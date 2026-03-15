@@ -90,6 +90,15 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
 
+      - name: Copy standalone exe (Windows only)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          EXE="src-tauri/target/${{ matrix.target }}/release/flaccrunch.exe"
+          if [ -f "$EXE" ]; then
+            cp "$EXE" "src-tauri/target/${{ matrix.target }}/release/flaccrunch-portable.exe"
+          fi
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -100,6 +109,7 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/flaccrunch-portable.exe
           if-no-files-found: ignore
 
   build-android:
@@ -161,6 +171,16 @@ jobs:
             sed -i 's/minSdk = [0-9]*/minSdk = 24/' "$GRADLE_FILE"
             sed -i 's/targetSdk = [0-9]*/targetSdk = 35/' "$GRADLE_FILE"
             sed -i 's/compileSdk = [0-9]*/compileSdk = 35/' "$GRADLE_FILE"
+          fi
+
+      - name: Patch Android permissions into manifest
+        run: |
+          MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            # Insert permission declarations before <application ...>
+            sed -i 's|<application |<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <application |' "$MANIFEST"
+            echo "Patched AndroidManifest.xml:"
+            cat "$MANIFEST"
           fi
 
       - name: Generate signing keystore

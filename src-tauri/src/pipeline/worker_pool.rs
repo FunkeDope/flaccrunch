@@ -89,6 +89,13 @@ pub async fn run_worker_pool(
                 };
                 // Emit enriched event instead of original
                 let _ = app_handle.emit("pipeline-event", &enriched);
+
+                // Android: write the compressed cache file back to the original content URI.
+                #[cfg(target_os = "android")]
+                if file_event.status == crate::state::run_state::FileStatus::OK {
+                    android_write_back(&app_handle, &file_event.file);
+                }
+
                 continue;
             }
             PipelineEvent::WorkerHashComputed { .. } => {
@@ -160,6 +167,41 @@ async fn worker_loop(
         let _ = event_tx
             .send(PipelineEvent::WorkerIdle { worker_id })
             .await;
+    }
+}
+
+/// Android only: if `cache_path` was copied from a content URI, write the (now-compressed)
+/// cache file back to the original URI using the fs plugin's writable file descriptor.
+/// This requires the URI to have been opened with write permission (ACTION_OPEN_DOCUMENT)
+/// or the app to hold MANAGE_EXTERNAL_STORAGE.  Failures are silently ignored so that
+/// the processing result is not affected.
+#[cfg(target_os = "android")]
+fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: &str) {
+    use std::io::Write;
+    use tauri::Manager;
+    use tauri_plugin_dialog::FilePath;
+    use tauri_plugin_fs::{FsExt, OpenOptions};
+
+    let state = app.state::<crate::state::app_state::AppState>();
+    let original_uri = {
+        let map = state.content_uri_map.read().unwrap_or_else(|e| e.into_inner());
+        map.get(cache_path).cloned()
+    };
+    let Some(uri_str) = original_uri else { return };
+
+    let data = match std::fs::read(cache_path) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    if let Ok(url) = url::Url::parse(&uri_str) {
+        let fp = FilePath::Url(url);
+        let mut opts = OpenOptions::new();
+        opts.write(true);
+        opts.truncate(true);
+        if let Ok(mut file) = app.fs().open(fp, opts) {
+            let _ = file.write_all(&data);
+        }
     }
 }
 

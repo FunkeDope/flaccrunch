@@ -120,9 +120,9 @@ export function FolderSelector({
         </div>
       )}
 
-      <div className="action-bar">
+      <div className="action-bar" style={mobile ? { justifyContent: "center" } : undefined}>
         <button
-          className="btn btn-primary btn-full"
+          className={`btn btn-primary${mobile ? "" : " btn-full"}`}
           onClick={onStart}
           disabled={!canStart}
         >

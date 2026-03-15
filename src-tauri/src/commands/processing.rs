@@ -47,9 +47,15 @@ pub async fn start_processing(
     let worker_count = settings.thread_count.min(scan_result.files.len());
     let run_id = uuid::Uuid::new_v4().to_string();
 
-    // Set up logging
+    // Set up logging — non-fatal; on mobile use the app cache directory
     let log_folder = if settings.log_folder.is_empty() {
-        default_log_folder()
+        #[cfg(mobile)]
+        {
+            use tauri::Manager;
+            app.path().app_cache_dir().unwrap_or_else(|_| default_log_folder())
+        }
+        #[cfg(not(mobile))]
+        { default_log_folder() }
     } else {
         PathBuf::from(&settings.log_folder)
     };
@@ -59,16 +65,17 @@ pub async fn start_processing(
     ));
     let _ = std::fs::create_dir_all(&run_log_dir);
 
-    let run_log = RunLog::new(run_log_dir.join("run.log"))
-        .map_err(|e| format!("Failed to create run log: {e}"))?;
-    run_log.log(
-        crate::logging::run_log::LogLevel::Info,
-        &format!(
-            "Starting FlacCrunch: {} files, {} workers",
-            scan_result.files.len(),
-            worker_count
-        ),
-    );
+    // Log creation is non-fatal — if the directory isn't writable (e.g. Android), continue without a log file
+    if let Ok(run_log) = RunLog::new(run_log_dir.join("run.log")) {
+        run_log.log(
+            crate::logging::run_log::LogLevel::Info,
+            &format!(
+                "Starting FlacCrunch: {} files, {} workers",
+                scan_result.files.len(),
+                worker_count
+            ),
+        );
+    }
 
     // Create run state
     let run_state = Arc::new(RunState::new(run_id.clone(), worker_count));

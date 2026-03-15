@@ -71,7 +71,7 @@ pub async fn select_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
 
 /// Convert a dialog FilePath to a usable filesystem path string.
 /// On desktop, FilePath is always a Path variant and works directly.
-/// On Android, FilePath may be a content:// URI that needs to be copied to cache.
+/// On Android, FilePath may be a content:// URI that needs to be resolved.
 fn resolve_filepath(
     #[allow(unused_variables)] app: &tauri::AppHandle,
     fp: FilePath,
@@ -81,14 +81,22 @@ fn resolve_filepath(
         return Ok(path.display().to_string());
     }
 
-    // Content URI (Android) — read via fs plugin and copy to app cache
+    // Content URI (Android)
     #[cfg(target_os = "android")]
     {
+        use crate::state::app_state::AppState;
         use tauri::Manager;
         use tauri_plugin_fs::FsExt;
 
         let uri_str = fp.to_string();
 
+        // For external storage document URIs we can resolve to a real path and
+        // work on the file directly (no cache copy, no write-back needed).
+        if let Some(real_path) = resolve_external_storage_uri(&uri_str) {
+            return Ok(real_path);
+        }
+
+        // Fall back: copy to app cache and remember the original URI for write-back.
         let cache_dir = app
             .path()
             .app_cache_dir()
@@ -97,22 +105,9 @@ fn resolve_filepath(
         std::fs::create_dir_all(&flac_cache)
             .map_err(|e| format!("Failed to create cache dir: {e}"))?;
 
-        // Extract filename from URI or generate one
-        let filename = uri_str
-            .rsplit('/')
-            .next()
-            .unwrap_or("unknown.flac")
-            .split('?')
-            .next()
-            .unwrap_or("unknown.flac");
-        let filename = if filename.ends_with(".flac") || filename.ends_with(".FLAC") {
-            filename.to_string()
-        } else {
-            format!("{filename}.flac")
-        };
+        let filename = extract_filename_from_content_uri(&uri_str);
         let dest = flac_cache.join(&filename);
 
-        // Read content URI via the fs plugin (handles Android content resolver)
         let content = app
             .fs()
             .read(fp)
@@ -120,11 +115,100 @@ fn resolve_filepath(
         std::fs::write(&dest, &content)
             .map_err(|e| format!("Failed to write to cache: {e}"))?;
 
-        return Ok(dest.display().to_string());
+        // Store the mapping for write-back after processing.
+        let cache_path = dest.display().to_string();
+        let state = app.state::<AppState>();
+        let mut map = state.content_uri_map.write().unwrap_or_else(|e| e.into_inner());
+        map.insert(cache_path.clone(), uri_str);
+
+        return Ok(cache_path);
     }
 
     #[cfg(not(target_os = "android"))]
     Err(format!("Cannot resolve file path: {}", fp))
+}
+
+/// For `content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.flac`
+/// resolve to the real filesystem path `/storage/emulated/0/Music/track.flac`.
+/// Returns `None` for any other URI authority (media provider, downloads, etc.).
+#[cfg(target_os = "android")]
+fn resolve_external_storage_uri(uri_str: &str) -> Option<String> {
+    if !uri_str.contains("com.android.externalstorage.documents/document/") {
+        return None;
+    }
+    let encoded = uri_str.split("/document/").nth(1)?;
+    let doc_id = percent_decode(encoded); // e.g. "primary:Music/track.flac"
+    let colon = doc_id.find(':')?;
+    let volume = &doc_id[..colon];
+    let rel = &doc_id[colon + 1..];
+    let base = if volume.eq_ignore_ascii_case("primary") {
+        "/storage/emulated/0".to_string()
+    } else {
+        format!("/storage/{}", volume)
+    };
+    let real_path = format!("{}/{}", base, rel);
+    if std::path::Path::new(&real_path).exists() {
+        Some(real_path)
+    } else {
+        None
+    }
+}
+
+/// Extract a human-readable filename from a content URI by URL-decoding it and
+/// parsing common URI patterns.
+#[cfg(target_os = "android")]
+fn extract_filename_from_content_uri(uri_str: &str) -> String {
+    let decoded = percent_decode(uri_str);
+    // Last path segment after final '/'
+    let last = decoded.rsplit('/').next().unwrap_or("audio");
+    // Strip a leading "primary:" volume prefix that can appear in external storage URIs
+    let name = if let Some(after_colon) = last.strip_prefix(|c: char| c.is_ascii_alphabetic())
+        .and_then(|_| last.find(':'))
+        .map(|i| &last[i + 1..])
+    {
+        // e.g. "primary:track.flac" → "track.flac", or just use what's after the colon
+        after_colon.rsplit('/').next().unwrap_or(after_colon)
+    } else {
+        last
+    };
+    // Ensure it looks like a FLAC filename
+    if name.to_lowercase().ends_with(".flac") && !name.is_empty() {
+        name.to_string()
+    } else {
+        // For opaque IDs like "audio:12345" → "audio-12345.flac"
+        let clean = name.replace(':', "-");
+        format!("{clean}.flac")
+    }
+}
+
+/// Simple percent-decoder (handles %XX sequences).
+#[cfg(target_os = "android")]
+fn percent_decode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let (Some(hi), Some(lo)) = (hex_nibble(b[i + 1]), hex_nibble(b[i + 2])) {
+                out.push((hi << 4 | lo) as char);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+#[cfg(target_os = "android")]
+fn hex_nibble(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// Return whether we're running on mobile (for UI to adapt).
