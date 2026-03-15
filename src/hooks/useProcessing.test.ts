@@ -22,7 +22,13 @@ vi.mock("../lib/tauri", () => ({
 }));
 
 import * as api from "../lib/tauri";
+import type { ScanResult } from "../types/processing";
 import { useProcessing } from "./useProcessing";
+
+const emptyScan: ScanResult = { files: [], permissionErrors: [], totalSize: 0 };
+function fileScan(paths: string[]): ScanResult {
+  return { files: paths.map((p) => ({ path: p, name: p.split("/").pop()!, size: 1000 })), permissionErrors: [], totalSize: paths.length * 1000 };
+}
 
 const mockGetStartupPaths = vi.mocked(api.getStartupPaths);
 const mockSelectFolders = vi.mocked(api.selectFolders);
@@ -36,7 +42,7 @@ beforeEach(() => {
   mockGetStartupPaths.mockResolvedValue([]);
   mockSelectFolders.mockResolvedValue([]);
   mockSelectFiles.mockResolvedValue([]);
-  mockScanFolders.mockResolvedValue({ files: [], totalSize: 0 });
+  mockScanFolders.mockResolvedValue(emptyScan);
   mockStartProcessing.mockResolvedValue("ok");
   mockCancelProcessing.mockResolvedValue(undefined);
 });
@@ -198,7 +204,7 @@ describe("useProcessing — startRun", () => {
 
   it("sets error when no FLAC files found", async () => {
     mockSelectFolders.mockResolvedValue(["/empty"]);
-    mockScanFolders.mockResolvedValue({ files: [], totalSize: 0 });
+    mockScanFolders.mockResolvedValue(emptyScan);
     const { result } = renderHook(() => useProcessing());
 
     // Add folder first, wait for state to settle before calling startRun
@@ -213,7 +219,7 @@ describe("useProcessing — startRun", () => {
 
   it("transitions to processing status when FLAC files found", async () => {
     mockSelectFolders.mockResolvedValue(["/music"]);
-    mockScanFolders.mockResolvedValue({ files: ["/music/a.flac"], totalSize: 1000 });
+    mockScanFolders.mockResolvedValue(fileScan(["/music/a.flac"]));
     const { result } = renderHook(() => useProcessing());
 
     await act(async () => { await result.current.addFolder(); });
@@ -226,7 +232,7 @@ describe("useProcessing — startRun", () => {
 
   it("calls startProcessing with folders and settings", async () => {
     mockSelectFolders.mockResolvedValue(["/music"]);
-    mockScanFolders.mockResolvedValue({ files: ["/music/a.flac"], totalSize: 1000 });
+    mockScanFolders.mockResolvedValue(fileScan(["/music/a.flac"]));
     const { result } = renderHook(() => useProcessing());
 
     await act(async () => { await result.current.addFolder(); });

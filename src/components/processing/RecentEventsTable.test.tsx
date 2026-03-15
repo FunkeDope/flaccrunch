@@ -15,10 +15,12 @@ function makeEvent(overrides: Partial<FileEvent> = {}): FileEvent {
     savedBytes: 200,
     compressionPct: 20,
     artworkSavedBytes: 0,
+    artworkRawSavedBytes: 0,
+    artworkBlocksOptimized: 0,
     detail: "",
-    sourceHash: null,
-    outputHash: null,
-    embeddedMd5: null,
+    sourceHash: undefined,
+    outputHash: undefined,
+    embeddedMd5: undefined,
     ...overrides,
   };
 }
