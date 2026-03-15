@@ -1,141 +1,124 @@
-# Exact FLAC Cruncher
+# FlacCrunch-ng
 
-`Start-ExactFlacCrunch.ps1` recompresses FLAC files in place, verifies decoded-audio integrity, and replaces originals only after verification succeeds.
+A cross-platform FLAC optimizer with a modern desktop UI. Losslessly recompresses FLAC files at maximum compression, verifies decoded audio integrity, and optimizes embedded album art — all with native performance via libFLAC.
 
-## Requirements
+Built with **Tauri v2** (Rust) and **React** (TypeScript).
 
-- PowerShell 7+ (`pwsh`)
-- `flac` and `metaflac` available in `PATH` or in the script folder (or use `-InstallDeps` to auto-install)
-- Read/write access to every target folder
+> The original PowerShell script version is preserved under the [`powershell-original`](../../tree/powershell-original) tag.
 
-Optional album-art tools:
+## Features
 
-- `oxipng` or `pngcrush` (PNG)
-- `jpegtran` (JPEG)
+- **Maximum FLAC compression** — re-encodes at level 8 with exhaustive model search
+- **Audio integrity verification** — MD5 hash comparison of decoded audio before and after; originals are only replaced on match
+- **Album art optimization** — PNG (oxipng) and JPEG (jpegtran) compression, PADDING block removal
+- **Multi-threaded processing** — configurable worker pool (default: CPU count - 1)
+- **Live dashboard** — real-time worker status, compression stats, and file event feed
+- **Comprehensive logging** — run log, EFC-style summary, and failed-file tracking
+- **Light/Dark/System theme** support
 
-## Platform Support
+## Supported Platforms
 
-Works on both **Windows** and **Linux** with PowerShell 7+.
+| Platform | Architecture | Artifact |
+|----------|-------------|----------|
+| Windows  | x86_64      | `.msi`, `.exe` |
+| Linux    | x86_64      | `.deb`, `.AppImage` |
+| macOS    | ARM64       | `.dmg` |
+| Android  | arm64, armv7, x86_64, i686 | `.apk` |
 
-**Windows**: Uses `winget` or `choco` for dependency installation.
+All platforms compile libFLAC natively — no external `flac` binary required.
 
-**Linux**: Detects `apt-get`, `dnf`, or `pacman` for dependency installation. Log files default to `$HOME/EFC-logs` (no Desktop folder required).
+## Building
 
-## Parameters
+### Prerequisites
 
-### `-RootFolder` (alias: `-Path`)
+- **Rust** 1.70+ (stable)
+- **Node.js** 22+
+- **Linux only**: `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `libjavascriptcoregtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`
+- **Android only**: Java 17, Android SDK, Android NDK 27.0
 
-- One or more folder paths to scan recursively for `.flac` files.
-- Multi-input is supported by passing multiple positional paths or multiple values to `-Path`.
-- Files are not valid input; each input must be a directory.
+### Commands
 
-### `-LogFolder`
+```bash
+# Install JS dependencies
+npm ci
 
-- Parent log directory.
-- Windows default: `Desktop\EFC-logs` (falls back to `%USERPROFILE%\EFC-logs`)
-- Linux default: `$HOME/EFC-logs`
+# Development (hot-reload on port 1420)
+npm run dev
 
-### `-Threads` (alias: `-Workers`)
+# Production desktop build
+npm run tauri build
 
-- Optional worker count (`1..Int32.MaxValue`).
-- Default: logical CPU count minus one (minimum 1), capped by number of FLAC files found.
-
-### `-InstallDeps`
-
-- Automatically install required (`flac`, `metaflac`) and optional (`oxipng`, `jpegtran`) dependencies using the system package manager.
-- Windows: `winget` (preferred) or `choco` (fallback).
-- Linux: `apt-get`, `dnf`, or `pacman`.
-
-### `-RunTests`
-
-- Run the built-in Pester test suite and exit. Installs Pester 5+ if not present.
-
-### `-ShowVersion`
-
-- Display version information and exit.
-
-## Usage
-
-Single folder:
-
-```powershell
-.\Start-ExactFlacCrunch.ps1 "D:\Music"
+# Android APK
+npm run tauri android init
+npm run tauri android build --apk
 ```
 
-Linux:
+## Processing Pipeline
 
-```powershell
-./Start-ExactFlacCrunch.ps1 ~/Music
+Each file goes through five stages:
+
+1. **Converting** — decode source FLAC, re-encode at level 8 exhaustive
+2. **Hashing source** — MD5 of original decoded audio
+3. **Hashing output** — MD5 of recompressed decoded audio
+4. **Artwork** — optimize embedded PNG/JPEG, strip PADDING blocks
+5. **Finalizing** — restore metadata, replace original, clean up temp files
+
+Files are only replaced when all hash checks pass.
+
+## UI Overview
+
+- **Folder Selector** — add/remove target folders, start/cancel/reset runs
+- **Overall Progress** — file count and completion percentage
+- **Stats Bar** — live byte savings breakdown (FLAC, metadata, artwork, padding)
+- **Worker Grid** — per-worker status and current file
+- **Recent Events** — last 25 processed files with status and savings
+- **Top Compression** — top 3 files by byte savings
+- **Settings** — thread count, log folder, max retries, theme
+
+## CI/CD
+
+GitHub Actions workflows in `.github/workflows/`:
+
+- **ci.yml** — runs on push/PR to `main`: TypeScript check, Vite build, `cargo test`, `cargo build`
+- **release.yml** — triggers on `v*` tags or manual dispatch: builds desktop installers (Windows, Linux, macOS) and signed Android APKs, uploads as GitHub release assets
+
+## Project Structure
+
 ```
-
-Multiple folders:
-
-```powershell
-.\Start-ExactFlacCrunch.ps1 "D:\Music\A" "D:\Music\B" "E:\Archive\FLAC"
+flaccrunch-ng/
+├── src/                    # React frontend
+│   ├── components/         # UI components (folders, processing, settings)
+│   ├── hooks/              # useProcessing, useSettings, etc.
+│   ├── types/              # TypeScript interfaces
+│   └── lib/                # Tauri API wrapper
+├── src-tauri/
+│   ├── src/
+│   │   ├── lib.rs          # Tauri setup and IPC command handlers
+│   │   ├── pipeline/       # Job queue, worker pool, processing stages
+│   │   ├── flac/           # Encoding, hashing, metadata
+│   │   ├── artwork/        # Album art optimization
+│   │   ├── fs/             # File scanning, temp handling
+│   │   ├── logging/        # Run log, EFC log, failed log
+│   │   └── state/          # App state and settings
+│   ├── Cargo.toml          # Rust dependencies
+│   └── tauri.conf.json     # Tauri configuration
+├── .github/workflows/      # CI and release pipelines
+└── package.json
 ```
-
-Auto-install dependencies and run:
-
-```powershell
-.\Start-ExactFlacCrunch.ps1 "D:\Music" -InstallDeps
-```
-
-Custom logs and thread count:
-
-```powershell
-.\Start-ExactFlacCrunch.ps1 "D:\Music" -LogFolder "D:\Logs\EFC" -Threads 8
-```
-
-## Behavior Summary
-
-- Recursively scans all provided folders for `.flac`.
-- Uses `.tmp` files for conversion work.
-- Verifies decoded audio before replacement.
-- Preserves timestamps/ACLs when replacing originals.
-- Writes:
-  - run log
-  - EFC-style final log
-  - failed-files log (only when failures occur)
 
 ## Development
 
-### Running Tests
+```bash
+# Run frontend type check
+npx tsc --noEmit
 
-```powershell
-# Via build script
-./build.ps1
+# Run backend tests
+cd src-tauri && cargo test
 
-# Via the script itself
-./Start-ExactFlacCrunch.ps1 -RunTests
-
-# Direct Pester invocation
-Invoke-Pester ./Tests -Output Detailed
+# Run frontend dev server only
+npm run dev
 ```
 
-### CI
+## License
 
-GitHub Actions runs tests on both Ubuntu and Windows. See `.github/workflows/ci.yml`.
-
-## Quick Tutorial: Add `shell:sendto` Support
-
-Use this when you want to right-click one or more folders in Explorer and run EFC from **Send to**.
-
-### 1. Open the SendTo folder
-
-Press `Win+R`, run:
-
-```text
-shell:sendto
-```
-
-### 2. Add a shortcut
-
-- Create a shortcut in that folder pointing to `pwsh.exe` (Powershell 7).
-- Rename it to something like `FLAC Crunch`.
-- Add these arguments: `-ExecutionPolicy Bypass -noexit -file "C:\Path\To\Script\Start-ExactFlacCrunch.ps1`
-- Shortcut target should look like: `"C:\Program Files\PowerShell\7\pwsh.exe" -ExecutionPolicy Bypass -noexit -file "C:\Scripts\Start-ExactFlacCrunch.ps1"`
-
-### 3. Use it
-
-- In Explorer, select one or more music folders.
-- Right-click -> `Send to` -> `FLAC Crunch`.
+See repository for license information.
