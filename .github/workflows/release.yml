@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'V*'
   workflow_dispatch:
 
 permissions:
@@ -65,7 +66,6 @@ jobs:
       - name: Download & place sidecar binaries
         shell: bash
         run: |
-          # Find flac and metaflac in PATH and copy to binaries dir
           FLAC_PATH=$(which flac || echo "")
           METAFLAC_PATH=$(which metaflac || echo "")
 
@@ -76,7 +76,6 @@ jobs:
             cp "$METAFLAC_PATH" "src-tauri/binaries/metaflac-${{ matrix.target }}$([ '${{ runner.os }}' = 'Windows' ] && echo '.exe' || echo '')"
           fi
 
-          # Ensure they're executable
           chmod +x src-tauri/binaries/* 2>/dev/null || true
           ls -la src-tauri/binaries/
 
@@ -97,6 +96,7 @@ jobs:
             - **Windows**: `.msi` installer or `.exe` setup
             - **macOS**: `.dmg` disk image
             - **Linux**: `.deb` package or `.AppImage`
+            - **Android**: `.apk` (see assets below)
 
             ## Features
             - Lossless FLAC recompression at maximum compression (level 8, exhaustive)
@@ -160,12 +160,11 @@ jobs:
             libjavascriptcoregtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            flac
+            flac \
+            cmake
 
       - name: Cross-compile FLAC for Android
         run: |
-          # Download FLAC source and cross-compile for Android architectures
-          sudo apt-get install -y cmake
           git clone --depth 1 --branch 1.4.3 https://github.com/xiph/flac.git /tmp/flac-src
           cd /tmp/flac-src
 
@@ -190,7 +189,6 @@ jobs:
               -DINSTALL_MANPAGES=OFF
             cmake --build . -j$(nproc)
 
-            # Copy binaries with Tauri sidecar naming convention
             cp src/flac/flac $GITHUB_WORKSPACE/src-tauri/binaries/flac-$TARGET
             cp src/metaflac/metaflac $GITHUB_WORKSPACE/src-tauri/binaries/metaflac-$TARGET
             chmod +x $GITHUB_WORKSPACE/src-tauri/binaries/flac-$TARGET
@@ -210,35 +208,37 @@ jobs:
         env:
           NDK_HOME: ${{ env.NDK_HOME }}
 
+      - name: Find APK files
+        id: find-apk
+        run: |
+          echo "Searching for APK files..."
+          find src-tauri/gen/android -name "*.apk" -type f 2>/dev/null | tee /tmp/apk-list.txt
+          # Also check common alternative locations
+          find . -name "*.apk" -type f 2>/dev/null | tee -a /tmp/apk-list.txt
+          APK_FILES=$(cat /tmp/apk-list.txt | sort -u | tr '\n' ',')
+          echo "apk_files=$APK_FILES" >> $GITHUB_OUTPUT
+
+      - name: Rename APK for release
+        run: |
+          mkdir -p release-apks
+          # Find all release APKs and copy with clean names
+          find src-tauri/gen/android -name "*.apk" -type f | while read apk; do
+            basename=$(basename "$apk")
+            cp "$apk" "release-apks/FlacCrunch-${{ github.ref_name }}-${basename}"
+          done
+          ls -la release-apks/ || echo "No APKs found in release-apks"
+
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: flaccrunch-android
-          path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          path: release-apks/*.apk
           if-no-files-found: warn
 
       - name: Upload APK to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          files: release-apks/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Create release if triggered by tag
-  create-release:
-    needs: [build-desktop, build-android]
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: List artifacts
-        run: find artifacts -type f | head -50
-
-      - name: Release already created by tauri-action
-        run: echo "Release was created by tauri-action in the build-desktop job"
