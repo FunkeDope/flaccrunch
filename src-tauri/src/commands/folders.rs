@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 /// Open a native folder selection dialog.
 #[tauri::command]
+#[cfg(desktop)]
 pub async fn select_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
@@ -17,6 +18,29 @@ pub async fn select_folders(app: tauri::AppHandle) -> Result<Vec<String>, String
     let folder = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
 
     match folder {
+        Some(path) => Ok(vec![path.to_string()]),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// On mobile, folder picking is not supported by tauri-plugin-dialog.
+/// Fall back to file picking so the app compiles and runs on Android/iOS.
+#[tauri::command]
+#[cfg(mobile)]
+pub async fn select_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    app.dialog()
+        .file()
+        .pick_file(move |file| {
+            let _ = tx.send(file);
+        });
+
+    let file = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
+
+    match file {
         Some(path) => Ok(vec![path.to_string()]),
         None => Ok(Vec::new()),
     }
