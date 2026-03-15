@@ -56,13 +56,13 @@ export function FolderSelector({
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
       >
-        Click to browse or drag folders here
+        Click to select FLAC files
       </div>
 
       {folders.length > 0 && (
         <div className="card">
           <div className="card-header">
-            <h2>Folders ({folders.length})</h2>
+            <h2>Selected ({folders.length})</h2>
           </div>
           <ul className="folder-list">
             {folders.map((folder) => (

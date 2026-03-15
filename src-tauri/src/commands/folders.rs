@@ -1,9 +1,10 @@
 use crate::fs::scanner;
 use std::path::PathBuf;
 
-/// Open a native folder selection dialog.
+/// Open a native file selection dialog for picking FLAC files.
+/// Uses multi-select so users can Ctrl+click multiple files.
+/// Works on both desktop and mobile (folder picking isn't supported on mobile).
 #[tauri::command]
-#[cfg(desktop)]
 pub async fn select_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
@@ -11,42 +12,21 @@ pub async fn select_folders(app: tauri::AppHandle) -> Result<Vec<String>, String
 
     app.dialog()
         .file()
-        .pick_folder(move |folder| {
-            let _ = tx.send(folder);
+        .add_filter("FLAC Audio", &["flac", "FLAC"])
+        .pick_files(move |files| {
+            let _ = tx.send(files);
         });
 
-    let folder = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
+    let files = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
 
-    match folder {
-        Some(path) => Ok(vec![path.to_string()]),
+    match files {
+        Some(paths) => Ok(paths.iter().map(|p| p.to_string()).collect()),
         None => Ok(Vec::new()),
     }
 }
 
-/// On mobile, folder picking is not supported by tauri-plugin-dialog.
-/// Fall back to file picking so the app compiles and runs on Android/iOS.
-#[tauri::command]
-#[cfg(mobile)]
-pub async fn select_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    use tauri_plugin_dialog::DialogExt;
-
-    let (tx, rx) = tokio::sync::oneshot::channel();
-
-    app.dialog()
-        .file()
-        .pick_file(move |file| {
-            let _ = tx.send(file);
-        });
-
-    let file = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
-
-    match file {
-        Some(path) => Ok(vec![path.to_string()]),
-        None => Ok(Vec::new()),
-    }
-}
-
-/// Scan the given folders for FLAC files and return the result.
+/// Scan the given paths for FLAC files and return the result.
+/// Paths can be directories (scanned recursively) or individual .flac files.
 #[tauri::command]
 pub async fn scan_folders(folders: Vec<String>) -> Result<scanner::ScanResult, String> {
     let paths: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();

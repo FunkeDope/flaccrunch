@@ -18,38 +18,69 @@ pub struct ScanResult {
     pub total_size: u64,
 }
 
-/// Recursively scan the given folders for .flac files.
+/// Scan the given paths for .flac files.
+/// Paths can be directories (scanned recursively) or individual .flac files.
 /// Returns files sorted by size descending (largest first), then by name ascending.
-pub fn scan_for_flac_files(folders: &[PathBuf]) -> ScanResult {
+pub fn scan_for_flac_files(paths: &[PathBuf]) -> ScanResult {
     let mut files = Vec::new();
     let mut permission_errors = Vec::new();
     let mut total_size: u64 = 0;
+    let mut seen = std::collections::HashSet::new();
 
-    for folder in folders {
-        for entry in WalkDir::new(folder).follow_links(true) {
-            match entry {
-                Ok(entry) => {
-                    if entry.file_type().is_file() {
-                        if let Some(ext) = entry.path().extension() {
-                            if ext.eq_ignore_ascii_case("flac") {
-                                if let Ok(meta) = entry.metadata() {
-                                    let size = meta.len();
-                                    total_size += size;
-                                    files.push(ScannedFile {
-                                        path: entry.path().to_path_buf(),
-                                        name: entry
-                                            .file_name()
-                                            .to_string_lossy()
-                                            .to_string(),
-                                        size,
-                                    });
+    for path in paths {
+        if path.is_file() {
+            // Individual file path — include it directly if it's a .flac
+            if let Some(ext) = path.extension() {
+                if ext.eq_ignore_ascii_case("flac") {
+                    if let Ok(meta) = std::fs::metadata(path) {
+                        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+                        if seen.insert(canonical) {
+                            let size = meta.len();
+                            total_size += size;
+                            files.push(ScannedFile {
+                                path: path.clone(),
+                                name: path
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string(),
+                                size,
+                            });
+                        }
+                    }
+                }
+            }
+        } else if path.is_dir() {
+            // Directory — scan recursively
+            for entry in WalkDir::new(path).follow_links(true) {
+                match entry {
+                    Ok(entry) => {
+                        if entry.file_type().is_file() {
+                            if let Some(ext) = entry.path().extension() {
+                                if ext.eq_ignore_ascii_case("flac") {
+                                    if let Ok(meta) = entry.metadata() {
+                                        let canonical = entry.path().canonicalize()
+                                            .unwrap_or_else(|_| entry.path().to_path_buf());
+                                        if seen.insert(canonical) {
+                                            let size = meta.len();
+                                            total_size += size;
+                                            files.push(ScannedFile {
+                                                path: entry.path().to_path_buf(),
+                                                name: entry
+                                                    .file_name()
+                                                    .to_string_lossy()
+                                                    .to_string(),
+                                                size,
+                                            });
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    permission_errors.push(format!("{}", e));
+                    Err(e) => {
+                        permission_errors.push(format!("{}", e));
+                    }
                 }
             }
         }
@@ -191,6 +222,49 @@ mod tests {
         assert!(!dir.path().join("track.tmp").exists());
         // orphan.tmp should remain (no matching .flac)
         assert!(dir.path().join("orphan.tmp").exists());
+    }
+
+    #[test]
+    fn test_scan_individual_files() {
+        let dir = create_test_dir();
+        let file1 = dir.path().join("a.flac");
+        let file2 = dir.path().join("b.flac");
+        let file3 = dir.path().join("c.mp3");
+        fs::write(&file1, b"flac data 1").unwrap();
+        fs::write(&file2, b"flac data 2").unwrap();
+        fs::write(&file3, b"not flac").unwrap();
+        // Pass individual file paths instead of directory
+        let result = scan_for_flac_files(&[file1.clone(), file2.clone(), file3.clone()]);
+        assert_eq!(result.files.len(), 2);
+        // mp3 should be excluded
+    }
+
+    #[test]
+    fn test_scan_mixed_files_and_dirs() {
+        let dir = create_test_dir();
+        let sub = dir.path().join("subdir");
+        fs::create_dir(&sub).unwrap();
+        let file_in_sub = sub.join("nested.flac");
+        fs::write(&file_in_sub, b"nested flac").unwrap();
+        let standalone = dir.path().join("standalone.flac");
+        fs::write(&standalone, b"standalone flac data here").unwrap();
+        // Mix: one directory + one individual file
+        let result = scan_for_flac_files(&[sub.clone(), standalone.clone()]);
+        assert_eq!(result.files.len(), 2);
+    }
+
+    #[test]
+    fn test_scan_deduplicates_files() {
+        let dir = create_test_dir();
+        let file = dir.path().join("test.flac");
+        fs::write(&file, b"flac data").unwrap();
+        // Pass the same file twice and also its parent directory
+        let result = scan_for_flac_files(&[
+            file.clone(),
+            file.clone(),
+            dir.path().to_path_buf(),
+        ]);
+        assert_eq!(result.files.len(), 1);
     }
 
     #[test]

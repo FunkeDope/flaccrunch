@@ -39,8 +39,9 @@ pub async fn start_processing(
 
     let folder_paths: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
 
-    // Clean up stale temp files
-    cleanup_stale_temps(&folder_paths);
+    // Clean up stale temp files (only in directory paths, not individual files)
+    let dir_paths: Vec<PathBuf> = folder_paths.iter().filter(|p| p.is_dir()).cloned().collect();
+    cleanup_stale_temps(&dir_paths);
 
     // Scan for FLAC files
     let scan_result = scan_for_flac_files(&folder_paths);
