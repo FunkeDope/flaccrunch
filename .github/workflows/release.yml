@@ -208,7 +208,8 @@ jobs:
               -DBUILD_EXAMPLES=OFF \
               -DBUILD_TESTING=OFF \
               -DBUILD_DOCS=OFF \
-              -DINSTALL_MANPAGES=OFF
+              -DINSTALL_MANPAGES=OFF \
+              -DWITH_OGG=OFF
             cmake --build . -j$(nproc)
 
             cp src/flac/flac $GITHUB_WORKSPACE/src-tauri/binaries/flac-$TARGET
