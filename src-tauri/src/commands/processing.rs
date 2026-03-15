@@ -33,9 +33,9 @@ pub async fn start_processing(
         }
     }
 
-    // Resolve sidecar binaries
-    let flac_bin = resolve::resolve_flac(&app)?;
-    let metaflac_bin = resolve::resolve_metaflac(&app)?;
+    // Resolve sidecar binaries (optional — native libFLAC is used for all operations)
+    let flac_bin = resolve::resolve_flac(&app).unwrap_or_else(|_| PathBuf::from("flac"));
+    let metaflac_bin = resolve::resolve_metaflac(&app).unwrap_or_else(|_| PathBuf::from("metaflac"));
 
     let folder_paths: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
 

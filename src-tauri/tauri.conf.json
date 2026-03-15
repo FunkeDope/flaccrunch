@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/nicerdicer/tauri-v2-schema/refs/heads/main/tauri.conf.json",
   "productName": "FlacCrunch",
   "version": "1.0.0",
-  "identifier": "com.flaccrunch.desktop",
+  "identifier": "com.flaccrunch.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -33,9 +33,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "binaries/flac",
-      "binaries/metaflac"
-    ]
+    "externalBin": []
   }
 }
