@@ -24,9 +24,9 @@ pub async fn start_processing(
 ) -> Result<String, String> {
     // Check if already processing
     {
-        let active = state.active_run.read().unwrap();
+        let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
         if let Some(ref run) = *active {
-            let status = run.status.read().unwrap();
+            let status = run.status.read().unwrap_or_else(|e| e.into_inner());
             if *status == ProcessingStatus::Processing {
                 return Err("Processing is already in progress".to_string());
             }
@@ -77,18 +77,18 @@ pub async fn start_processing(
     // Create run state
     let run_state = Arc::new(RunState::new(run_id.clone(), worker_count));
     {
-        let mut counters = run_state.counters.write().unwrap();
+        let mut counters = run_state.counters.write().unwrap_or_else(|e| e.into_inner());
         counters.total_files = scan_result.files.len();
         counters.total_original_bytes = scan_result.total_size;
     }
     {
-        let mut status = run_state.status.write().unwrap();
+        let mut status = run_state.status.write().unwrap_or_else(|e| e.into_inner());
         *status = ProcessingStatus::Processing;
     }
 
     // Store run state
     {
-        let mut active = state.active_run.write().unwrap();
+        let mut active = state.active_run.write().unwrap_or_else(|e| e.into_inner());
         *active = Some(Arc::clone(&run_state));
     }
 
@@ -110,7 +110,7 @@ pub async fn start_processing(
         run_worker_pool(worker_count, queue, context, run_state_clone, app).await;
 
         // Mark run as complete
-        let mut status = run_state.status.write().unwrap();
+        let mut status = run_state.status.write().unwrap_or_else(|e| e.into_inner());
         *status = ProcessingStatus::Complete;
     });
 
@@ -122,10 +122,10 @@ pub async fn start_processing(
 pub async fn cancel_processing(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let active = state.active_run.read().unwrap();
+    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
         {
-            let mut status = run.status.write().unwrap();
+            let mut status = run.status.write().unwrap_or_else(|e| e.into_inner());
             *status = ProcessingStatus::Cancelling;
         }
         run.cancel_token.cancel();
@@ -140,9 +140,9 @@ pub async fn cancel_processing(
 pub async fn get_processing_status(
     state: State<'_, AppState>,
 ) -> Result<ProcessingStatus, String> {
-    let active = state.active_run.read().unwrap();
+    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
-        Ok(run.status.read().unwrap().clone())
+        Ok(run.status.read().unwrap_or_else(|e| e.into_inner()).clone())
     } else {
         Ok(ProcessingStatus::Idle)
     }
@@ -153,9 +153,9 @@ pub async fn get_processing_status(
 pub async fn get_worker_statuses(
     state: State<'_, AppState>,
 ) -> Result<Vec<WorkerStatus>, String> {
-    let active = state.active_run.read().unwrap();
+    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
-        Ok(run.workers.read().unwrap().clone())
+        Ok(run.workers.read().unwrap_or_else(|e| e.into_inner()).clone())
     } else {
         Ok(Vec::new())
     }
@@ -166,9 +166,9 @@ pub async fn get_worker_statuses(
 pub async fn get_recent_events(
     state: State<'_, AppState>,
 ) -> Result<Vec<FileEvent>, String> {
-    let active = state.active_run.read().unwrap();
+    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
-        Ok(run.recent_events.read().unwrap().iter().cloned().collect())
+        Ok(run.recent_events.read().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect())
     } else {
         Ok(Vec::new())
     }
@@ -179,9 +179,9 @@ pub async fn get_recent_events(
 pub async fn get_top_compression(
     state: State<'_, AppState>,
 ) -> Result<Vec<CompressionResult>, String> {
-    let active = state.active_run.read().unwrap();
+    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
-        Ok(run.top_compression.read().unwrap().clone())
+        Ok(run.top_compression.read().unwrap_or_else(|e| e.into_inner()).clone())
     } else {
         Ok(Vec::new())
     }

@@ -1,12 +1,16 @@
 import { useState, useCallback } from "react";
-import { Header } from "../layout/Header";
+import type { RunStatus } from "../../types/processing";
 
 interface FolderSelectorProps {
   folders: string[];
   onAddFolder: () => void;
   onRemoveFolder: (folder: string) => void;
   onStart: () => void;
+  onCancel: () => void;
+  onReset: () => void;
   canStart: boolean;
+  status: RunStatus;
+  error: string | null;
 }
 
 export function FolderSelector({
@@ -14,7 +18,11 @@ export function FolderSelector({
   onAddFolder,
   onRemoveFolder,
   onStart,
+  onCancel,
+  onReset,
   canStart,
+  status,
+  error,
 }: FolderSelectorProps) {
   const [dragOver, setDragOver] = useState(false);
 
@@ -22,20 +30,25 @@ export function FolderSelector({
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      // Drag-and-drop folder handling would go here
-      // For now, trigger the native dialog
       onAddFolder();
     },
     [onAddFolder]
   );
 
+  const isProcessing = status === "processing" || status === "cancelling";
+  const isComplete = status === "complete";
+
   return (
-    <div>
-      <Header title="Select Folders" />
+    <div className="folder-section">
+      {error && (
+        <div className="error-banner">
+          {error}
+        </div>
+      )}
 
       <div
-        className={`drop-zone ${dragOver ? "active" : ""}`}
-        onClick={onAddFolder}
+        className={`drop-zone ${dragOver ? "active" : ""} ${isProcessing ? "disabled" : ""}`}
+        onClick={isProcessing ? undefined : onAddFolder}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -48,31 +61,51 @@ export function FolderSelector({
 
       {folders.length > 0 && (
         <div className="card">
-          <h2>Selected Folders ({folders.length})</h2>
+          <div className="card-header">
+            <h2>Folders ({folders.length})</h2>
+          </div>
           <ul className="folder-list">
             {folders.map((folder) => (
               <li key={folder} className="folder-item">
                 <span className="path">{folder}</span>
-                <button
-                  className="remove-btn"
-                  onClick={() => onRemoveFolder(folder)}
-                  title="Remove folder"
-                >
-                  x
-                </button>
+                {!isProcessing && (
+                  <button
+                    className="remove-btn"
+                    onClick={() => onRemoveFolder(folder)}
+                    title="Remove folder"
+                  >
+                    x
+                  </button>
+                )}
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      <button
-        className="btn btn-primary"
-        onClick={onStart}
-        disabled={!canStart}
-      >
-        Start Processing
-      </button>
+      <div className="action-bar">
+        {isComplete ? (
+          <button className="btn btn-primary" onClick={onReset}>
+            New Run
+          </button>
+        ) : isProcessing ? (
+          <button
+            className="btn btn-danger"
+            onClick={onCancel}
+            disabled={status === "cancelling"}
+          >
+            {status === "cancelling" ? "Cancelling..." : "Cancel"}
+          </button>
+        ) : (
+          <button
+            className="btn btn-primary"
+            onClick={onStart}
+            disabled={!canStart}
+          >
+            Start Processing
+          </button>
+        )}
+      </div>
     </div>
   );
 }

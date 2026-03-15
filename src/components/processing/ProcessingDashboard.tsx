@@ -1,6 +1,4 @@
-import { Header } from "../layout/Header";
 import { OverallProgress } from "./OverallProgress";
-import { ControlBar } from "./ControlBar";
 import { StatsBar } from "./StatsBar";
 import { WorkerGrid } from "./WorkerGrid";
 import { RecentEventsTable } from "./RecentEventsTable";
@@ -19,7 +17,6 @@ interface ProcessingDashboardProps {
   workers: WorkerStatus[];
   recentEvents: FileEvent[];
   topCompression: CompressionResult[];
-  onCancel: () => void;
 }
 
 export function ProcessingDashboard({
@@ -28,17 +25,9 @@ export function ProcessingDashboard({
   workers,
   recentEvents,
   topCompression,
-  onCancel,
 }: ProcessingDashboardProps) {
   return (
-    <div>
-      <Header title="Processing" />
-
-      <ControlBar
-        status={status}
-        onCancel={onCancel}
-      />
-
+    <div className="processing-section">
       <OverallProgress counters={counters} />
 
       <StatsBar counters={counters} />
@@ -61,6 +50,30 @@ export function ProcessingDashboard({
         <div className="card">
           <h2>Recent Files</h2>
           <RecentEventsTable events={recentEvents} />
+        </div>
+      )}
+
+      {status === "complete" && counters.processed > 0 && (
+        <div className="card">
+          <h2>Summary</h2>
+          <div className="stats-bar">
+            <div className="stat-item">
+              <div className="stat-value">
+                {counters.totalFiles > 0
+                  ? ((counters.successful / counters.totalFiles) * 100).toFixed(1) + "%"
+                  : "0%"}
+              </div>
+              <div className="stat-label">Success Rate</div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-value">{counters.artworkOptimizedFiles}</div>
+              <div className="stat-label">Art Files</div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-value">{counters.artworkOptimizedBlocks}</div>
+              <div className="stat-label">Art Blocks</div>
+            </div>
+          </div>
         </div>
       )}
     </div>

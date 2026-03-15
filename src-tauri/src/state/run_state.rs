@@ -137,7 +137,7 @@ impl RunState {
     pub fn record_event(&self, event: FileEvent) {
         // Update recent events (keep last 25)
         {
-            let mut events = self.recent_events.write().unwrap();
+            let mut events = self.recent_events.write().unwrap_or_else(|e| e.into_inner());
             events.push_back(event.clone());
             while events.len() > 25 {
                 events.pop_front();
@@ -146,7 +146,7 @@ impl RunState {
 
         // Update counters
         {
-            let mut counters = self.counters.write().unwrap();
+            let mut counters = self.counters.write().unwrap_or_else(|e| e.into_inner());
             counters.processed += 1;
             match event.status {
                 FileStatus::OK => {
@@ -167,7 +167,7 @@ impl RunState {
 
         // Update top compression
         if event.status == FileStatus::OK && event.saved_bytes > 0 {
-            let mut top = self.top_compression.write().unwrap();
+            let mut top = self.top_compression.write().unwrap_or_else(|e| e.into_inner());
             top.push(CompressionResult {
                 path: event.file,
                 saved_bytes: event.saved_bytes,
@@ -180,7 +180,7 @@ impl RunState {
 
     /// Update a specific worker's status.
     pub fn update_worker(&self, worker_id: usize, state: WorkerState, file: Option<String>, percent: u8, ratio: String) {
-        let mut workers = self.workers.write().unwrap();
+        let mut workers = self.workers.write().unwrap_or_else(|e| e.into_inner());
         if let Some(worker) = workers.get_mut(worker_id) {
             worker.state = state;
             worker.file = file;

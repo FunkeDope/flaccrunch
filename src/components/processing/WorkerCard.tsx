@@ -6,8 +6,11 @@ interface WorkerCardProps {
 }
 
 export function WorkerCard({ worker }: WorkerCardProps) {
+  const isActive = worker.state !== "idle";
+  const showPercent = worker.state === "converting" && worker.percent > 0;
+
   return (
-    <div className="worker-card">
+    <div className={`worker-card ${isActive ? "active" : ""}`}>
       <div className="worker-header">
         <span className="worker-id">Worker {worker.id + 1}</span>
         <span className={`worker-stage ${getStageColor(worker.state)}`}>
@@ -15,25 +18,29 @@ export function WorkerCard({ worker }: WorkerCardProps) {
         </span>
       </div>
       <div className="file-name">
-        {worker.file ?? "Idle"}
+        {worker.file
+          ? (worker.file.split("/").pop() ?? worker.file)
+          : "Idle"}
       </div>
-      <div className="progress-bar">
-        <div
-          className="fill"
-          style={{ width: `${worker.percent}%` }}
-        />
-      </div>
-      {worker.ratio && (
-        <div
-          style={{
-            fontSize: 11,
-            color: "var(--text-muted)",
-            marginTop: 4,
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          ratio: {worker.ratio}
-        </div>
+      {isActive && (
+        <>
+          <div className="worker-progress-row">
+            <div className="progress-bar">
+              <div
+                className="fill"
+                style={{ width: `${worker.percent}%` }}
+              />
+            </div>
+            {showPercent && (
+              <span className="worker-percent">{worker.percent}%</span>
+            )}
+          </div>
+          {worker.ratio && (
+            <div className="worker-ratio">
+              ratio: {worker.ratio}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

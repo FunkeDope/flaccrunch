@@ -1,5 +1,5 @@
 use crate::artwork::optimize::ArtworkResult;
-use crate::state::run_state::{FileEvent, FileStatus};
+use crate::state::run_state::{FileEvent, FileStatus, RunCounters};
 use serde::{Deserialize, Serialize};
 
 /// The processing stage a worker is currently in.
@@ -42,6 +42,7 @@ pub enum PipelineEvent {
     FileCompleted {
         worker_id: usize,
         event: FileEvent,
+        counters: RunCounters,
     },
     WorkerIdle {
         worker_id: usize,
