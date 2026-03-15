@@ -105,11 +105,11 @@ function hashColors(
   return { srcColor, outColor: "hash-neutral", embColor };
 }
 
-/** Abbreviated hash for display: first10...last4, or special label */
+/** Abbreviated hash for display: first8…last4, or special label */
 function abbrev(hash: string | undefined | null): string {
   if (!hash || hash === NULL_MD5) return "null";
-  if (hash.length <= 14) return hash;
-  return `${hash.slice(0, 10)}…${hash.slice(-4)}`;
+  if (hash.length <= 12) return hash;
+  return `${hash.slice(0, 8)}…${hash.slice(-4)}`;
 }
 
 export function WorkerCard({ worker }: WorkerCardProps) {
@@ -197,10 +197,10 @@ export function WorkerCard({ worker }: WorkerCardProps) {
               {srcEl}
               {/* Ratio lives here when OUT is not yet computed */}
               {!outEl && isActive && worker.ratio ? (
-                <span className="hash-val" style={{ marginLeft: "auto", color: "var(--success)" }}>≈{worker.ratio}</span>
+                <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: "var(--success)", fontFamily: "var(--font-mono)", fontSize: 10 }}>≈{worker.ratio}</span>
               ) : null}
               {!outEl && !isActive && worker.lastCompressionPct !== undefined ? (
-                <span className="hash-val" style={{ marginLeft: "auto", color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)" }}>
+                <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
                   {worker.lastCompressionPct.toFixed(1)}%↓
                 </span>
               ) : null}
@@ -211,10 +211,10 @@ export function WorkerCard({ worker }: WorkerCardProps) {
               <span className="hash-label">OUT</span>
               {outEl}
               {isActive && worker.ratio ? (
-                <span className="hash-val" style={{ marginLeft: "auto", color: "var(--success)" }}>≈{worker.ratio}</span>
+                <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: "var(--success)", fontFamily: "var(--font-mono)", fontSize: 10 }}>≈{worker.ratio}</span>
               ) : null}
               {!isActive && worker.lastCompressionPct !== undefined ? (
-                <span className="hash-val" style={{ marginLeft: "auto", color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)" }}>
+                <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
                   {worker.lastCompressionPct.toFixed(1)}%↓
                 </span>
               ) : null}

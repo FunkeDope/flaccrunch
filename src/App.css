@@ -768,7 +768,12 @@ body {
 .hash-val {
   font-family: var(--font-mono);
   font-size: 10px;
-  letter-spacing: 0.5px;
+  /* flex:1 + min-width:0 lets the hash shrink when ratio shares the row */
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hash-match    { color: var(--success); }
