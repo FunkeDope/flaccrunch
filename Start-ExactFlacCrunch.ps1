@@ -1927,9 +1927,22 @@ function Render-InteractiveUi {
             $wDetail = $wTextTotal - $wFile
         }
 
+        $cwTime = 8
+        $cwStat = 5
+        $cwComp = 8
+        $cwSaved = 9
+        $cwHash = 7
+        $compactFixed = $cwTime + $cwStat + $cwComp + $cwSaved + $cwHash + 5
+        $cwFile = [Math]::Max(10, $width - $compactFixed)
+
         if ($useCompactEvents) {
             Write-UiLine -Text "Recent Results (compact)" -Color Cyan
-            Write-UiLine -Text "Time     Status Attempt File / Detail" -Color DarkCyan
+            Write-UiLine -Text (('Time'.PadRight($cwTime) + '|' +
+                    'Stat'.PadRight($cwStat) + '|' +
+                    'Comp%'.PadRight($cwComp) + '|' +
+                    'Saved'.PadRight($cwSaved) + '|' +
+                    'Verify'.PadRight($cwHash) + '|' +
+                    'File'.PadRight($cwFile))) -Color DarkCyan
         }
         else {
             Write-UiLine -Text "Recent Results (latest first)" -Color Cyan
@@ -1952,8 +1965,59 @@ function Render-InteractiveUi {
             $verificationDisplay = Format-VerificationText -Verification ([string]$row.Verification)
             $verificationColor = Get-VerificationColor -Verification $row.Verification
             if ($useCompactEvents) {
-                $compactText = "{0} {1} {2} {3} | {4}" -f [string]$row.Time, [string]$row.Status, [string]$row.Attempt, [string]$row.File, [string]$row.Detail
-                Write-UiLine -Text $compactText -Color $statusColor
+                $cTimeText = Fit-DisplayText -Text ([string]$row.Time) -Width $cwTime
+                $cStatText = Fit-DisplayText -Text ([string]$row.Status) -Width $cwStat
+                $cCmpText = Fit-DisplayText -Text ([string]$row.CompressionPct) -Width $cwComp
+                $cSavedText = Fit-DisplayText -Text ([string]$row.Saved) -Width $cwSaved
+                $cVerifyText = Fit-DisplayText -Text $verificationDisplay -Width $cwHash -UseEllipsis
+                $cFileText = Fit-DisplayText -Text ([string]$row.File) -Width $cwFile -UseEllipsis
+
+                Write-UiSegmentLine -Segments @(
+                    [PSCustomObject]@{
+                        Text  = $cTimeText
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $cStatText
+                        Color = $statusColor
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $cCmpText
+                        Color = $cmpColor
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $cSavedText
+                        Color = $savedColor
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $cVerifyText
+                        Color = $verificationColor
+                    },
+                    [PSCustomObject]@{
+                        Text  = '|'
+                        Color = [ConsoleColor]::DarkGray
+                    },
+                    [PSCustomObject]@{
+                        Text  = $cFileText
+                        Color = [ConsoleColor]::Gray
+                    }
+                )
             }
             else {
                 $timeText = Fit-DisplayText -Text ([string]$row.Time) -Width $wTime
