@@ -164,10 +164,36 @@ jobs:
             sed -i 's/compileSdk = [0-9]*/compileSdk = 35/' "$GRADLE_FILE"
           fi
 
+      - name: Generate signing keystore
+        run: |
+          keytool -genkey -v \
+            -keystore /tmp/flaccrunch-release.keystore \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias release \
+            -storepass flaccrunch -keypass flaccrunch \
+            -dname "CN=FlacCrunch, OU=Dev, O=FlacCrunch, L=Unknown, ST=Unknown, C=US"
+
       - name: Build Android APK
         run: npx tauri android build --apk
         env:
           NDK_HOME: ${{ env.NDK_HOME }}
+
+      - name: Sign APK files
+        run: |
+          # Find and sign all unsigned APKs with apksigner
+          find . -name "*.apk" -not -path "./.git/*" -type f | while read apk; do
+            echo "Signing: $apk"
+            # zipalign first (required before signing)
+            "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$apk" "${apk}.aligned"
+            mv "${apk}.aligned" "$apk"
+            # Sign with apksigner
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+              --ks /tmp/flaccrunch-release.keystore \
+              --ks-pass pass:flaccrunch \
+              --ks-key-alias release \
+              --key-pass pass:flaccrunch \
+              "$apk"
+          done
 
       - name: Collect APK files
         run: |
