@@ -151,8 +151,18 @@ export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "
                       <span className="saved-zero">0%</span>
                     )}
                   </td>
-                  <td style={{ color: "var(--text-muted)", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {event.verification || event.detail || "—"}
+                  <td style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {(() => {
+                      const v = (event.verification || event.detail || "").toLowerCase();
+                      const color = v.startsWith("mismatch") || v.startsWith("fail")
+                        ? "var(--error)"
+                        : v.startsWith("match") || v === "ok"
+                        ? "var(--success)"
+                        : v.includes("warn") || v.includes("error")
+                        ? "var(--warning)"
+                        : "var(--text-muted)";
+                      return <span style={{ color }}>{event.verification || event.detail || "—"}</span>;
+                    })()}
                   </td>
                 </tr>
               );

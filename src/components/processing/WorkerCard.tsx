@@ -195,29 +195,31 @@ export function WorkerCard({ worker }: WorkerCardProps) {
             <div className="hash-row">
               <span className="hash-label">PRE</span>
               {srcEl}
+              {/* Ratio lives here when OUT is not yet computed */}
+              {!outEl && isActive && worker.ratio ? (
+                <span className="hash-val" style={{ marginLeft: "auto", color: "var(--success)" }}>≈{worker.ratio}</span>
+              ) : null}
+              {!outEl && !isActive && worker.lastCompressionPct !== undefined ? (
+                <span className="hash-val" style={{ marginLeft: "auto", color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)" }}>
+                  {worker.lastCompressionPct.toFixed(1)}%↓
+                </span>
+              ) : null}
             </div>
           )}
           {outEl && (
             <div className="hash-row">
               <span className="hash-label">OUT</span>
               {outEl}
-            </div>
-          )}
-          {(isActive && worker.ratio) || (!isActive && worker.lastCompressionPct !== undefined) ? (
-            <div className="hash-row" style={{ justifyContent: "flex-end", marginTop: 2 }}>
               {isActive && worker.ratio ? (
-                <span className="hash-label" style={{ color: "var(--text-muted)" }}>ratio</span>
-              ) : null}
-              {isActive && worker.ratio ? (
-                <span className="hash-val" style={{ color: "var(--success)" }}>{worker.ratio}</span>
+                <span className="hash-val" style={{ marginLeft: "auto", color: "var(--success)" }}>≈{worker.ratio}</span>
               ) : null}
               {!isActive && worker.lastCompressionPct !== undefined ? (
-                <span className="hash-val" style={{ color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)" }}>
-                  {worker.lastCompressionPct.toFixed(1)}% saved
+                <span className="hash-val" style={{ marginLeft: "auto", color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)" }}>
+                  {worker.lastCompressionPct.toFixed(1)}%↓
                 </span>
               ) : null}
             </div>
-          ) : null}
+          )}
         </div>
       )}
     </div>

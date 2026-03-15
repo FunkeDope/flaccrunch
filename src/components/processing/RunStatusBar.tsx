@@ -108,9 +108,10 @@ export function RunStatusBar({
           {isComplete && (
             <>
               <button
-                className="btn btn-ghost"
+                className="btn btn-secondary"
                 onClick={onExport}
                 title="Export log as text file"
+                style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }}
               >
                 Export Log
               </button>

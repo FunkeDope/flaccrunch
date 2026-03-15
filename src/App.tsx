@@ -17,10 +17,16 @@ function App() {
   // Live blended progress: completed files + fractional in-flight worker progress
   const livePct = useMemo(() => {
     if (processing.counters.totalFiles === 0) return 0;
-    const activeStages = ["converting", "hashing-source", "hashing-output", "artwork", "finalizing"];
     const inFlightWeight = processing.workers
-      .filter((w) => activeStages.includes(w.state))
-      .reduce((sum, w) => sum + w.percent / 100, 0);
+      .filter((w) => w.state !== "idle")
+      .reduce((sum, w) => {
+        // Post-encoding stages: encoding is done — count as full weight to
+        // prevent the bar jumping backward when percent resets to 0 on stage change.
+        if (w.state === "hashing-output" || w.state === "artwork" || w.state === "finalizing") {
+          return sum + 1.0;
+        }
+        return sum + w.percent / 100;
+      }, 0);
     return Math.min(
       100,
       ((processing.counters.processed + inFlightWeight) / processing.counters.totalFiles) * 100
