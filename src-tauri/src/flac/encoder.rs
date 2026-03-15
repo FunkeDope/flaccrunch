@@ -17,27 +17,34 @@ pub struct EncodeResult {
 /// - Exhaustive model search (-e)
 /// - Exhaustive QLP coefficient precision search (-p)
 /// - Verify encoding (-V)
+///
+/// If `progress_tx` is provided, sends percent complete (0-100) during encoding.
 pub async fn encode_flac(
     _flac_bin: &Path,
     input: &Path,
     output: &Path,
+    progress_tx: Option<std::sync::mpsc::Sender<u8>>,
 ) -> Result<EncodeResult, String> {
     let input = input.to_path_buf();
     let output = output.to_path_buf();
 
     // Run the CPU-intensive FLAC encoding on a blocking thread
-    tokio::task::spawn_blocking(move || encode_flac_native(&input, &output))
+    tokio::task::spawn_blocking(move || encode_flac_native(&input, &output, progress_tx))
         .await
         .map_err(|e| format!("Encoding task panicked: {e}"))?
 }
 
 /// Native FLAC re-encoding: decode input -> re-encode with max compression.
-fn encode_flac_native(input: &Path, output: &Path) -> Result<EncodeResult, String> {
+fn encode_flac_native(
+    input: &Path,
+    output: &Path,
+    progress_tx: Option<std::sync::mpsc::Sender<u8>>,
+) -> Result<EncodeResult, String> {
     // Step 1: Decode the input FLAC file to get PCM data and stream info
     let decoded = decode_flac_to_pcm(input)?;
 
     // Step 2: Encode the PCM data to a new FLAC file with maximum compression
-    encode_pcm_to_flac(&decoded, output)
+    encode_pcm_to_flac(&decoded, output, progress_tx)
 }
 
 struct DecodedFlac {
@@ -173,7 +180,11 @@ fn decode_flac_to_pcm(input: &Path) -> Result<DecodedFlac, String> {
 
 /// Encode PCM data to a FLAC file with maximum compression settings.
 /// Also copies metadata blocks (pictures, vorbis comments) from the input.
-fn encode_pcm_to_flac(decoded: &DecodedFlac, output: &Path) -> Result<EncodeResult, String> {
+fn encode_pcm_to_flac(
+    decoded: &DecodedFlac,
+    output: &Path,
+    progress_tx: Option<std::sync::mpsc::Sender<u8>>,
+) -> Result<EncodeResult, String> {
     use libflac_sys::*;
 
     let output_cstr = CString::new(output.to_string_lossy().as_bytes())
@@ -218,6 +229,7 @@ fn encode_pcm_to_flac(decoded: &DecodedFlac, output: &Path) -> Result<EncodeResu
         let chunk_size = 4096; // frames per chunk
 
         let mut offset = 0;
+        let mut last_percent: u8 = 0;
         while offset < total_frames {
             let frames_this_chunk = chunk_size.min(total_frames - offset);
             let sample_offset = offset * channels;
@@ -240,6 +252,15 @@ fn encode_pcm_to_flac(decoded: &DecodedFlac, output: &Path) -> Result<EncodeResu
             }
 
             offset += frames_this_chunk;
+
+            // Report progress (throttled to only send when percent changes)
+            if let Some(ref tx) = progress_tx {
+                let percent = ((offset as f64 / total_frames as f64) * 100.0) as u8;
+                if percent != last_percent {
+                    last_percent = percent;
+                    let _ = tx.send(percent);
+                }
+            }
         }
 
         let ok = FLAC__stream_encoder_finish(encoder);

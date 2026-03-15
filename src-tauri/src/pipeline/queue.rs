@@ -31,12 +31,12 @@ impl JobQueue {
 
     /// Dequeue the next item for processing. Returns None if queue is empty.
     pub fn dequeue(&self) -> Option<QueueItem> {
-        self.items.lock().unwrap().pop_front()
+        self.items.lock().unwrap_or_else(|e| e.into_inner()).pop_front()
     }
 
     /// Re-add an item for retry with incremented attempt count.
     pub fn requeue_for_retry(&self, item: QueueItem, next_attempt: u32) {
-        let mut items = self.items.lock().unwrap();
+        let mut items = self.items.lock().unwrap_or_else(|e| e.into_inner());
         items.push_back(QueueItem {
             file: item.file,
             attempt: next_attempt,
@@ -45,12 +45,12 @@ impl JobQueue {
 
     /// Number of items remaining in the queue.
     pub fn remaining(&self) -> usize {
-        self.items.lock().unwrap().len()
+        self.items.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// Check if the queue is empty.
     pub fn is_empty(&self) -> bool {
-        self.items.lock().unwrap().is_empty()
+        self.items.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
     /// Total number of files initially queued.

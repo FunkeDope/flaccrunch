@@ -50,12 +50,53 @@ pub async fn execute_job(
     let before_size = item.file.size;
 
     // === STAGE 1: CONVERTING ===
-    let encode_result = match encode_flac(&context.flac_bin, file_path, &temp_path).await {
+    // Set up progress reporting: encoder writes to AtomicU8, poll task emits events
+    let progress_pct = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
+
+    // Create a sync channel sender that updates the atomic from the blocking thread
+    let pct_writer = progress_pct.clone();
+    let (sync_tx, sync_rx) = std::sync::mpsc::channel::<u8>();
+    std::thread::spawn(move || {
+        while let Ok(pct) = sync_rx.recv() {
+            pct_writer.store(pct, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+
+    // Poll task: read atomic every 100ms, emit WorkerProgress when value changes
+    let poll_event_tx = event_tx.clone();
+    let poll_pct = progress_pct.clone();
+    let poll_worker_id = worker_id;
+    let poll_task = tokio::spawn(async move {
+        let mut last = 0u8;
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    let current = poll_pct.load(std::sync::atomic::Ordering::Relaxed);
+                    if current != last {
+                        last = current;
+                        let _ = poll_event_tx.send(PipelineEvent::WorkerProgress {
+                            worker_id: poll_worker_id,
+                            percent: current,
+                            ratio: format!("{}%", current),
+                        }).await;
+                    }
+                }
+                _ = &mut done_rx => break,
+            }
+        }
+    });
+
+    let encode_result = match encode_flac(&context.flac_bin, file_path, &temp_path, Some(sync_tx)).await {
         Ok(r) => r,
         Err(e) => {
+            let _ = done_tx.send(());
+            poll_task.abort();
             return make_failure(file_path, item.attempt, before_size, &e);
         }
     };
+    let _ = done_tx.send(());
+    let _ = poll_task.await;
 
     if !encode_result.success {
         safe_remove(&temp_path);

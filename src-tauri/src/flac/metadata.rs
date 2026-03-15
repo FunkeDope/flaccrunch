@@ -34,21 +34,20 @@ fn get_md5sum_native(flac_path: &Path) -> Result<Option<String>, String> {
         .map_err(|_| "Invalid path")?;
 
     unsafe {
-        let mut si: FLAC__StreamMetadata_StreamInfo = std::mem::zeroed();
-        let ok = FLAC__metadata_get_streaminfo(path_cstr.as_ptr(), &mut si as *mut _ as *mut FLAC__StreamMetadata);
+        // IMPORTANT: Must allocate a full FLAC__StreamMetadata, not just StreamInfo.
+        // FLAC__metadata_get_streaminfo writes the full metadata struct including
+        // type, is_last, length fields before the stream_info union data.
+        let mut metadata: FLAC__StreamMetadata = std::mem::zeroed();
+        let ok = FLAC__metadata_get_streaminfo(path_cstr.as_ptr(), &mut metadata);
 
         if ok == 0 {
             return Err("Failed to read STREAMINFO".to_string());
         }
 
-        let md5_bytes = si.md5sum;
+        let md5_bytes = metadata.data.stream_info.md5sum;
         let md5_str: String = md5_bytes.iter().map(|b| format!("{:02x}", b)).collect();
 
-        if md5_str == "00000000000000000000000000000000" {
-            Ok(Some(md5_str)) // Return the null MD5 - caller decides what to do
-        } else {
-            Ok(Some(md5_str))
-        }
+        Ok(Some(md5_str))
     }
 }
 
