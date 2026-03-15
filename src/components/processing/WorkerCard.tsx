@@ -181,18 +181,6 @@ export function WorkerCard({ worker }: WorkerCardProps) {
           {showPercent && (
             <span className="worker-percent">{worker.percent}%</span>
           )}
-          {worker.ratio && (
-            <span className="worker-percent" style={{ color: "var(--success)" }}>
-              {worker.ratio}
-            </span>
-          )}
-        </div>
-      )}
-      {!isActive && worker.lastCompressionPct !== undefined && (
-        <div className="worker-progress-row">
-          <span className="worker-percent" style={{ color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)" }}>
-            {worker.lastCompressionPct.toFixed(1)}% saved
-          </span>
         </div>
       )}
       {showHashes && anyHash && (
@@ -215,6 +203,21 @@ export function WorkerCard({ worker }: WorkerCardProps) {
               {outEl}
             </div>
           )}
+          {(isActive && worker.ratio) || (!isActive && worker.lastCompressionPct !== undefined) ? (
+            <div className="hash-row" style={{ justifyContent: "flex-end", marginTop: 2 }}>
+              {isActive && worker.ratio ? (
+                <span className="hash-label" style={{ color: "var(--text-muted)" }}>ratio</span>
+              ) : null}
+              {isActive && worker.ratio ? (
+                <span className="hash-val" style={{ color: "var(--success)" }}>{worker.ratio}</span>
+              ) : null}
+              {!isActive && worker.lastCompressionPct !== undefined ? (
+                <span className="hash-val" style={{ color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)" }}>
+                  {worker.lastCompressionPct.toFixed(1)}% saved
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )}
     </div>

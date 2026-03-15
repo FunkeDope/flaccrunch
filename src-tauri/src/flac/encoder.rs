@@ -24,7 +24,7 @@ pub struct EncodeResult {
 pub async fn encode_flac(
     input: &Path,
     output: &Path,
-    progress_tx: Option<std::sync::mpsc::Sender<u8>>,
+    progress_tx: Option<std::sync::mpsc::Sender<(u8, f32)>>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<EncodeResult, String> {
     let input = input.to_path_buf();
@@ -39,7 +39,7 @@ pub async fn encode_flac(
 fn encode_flac_native(
     input: &Path,
     output: &Path,
-    progress_tx: Option<std::sync::mpsc::Sender<u8>>,
+    progress_tx: Option<std::sync::mpsc::Sender<(u8, f32)>>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<EncodeResult, String> {
     let decoded = decode_flac_to_pcm(input)?;
@@ -182,7 +182,7 @@ fn decode_flac_to_pcm(input: &Path) -> Result<DecodedFlac, String> {
 fn encode_pcm_to_flac(
     decoded: &DecodedFlac,
     output: &Path,
-    progress_tx: Option<std::sync::mpsc::Sender<u8>>,
+    progress_tx: Option<std::sync::mpsc::Sender<(u8, f32)>>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<EncodeResult, String> {
     use libflac_sys::*;
@@ -227,6 +227,7 @@ fn encode_pcm_to_flac(
         let total_interleaved = decoded.samples.len();
         let total_frames = total_interleaved / channels;
         let chunk_size = 4096; // frames per chunk
+        let bytes_per_frame = (channels * (decoded.bits_per_sample as usize / 8)) as u64;
 
         let mut offset = 0;
         let mut last_percent: u8 = 0;
@@ -258,7 +259,14 @@ fn encode_pcm_to_flac(
                 let percent = ((offset as f64 / total_frames as f64) * 100.0) as u8;
                 if percent != last_percent {
                     last_percent = percent;
-                    let _ = tx.send(percent);
+                    let pcm_consumed = offset as u64 * bytes_per_frame;
+                    let out_size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+                    let ratio = if pcm_consumed > 0 {
+                        out_size as f32 / pcm_consumed as f32
+                    } else {
+                        1.0
+                    };
+                    let _ = tx.send((percent, ratio));
                 }
             }
 

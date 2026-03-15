@@ -125,18 +125,22 @@ async fn run_job(
         .await;
 
     let progress_pct = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let progress_ratio = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
     let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
 
     let pct_writer = progress_pct.clone();
-    let (sync_tx, sync_rx) = std::sync::mpsc::channel::<u8>();
+    let ratio_writer = progress_ratio.clone();
+    let (sync_tx, sync_rx) = std::sync::mpsc::channel::<(u8, f32)>();
     std::thread::spawn(move || {
-        while let Ok(pct) = sync_rx.recv() {
+        while let Ok((pct, ratio)) = sync_rx.recv() {
             pct_writer.store(pct, std::sync::atomic::Ordering::Relaxed);
+            ratio_writer.store(ratio.to_bits(), std::sync::atomic::Ordering::Relaxed);
         }
     });
 
     let poll_event_tx = event_tx.clone();
     let poll_pct = progress_pct.clone();
+    let poll_ratio = progress_ratio.clone();
     let poll_worker_id = worker_id;
     let poll_task = tokio::spawn(async move {
         let mut last = 0u8;
@@ -146,10 +150,11 @@ async fn run_job(
                     let current = poll_pct.load(std::sync::atomic::Ordering::Relaxed);
                     if current != last {
                         last = current;
+                        let ratio = f32::from_bits(poll_ratio.load(std::sync::atomic::Ordering::Relaxed));
                         let _ = poll_event_tx.send(PipelineEvent::WorkerProgress {
                             worker_id: poll_worker_id,
                             percent: current,
-                            ratio: format!("{}%", current),
+                            ratio: format!("{:.3}", ratio),
                         }).await;
                     }
                 }
