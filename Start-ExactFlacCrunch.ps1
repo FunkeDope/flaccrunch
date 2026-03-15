@@ -1682,6 +1682,24 @@ function Render-InteractiveUi {
         $script:__uiRowsWritten++
     }
 
+    function Write-UiTableRow {
+        param([Parameter(Mandatory)][object[]]$Columns)
+        $segments = [System.Collections.Generic.List[object]]::new()
+        foreach ($col in $Columns) {
+            if ($segments.Count -gt 0) {
+                $segments.Add([PSCustomObject]@{ Text = '|'; Color = [ConsoleColor]::DarkGray }) | Out-Null
+            }
+            $fitted = Fit-DisplayText -Text ([string]$col.Text) -Width $col.Width -UseEllipsis:([bool]$col.Ellipsis)
+            $segments.Add([PSCustomObject]@{ Text = $fitted; Color = [ConsoleColor]$col.Color }) | Out-Null
+        }
+        Write-UiSegmentLine -Segments @($segments)
+    }
+
+    function Format-UiTableHeader {
+        param([Parameter(Mandatory)][object[]]$Columns)
+        return ($Columns | ForEach-Object { ([string]$_.Label).PadRight($_.Width) }) -join '|'
+    }
+
     function Format-HeaderMetricRow {
         param([Parameter(Mandatory)][string[]]$Metrics)
 
@@ -1787,24 +1805,19 @@ function Render-InteractiveUi {
     $showEventSection = ($rowsForEvents -ge ($eventChromeRows + 1))
     $eventRows = if ($showEventSection) { [Math]::Max(0, $rowsForEvents - $eventChromeRows) } else { 0 }
 
-    $wCore = 6
-    $wState = 7
-    $wTry = 5
-    $wPct = 5
-    $wRatio = 8
-    $wBar = 22
+    $wCore = 6; $wState = 7; $wTry = 5; $wPct = 5; $wRatio = 8; $wBar = 22
     $workerFixed = $wCore + $wState + $wTry + $wPct + $wRatio + $wBar
     $workerSep = 6
     $wFile = [Math]::Max(18, $width - ($workerFixed + $workerSep))
 
+    $workerColDefs = @(
+        @{ Label = 'Core'; Width = $wCore }, @{ Label = 'State'; Width = $wState },
+        @{ Label = 'Try'; Width = $wTry }, @{ Label = 'Pct'; Width = $wPct },
+        @{ Label = 'Ratio'; Width = $wRatio }, @{ Label = 'Progress'; Width = $wBar },
+        @{ Label = 'File'; Width = $wFile }
+    )
     Write-UiLine -Text "Workers" -Color Cyan
-    Write-UiLine -Text (('Core'.PadRight($wCore) + '|' +
-            'State'.PadRight($wState) + '|' +
-            'Try'.PadRight($wTry) + '|' +
-            'Pct'.PadRight($wPct) + '|' +
-            'Ratio'.PadRight($wRatio) + '|' +
-            'Progress'.PadRight($wBar) + '|' +
-            'File'.PadRight($wFile))) -Color DarkCyan
+    Write-UiLine -Text (Format-UiTableHeader -Columns $workerColDefs) -Color DarkCyan
 
     for ($i = 0; $i -lt $workerRows; $i++) {
         if ($i -ge $Workers.Count) {
@@ -1813,75 +1826,60 @@ function Render-InteractiveUi {
         }
 
         $w = $Workers[$i]
+        $coreLabel = "C{0:D2}" -f $w.Id
+
         if ($null -eq $w.Job) {
-            $line = (("C{0:D2}" -f $w.Id).PadRight($wCore) + '|' +
-                'IDLE'.PadRight($wState) + '|' +
-                '-'.PadRight($wTry) + '|' +
-                '-'.PadRight($wPct) + '|' +
-                '-'.PadRight($wRatio) + '|' +
-                ''.PadRight($wBar) + '|' +
-                ''.PadRight($wFile))
-            Write-UiLine -Text $line -Color DarkGray
+            Write-UiTableRow -Columns @(
+                @{ Text = $coreLabel; Width = $wCore; Color = 'DarkGray' },
+                @{ Text = 'IDLE'; Width = $wState; Color = 'DarkGray' },
+                @{ Text = '-'; Width = $wTry; Color = 'DarkGray' },
+                @{ Text = '-'; Width = $wPct; Color = 'DarkGray' },
+                @{ Text = '-'; Width = $wRatio; Color = 'DarkGray' },
+                @{ Text = ''; Width = $wBar; Color = 'DarkGray' },
+                @{ Text = ''; Width = $wFile; Color = 'DarkGray' }
+            )
             continue
         }
 
         $stage = [string]$w.Job.Stage
         if ([string]::IsNullOrWhiteSpace($stage)) { $stage = 'CONVERTING' }
 
-        $pct = 0
-        $ratio = '-'
-        $stateText = 'ENCODE'
-        $fileSuffix = ''
-
+        $pct = 0; $ratio = '-'; $stateText = 'ENCODE'; $fileSuffix = ''
         switch ($stage) {
-            'ARTWORK' {
-                $stateText = 'ART'
-                $fileSuffix = ' [artwork]'
-            }
-            'HASHING' {
+            'ARTWORK'    { $stateText = 'ART';     $fileSuffix = ' [artwork]' }
+            'HASHING'    {
                 $stateText = 'HASHING'
                 $phase = [string]$w.Job.HashPhase
-                if ($phase -eq 'SOURCE') {
-                    $stateText = 'HASHIN'
-                    $fileSuffix = ' [hash:in]'
-                }
-                elseif ($phase -eq 'OUTPUT') {
-                    $stateText = 'HASHOUT'
-                    $fileSuffix = ' [hash:out]'
-                }
+                if ($phase -eq 'SOURCE')    { $stateText = 'HASHIN';  $fileSuffix = ' [hash:in]' }
+                elseif ($phase -eq 'OUTPUT') { $stateText = 'HASHOUT'; $fileSuffix = ' [hash:out]' }
                 else { $fileSuffix = ' [hash]' }
             }
-            'FINALIZING' {
-                $stateText = 'FINAL'
-                $fileSuffix = ' [finalize]'
-            }
+            'FINALIZING' { $stateText = 'FINAL';   $fileSuffix = ' [finalize]' }
             default {
                 $stateText = 'ENCODE'
                 $p = Read-FlacProgress -StdErrPath $w.Job.ErrLog -Cache $ProgressCache
-                $pct = [int]$p.Pct
-                $ratio = [string]$p.Ratio
+                $pct = [int]$p.Pct; $ratio = [string]$p.Ratio
                 if ($ratio -eq 'N/A') { $ratio = '-' }
             }
         }
 
-        $attempt = ("{0}/{1}" -f $w.Job.Attempt, $MaxAttemptsPerFile)
-
+        $attempt = "{0}/{1}" -f $w.Job.Attempt, $MaxAttemptsPerFile
         $barLen = [Math]::Max(8, $wBar - 2)
         $fill = if ($stage -eq 'HASHING' -or $stage -eq 'ARTWORK') { [int](($script:__uiRowsWritten + $i) % ($barLen + 1)) } else { [int][Math]::Floor(($pct / 100.0) * $barLen) }
         if ($fill -lt 0) { $fill = 0 }
         if ($fill -gt $barLen) { $fill = $barLen }
-        $bar = ('[' + ('#' * $fill).PadRight($barLen, '.') + ']')
-        $name = Fit-DisplayText -Text ($w.Job.Name + $fileSuffix) -Width $wFile -UseEllipsis
+        $bar = '[' + ('#' * $fill).PadRight($barLen, '.') + ']'
+        $stateColor = Get-WorkerStateColor -State $stateText -Stage $stage -Pct $pct
 
-        $line = (("C{0:D2}" -f $w.Id).PadRight($wCore) + '|' +
-            $stateText.PadRight($wState) + '|' +
-            $attempt.PadRight($wTry) + '|' +
-            ("{0,3}%" -f $pct).PadRight($wPct) + '|' +
-            $ratio.PadRight($wRatio) + '|' +
-            $bar.PadRight($wBar) + '|' +
-            $name)
-        $lineColor = Get-WorkerStateColor -State $stateText -Stage $stage -Pct $pct
-        Write-UiLine -Text $line -Color $lineColor
+        Write-UiTableRow -Columns @(
+            @{ Text = $coreLabel; Width = $wCore; Color = 'DarkGray' },
+            @{ Text = $stateText; Width = $wState; Color = $stateColor },
+            @{ Text = $attempt; Width = $wTry; Color = 'Gray' },
+            @{ Text = ("{0,3}%" -f $pct); Width = $wPct; Color = $stateColor },
+            @{ Text = $ratio; Width = $wRatio; Color = 'Gray' },
+            @{ Text = $bar; Width = $wBar; Color = $stateColor },
+            @{ Text = ($w.Job.Name + $fileSuffix); Width = $wFile; Color = 'Gray'; Ellipsis = $true }
+        )
     }
 
     if ($Workers.Count -gt $workerRows) {
@@ -1904,194 +1902,66 @@ function Render-InteractiveUi {
     }
 
     if ($showEventSection) {
-        $wTime = 8
-        $wStat = 6
-        $wTry2 = 7
-        $wComp = 13
-        $wSaved = 12
-        $wHash = 10
-        $eventFixed = $wTime + $wStat + $wTry2 + $wComp + $wSaved + $wHash
-        $eventSep = 7
-        $minFullEventTextWidth = 36
-        $fullEventWidthNeeded = $eventFixed + $eventSep + $minFullEventTextWidth
-        $useCompactEvents = ($width -lt $fullEventWidthNeeded)
-        $wTextTotal = 0
-        $wFile = 0
-        $wDetail = 0
+        # Core columns always shown: Time, Stat, Comp%, Verify, File
+        # File absorbs remaining width. 4 fixed cols + File = 5 cols = 4 separators.
+        $eTime = 8; $eStat = 5; $eComp = 8; $eHash = 7
+        $coreFixed = $eTime + $eStat + $eComp + $eHash  # 28
+        $coreSeps = 4                                     # 4 separators between 5 cols (including File)
 
-        if (-not $useCompactEvents) {
-            $wTextTotal = $width - ($eventFixed + $eventSep)
-            $wFile = [int][Math]::Floor($wTextTotal * 0.52)
-            if ($wFile -lt 18) { $wFile = 18 }
-            if ($wFile -gt ($wTextTotal - 18)) { $wFile = $wTextTotal - 18 }
-            $wDetail = $wTextTotal - $wFile
-        }
+        # Optional columns added when width permits (priority order)
+        $eSaved = 9; $eTry = 7
+        $minFile = 10
 
-        $cwTime = 8
-        $cwStat = 5
-        $cwComp = 8
-        $cwSaved = 9
-        $cwHash = 7
-        $compactFixed = $cwTime + $cwStat + $cwComp + $cwSaved + $cwHash + 5
-        $cwFile = [Math]::Max(10, $width - $compactFixed)
-
-        if ($useCompactEvents) {
-            Write-UiLine -Text "Recent Results (compact)" -Color Cyan
-            Write-UiLine -Text (('Time'.PadRight($cwTime) + '|' +
-                    'Stat'.PadRight($cwStat) + '|' +
-                    'Comp%'.PadRight($cwComp) + '|' +
-                    'Saved'.PadRight($cwSaved) + '|' +
-                    'Verify'.PadRight($cwHash) + '|' +
-                    'File'.PadRight($cwFile))) -Color DarkCyan
+        $remaining = $width - $coreFixed - $coreSeps
+        $showSaved = ($remaining -ge ($eSaved + 1 + $minFile))
+        if ($showSaved) { $remaining -= ($eSaved + 1) }
+        $showAttempt = ($remaining -ge ($eTry + 1 + $minFile))
+        if ($showAttempt) { $remaining -= ($eTry + 1) }
+        $showDetail = ($remaining -ge (18 + 1 + 18))
+        $eFile = 0; $eDetail = 0
+        if ($showDetail) {
+            $eFile = [int][Math]::Floor($remaining * 0.52)
+            if ($eFile -lt 18) { $eFile = 18 }
+            if ($eFile -gt ($remaining - 18)) { $eFile = $remaining - 18 }
+            $eDetail = $remaining - $eFile - 1
         }
         else {
-            Write-UiLine -Text "Recent Results (latest first)" -Color Cyan
-            Write-UiLine -Text (('Time'.PadRight($wTime) + '|' +
-                    'Status'.PadRight($wStat) + '|' +
-                    'Attempt'.PadRight($wTry2) + '|' +
-                    'Compression %'.PadRight($wComp) + '|' +
-                    'Saved'.PadRight($wSaved) + '|' +
-                    'Verify'.PadRight($wHash) + '|' +
-                    'File'.PadRight($wFile) + '|' +
-                    'Detail'.PadRight($wDetail))) -Color DarkCyan
+            $eFile = $remaining
         }
+
+        # Build column definitions for header and rows
+        $eventColDefs = [System.Collections.Generic.List[object]]::new()
+        $eventColDefs.Add(@{ Label = 'Time';   Width = $eTime }) | Out-Null
+        $eventColDefs.Add(@{ Label = 'Stat';   Width = $eStat }) | Out-Null
+        if ($showAttempt) { $eventColDefs.Add(@{ Label = 'Attempt'; Width = $eTry }) | Out-Null }
+        $eventColDefs.Add(@{ Label = 'Comp%';  Width = $eComp }) | Out-Null
+        if ($showSaved) { $eventColDefs.Add(@{ Label = 'Saved';  Width = $eSaved }) | Out-Null }
+        $eventColDefs.Add(@{ Label = 'Verify'; Width = $eHash }) | Out-Null
+        $eventColDefs.Add(@{ Label = 'File';   Width = $eFile }) | Out-Null
+        if ($showDetail) { $eventColDefs.Add(@{ Label = 'Detail'; Width = $eDetail }) | Out-Null }
+
+        Write-UiLine -Text "Recent Results (latest first)" -Color Cyan
+        Write-UiLine -Text (Format-UiTableHeader -Columns @($eventColDefs)) -Color DarkCyan
 
         $rowsToPrint = [Math]::Min($eventRows, $RecentEvents.Count)
         for ($i = 0; $i -lt $rowsToPrint; $i++) {
             $row = $RecentEvents[$i]
             $statusColor = Get-StatusColor -Status $row.Status
             $cmpColor = Get-CompressionColor -CompressionPct $row.CompressionPct
-            $savedColor = $cmpColor
             $verificationDisplay = Format-VerificationText -Verification ([string]$row.Verification)
             $verificationColor = Get-VerificationColor -Verification $row.Verification
-            if ($useCompactEvents) {
-                $cTimeText = Fit-DisplayText -Text ([string]$row.Time) -Width $cwTime
-                $cStatText = Fit-DisplayText -Text ([string]$row.Status) -Width $cwStat
-                $cCmpText = Fit-DisplayText -Text ([string]$row.CompressionPct) -Width $cwComp
-                $cSavedText = Fit-DisplayText -Text ([string]$row.Saved) -Width $cwSaved
-                $cVerifyText = Fit-DisplayText -Text $verificationDisplay -Width $cwHash -UseEllipsis
-                $cFileText = Fit-DisplayText -Text ([string]$row.File) -Width $cwFile -UseEllipsis
 
-                Write-UiSegmentLine -Segments @(
-                    [PSCustomObject]@{
-                        Text  = $cTimeText
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $cStatText
-                        Color = $statusColor
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $cCmpText
-                        Color = $cmpColor
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $cSavedText
-                        Color = $savedColor
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $cVerifyText
-                        Color = $verificationColor
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $cFileText
-                        Color = [ConsoleColor]::Gray
-                    }
-                )
-            }
-            else {
-                $timeText = Fit-DisplayText -Text ([string]$row.Time) -Width $wTime
-                $statusText = Fit-DisplayText -Text ([string]$row.Status) -Width $wStat
-                $attemptText = Fit-DisplayText -Text ([string]$row.Attempt) -Width $wTry2
-                $cmpText = Fit-DisplayText -Text ([string]$row.CompressionPct) -Width $wComp
-                $savedText = Fit-DisplayText -Text ([string]$row.Saved) -Width $wSaved
-                $verifyText = Fit-DisplayText -Text $verificationDisplay -Width $wHash -UseEllipsis
-                $fileText = Fit-DisplayText -Text ([string]$row.File) -Width $wFile -UseEllipsis
-                $detailText = Fit-DisplayText -Text ([string]$row.Detail) -Width $wDetail -UseEllipsis
+            $cols = [System.Collections.Generic.List[object]]::new()
+            $cols.Add(@{ Text = $row.Time;           Width = $eTime; Color = 'DarkGray' }) | Out-Null
+            $cols.Add(@{ Text = $row.Status;         Width = $eStat; Color = $statusColor }) | Out-Null
+            if ($showAttempt) { $cols.Add(@{ Text = $row.Attempt; Width = $eTry; Color = 'Gray' }) | Out-Null }
+            $cols.Add(@{ Text = $row.CompressionPct; Width = $eComp; Color = $cmpColor }) | Out-Null
+            if ($showSaved) { $cols.Add(@{ Text = $row.Saved;    Width = $eSaved; Color = $cmpColor }) | Out-Null }
+            $cols.Add(@{ Text = $verificationDisplay; Width = $eHash; Color = $verificationColor; Ellipsis = $true }) | Out-Null
+            $cols.Add(@{ Text = $row.File;           Width = $eFile; Color = 'Gray'; Ellipsis = $true }) | Out-Null
+            if ($showDetail) { $cols.Add(@{ Text = $row.Detail; Width = $eDetail; Color = 'DarkGray'; Ellipsis = $true }) | Out-Null }
 
-                Write-UiSegmentLine -Segments @(
-                    [PSCustomObject]@{
-                        Text  = $timeText
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $statusText
-                        Color = $statusColor
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $attemptText
-                        Color = [ConsoleColor]::Gray
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $cmpText
-                        Color = $cmpColor
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $savedText
-                        Color = $savedColor
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $verifyText
-                        Color = $verificationColor
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $fileText
-                        Color = [ConsoleColor]::Gray
-                    },
-                    [PSCustomObject]@{
-                        Text  = '|'
-                        Color = [ConsoleColor]::DarkGray
-                    },
-                    [PSCustomObject]@{
-                        Text  = $detailText
-                        Color = [ConsoleColor]::DarkGray
-                    }
-                )
-            }
+            Write-UiTableRow -Columns @($cols)
         }
 
         for ($i = $rowsToPrint; $i -lt $eventRows; $i++) {
