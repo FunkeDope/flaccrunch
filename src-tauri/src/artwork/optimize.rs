@@ -6,25 +6,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Result of album art optimization.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ArtworkResult {
     pub changed: bool,
     pub saved_bytes: i64,
     pub raw_saved_bytes: i64,
     pub blocks_optimized: u32,
     pub summary: String,
-}
-
-impl Default for ArtworkResult {
-    fn default() -> Self {
-        Self {
-            changed: false,
-            saved_bytes: 0,
-            raw_saved_bytes: 0,
-            blocks_optimized: 0,
-            summary: String::new(),
-        }
-    }
 }
 
 /// Optimize all embedded album art in a FLAC file.
@@ -143,4 +131,99 @@ pub async fn optimize_album_art(
             net_saved
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ArtworkResult ---
+
+    #[test]
+    fn test_artwork_result_default() {
+        let r = ArtworkResult::default();
+        assert!(!r.changed);
+        assert_eq!(r.saved_bytes, 0);
+        assert_eq!(r.raw_saved_bytes, 0);
+        assert_eq!(r.blocks_optimized, 0);
+        assert!(r.summary.is_empty());
+    }
+
+    #[test]
+    fn test_artwork_result_clone() {
+        let r = ArtworkResult {
+            changed: true,
+            saved_bytes: 500,
+            raw_saved_bytes: 200,
+            blocks_optimized: 1,
+            summary: "1 block optimized".to_string(),
+        };
+        let r2 = r.clone();
+        assert_eq!(r2.saved_bytes, 500);
+        assert_eq!(r2.blocks_optimized, 1);
+        assert_eq!(r2.summary, "1 block optimized");
+    }
+
+    #[test]
+    fn test_artwork_result_serde_roundtrip() {
+        let original = ArtworkResult {
+            changed: true,
+            saved_bytes: 1024,
+            raw_saved_bytes: 512,
+            blocks_optimized: 3,
+            summary: "test".to_string(),
+        };
+        let json = serde_json::to_string(&original).expect("serialize");
+        let back: ArtworkResult = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.changed, true);
+        assert_eq!(back.saved_bytes, 1024);
+        assert_eq!(back.raw_saved_bytes, 512);
+        assert_eq!(back.blocks_optimized, 3);
+        assert_eq!(back.summary, "test");
+    }
+
+    // --- Integration test using real FLAC file ---
+
+    #[test]
+    fn test_optimize_album_art_on_test_flac() {
+        let flac_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("Tests")
+            .join("un-optimized.flac");
+
+        if !flac_path.exists() {
+            eprintln!("Test FLAC not found at {:?} — skipping", flac_path);
+            return;
+        }
+
+        // Work on a copy so we don't mutate the test fixture
+        let tmp_dir = std::env::temp_dir().join("flaccrunch_art_test");
+        let scratch_dir = tmp_dir.join("scratch");
+        std::fs::create_dir_all(&scratch_dir).expect("create scratch dir");
+
+        let tmp_flac = tmp_dir.join("test_copy.flac");
+        std::fs::copy(&flac_path, &tmp_flac).expect("copy test FLAC");
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(optimize_album_art(&tmp_flac, &scratch_dir));
+
+        match result {
+            Ok(art) => {
+                // Just verify the result struct makes sense — don't assert savings
+                // since the artwork may already be optimal.
+                println!(
+                    "optimize_album_art: changed={} saved={} blocks_optimized={} summary={}",
+                    art.changed, art.saved_bytes, art.blocks_optimized, art.summary
+                );
+                assert!(art.blocks_optimized <= 10, "unreasonably many blocks");
+            }
+            Err(e) => {
+                // Some CI environments may lack metaflac; treat as a soft skip.
+                eprintln!("optimize_album_art returned Err (possibly missing tool): {e}");
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
 }

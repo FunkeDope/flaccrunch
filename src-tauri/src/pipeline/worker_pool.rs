@@ -79,7 +79,7 @@ pub async fn run_worker_pool(
             }
             PipelineEvent::FileCompleted { worker_id, event: file_event, .. } => {
                 // Record the event in run state (updates counters)
-                run_state.record_event(file_event.clone());
+                run_state.record_event(*file_event.clone());
                 // Read updated counters and re-emit with snapshot
                 let counters = run_state.counters.read().unwrap_or_else(|e| e.into_inner()).clone();
                 let enriched = PipelineEvent::FileCompleted {
@@ -149,7 +149,7 @@ async fn worker_loop(
             let _ = event_tx
                 .send(PipelineEvent::FileCompleted {
                     worker_id,
-                    event: file_event,
+                    event: Box::new(file_event),
                     counters: dummy_counters,
                 })
                 .await;
@@ -157,7 +157,7 @@ async fn worker_loop(
             let _ = event_tx
                 .send(PipelineEvent::FileCompleted {
                     worker_id,
-                    event: file_event,
+                    event: Box::new(file_event),
                     counters: dummy_counters,
                 })
                 .await;

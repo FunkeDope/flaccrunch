@@ -47,21 +47,21 @@ fn hash_decoded_audio_native(file_path: &Path) -> Result<String, String> {
 
                 match bps {
                     8 => {
-                        state.hasher.update(&(sample as i8).to_le_bytes());
+                        state.hasher.update((sample as i8).to_le_bytes());
                     }
                     16 => {
-                        state.hasher.update(&(sample as i16).to_le_bytes());
+                        state.hasher.update((sample as i16).to_le_bytes());
                     }
                     24 => {
                         let bytes = sample.to_le_bytes();
                         state.hasher.update(&bytes[..3]);
                     }
                     32 => {
-                        state.hasher.update(&sample.to_le_bytes());
+                        state.hasher.update(sample.to_le_bytes());
                     }
                     _ => {
                         // For non-standard bit depths, use the appropriate byte width
-                        let byte_width = ((bps + 7) / 8) as usize;
+                        let byte_width = bps.div_ceil(8) as usize;
                         let bytes = sample.to_le_bytes();
                         state.hasher.update(&bytes[..byte_width]);
                     }
@@ -138,4 +138,65 @@ fn hash_decoded_audio_native(file_path: &Path) -> Result<String, String> {
 
     let result = state.hasher.finalize();
     Ok(format!("{:032x}", result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The hash of zero bytes (empty input) in MD5.
+    const MD5_EMPTY: &str = "d41d8cd98f00b204e9800998ecf8427e";
+
+    #[test]
+    fn test_hash_decoded_audio_returns_32_hex_chars_on_real_flac() {
+        let flac_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("Tests")
+            .join("un-optimized.flac");
+
+        if !flac_path.exists() {
+            eprintln!("Test FLAC not found at {:?} — skipping", flac_path);
+            return;
+        }
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(hash_decoded_audio(&flac_path));
+
+        let hash = result.expect("hash_decoded_audio should succeed on test FLAC");
+        assert_eq!(hash.len(), 32, "MD5 hex string must be 32 characters, got: {hash}");
+        assert!(
+            hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "MD5 must be lowercase hex digits, got: {hash}"
+        );
+        // The actual audio is not silence, so hash must not be the MD5 of empty bytes
+        assert_ne!(hash, MD5_EMPTY, "real audio hash must not be MD5 of empty bytes");
+    }
+
+    #[test]
+    fn test_hash_decoded_audio_is_deterministic() {
+        let flac_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("Tests")
+            .join("un-optimized.flac");
+
+        if !flac_path.exists() {
+            eprintln!("Test FLAC not found — skipping determinism test");
+            return;
+        }
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let h1 = rt.block_on(hash_decoded_audio(&flac_path)).expect("first hash");
+        let h2 = rt.block_on(hash_decoded_audio(&flac_path)).expect("second hash");
+        assert_eq!(h1, h2, "hash must be deterministic");
+    }
+
+    #[test]
+    fn test_hash_decoded_audio_errors_on_missing_file() {
+        let missing = Path::new("/nonexistent/path/that/does/not/exist.flac");
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(hash_decoded_audio(missing));
+        assert!(result.is_err(), "should error on missing file");
+    }
 }

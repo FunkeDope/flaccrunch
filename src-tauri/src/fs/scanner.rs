@@ -99,16 +99,14 @@ pub fn scan_for_flac_files(paths: &[PathBuf]) -> ScanResult {
 /// Remove stale .tmp files where a matching .flac file exists.
 pub fn cleanup_stale_temps(folders: &[PathBuf]) {
     for folder in folders {
-        for entry in WalkDir::new(folder).follow_links(true) {
-            if let Ok(entry) = entry {
-                if entry.file_type().is_file() {
-                    let path = entry.path();
-                    if let Some(ext) = path.extension() {
-                        if ext.eq_ignore_ascii_case("tmp") {
-                            let flac_path = path.with_extension("flac");
-                            if flac_path.exists() {
-                                let _ = std::fs::remove_file(path);
-                            }
+        for entry in WalkDir::new(folder).follow_links(true).into_iter().flatten() {
+            if entry.file_type().is_file() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext.eq_ignore_ascii_case("tmp") {
+                        let flac_path = path.with_extension("flac");
+                        if flac_path.exists() {
+                            let _ = std::fs::remove_file(path);
                         }
                     }
                 }

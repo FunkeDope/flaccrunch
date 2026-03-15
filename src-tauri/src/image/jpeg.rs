@@ -61,7 +61,7 @@ fn extract_dqt_tables(data: &[u8]) -> Option<([u16; 64], Option<[u16; 64]>)> {
     while pos + 3 < data.len() {
         if data[pos] != 0xFF { break; }
         let marker = data[pos + 1];
-        if matches!(marker, 0xD8 | 0xD9 | 0xD0..=0xD7) { pos += 2; continue; }
+        if matches!(marker, 0xD0..=0xD9) { pos += 2; continue; }
         if pos + 4 > data.len() { break; }
         let seg_len = ((data[pos + 2] as usize) << 8) | (data[pos + 3] as usize);
         let seg_end = pos + 2 + seg_len;
@@ -98,7 +98,7 @@ fn detect_sampling(data: &[u8]) -> jpeg_encoder::SamplingFactor {
     while pos + 3 < data.len() {
         if data[pos] != 0xFF { break; }
         let marker = data[pos + 1];
-        if matches!(marker, 0xD8 | 0xD9 | 0xD0..=0xD7) { pos += 2; continue; }
+        if matches!(marker, 0xD0..=0xD9) { pos += 2; continue; }
         if pos + 4 > data.len() { break; }
         let seg_len = ((data[pos + 2] as usize) << 8) | (data[pos + 3] as usize);
         let seg_end = pos + 2 + seg_len;
@@ -151,8 +151,8 @@ fn optimize_jpeg_huffman(data: &[u8]) -> Option<Vec<u8>> {
     let mut decoder = zune_jpeg::JpegDecoder::new_with_options(data, options);
     decoder.decode_headers().ok()?;
     let info = decoder.info()?;
-    let width = info.width as u16;
-    let height = info.height as u16;
+    let width = info.width;
+    let height = info.height;
     let pixels = decoder.decode().ok()?;
 
     use jpeg_encoder::{Encoder, ColorType, QuantizationTableType};

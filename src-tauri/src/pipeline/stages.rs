@@ -41,7 +41,7 @@ pub enum PipelineEvent {
     },
     FileCompleted {
         worker_id: usize,
-        event: FileEvent,
+        event: Box<FileEvent>,
         counters: RunCounters,
     },
     /// Emitted immediately after a hash finishes computing, so the UI can

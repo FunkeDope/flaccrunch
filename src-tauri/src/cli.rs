@@ -184,8 +184,7 @@ async fn run_cli_async(args: CliArgs) -> i32 {
     }
     drop(event_tx);
 
-    let mut counters = RunCounters::default();
-    counters.total_files = total_files;
+    let mut counters = RunCounters { total_files, ..Default::default() };
     let start = std::time::Instant::now();
 
     while let Some(event) = event_rx.recv().await {
@@ -265,7 +264,7 @@ fn print_file_event(fe: &FileEvent, counters: &mut RunCounters) {
     counters.processed += 1;
 
     // Inline progress on stderr every 10 files
-    if counters.processed % 10 == 0 || counters.processed == counters.total_files {
+    if counters.processed.is_multiple_of(10) || counters.processed == counters.total_files {
         let pct = if counters.total_files > 0 {
             counters.processed as f64 / counters.total_files as f64 * 100.0
         } else {
@@ -306,10 +305,165 @@ async fn worker_loop(
         let _ = event_tx
             .send(PipelineEvent::FileCompleted {
                 worker_id,
-                event: fe,
+                event: Box::new(fe),
                 counters: RunCounters::default(),
             })
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(val: &str) -> String {
+        val.to_string()
+    }
+
+    fn args(vals: &[&str]) -> Vec<String> {
+        vals.iter().map(|v| v.to_string()).collect()
+    }
+
+    // --- parse_cli_args ---
+
+    #[test]
+    fn test_defaults_on_empty_args() {
+        let result = parse_cli_args(&[]);
+        assert!(result.paths.is_empty());
+        assert!(!result.silent);
+        assert!(result.threads.is_none());
+        assert_eq!(result.retries, 3);
+        assert!(result.log_dir.is_none());
+        assert!(!result.help);
+    }
+
+    #[test]
+    fn test_silent_short_flag() {
+        let result = parse_cli_args(&args(&["-silent"]));
+        assert!(result.silent);
+    }
+
+    #[test]
+    fn test_silent_long_flag() {
+        let result = parse_cli_args(&args(&["--silent"]));
+        assert!(result.silent);
+    }
+
+    #[test]
+    fn test_help_short_dash() {
+        let result = parse_cli_args(&args(&["-help"]));
+        assert!(result.help);
+    }
+
+    #[test]
+    fn test_help_long_flag() {
+        let result = parse_cli_args(&args(&["--help"]));
+        assert!(result.help);
+    }
+
+    #[test]
+    fn test_help_h_flag() {
+        let result = parse_cli_args(&args(&["-h"]));
+        assert!(result.help);
+    }
+
+    #[test]
+    fn test_help_windows_style() {
+        let result = parse_cli_args(&args(&["/?"]));
+        assert!(result.help);
+    }
+
+    #[test]
+    fn test_threads_valid() {
+        let result = parse_cli_args(&args(&["-threads", "4"]));
+        assert_eq!(result.threads, Some(4));
+    }
+
+    #[test]
+    fn test_threads_zero_clamped_to_one() {
+        let result = parse_cli_args(&args(&["-threads", "0"]));
+        assert_eq!(result.threads, Some(1));
+    }
+
+    #[test]
+    fn test_threads_no_value_does_not_crash() {
+        let result = parse_cli_args(&args(&["-threads"]));
+        assert!(result.threads.is_none());
+    }
+
+    #[test]
+    fn test_threads_invalid_value_ignored() {
+        let result = parse_cli_args(&args(&["-threads", "invalid"]));
+        assert!(result.threads.is_none());
+    }
+
+    #[test]
+    fn test_threads_long_flag() {
+        let result = parse_cli_args(&args(&["--threads", "8"]));
+        assert_eq!(result.threads, Some(8));
+    }
+
+    #[test]
+    fn test_retries_set() {
+        let result = parse_cli_args(&args(&["-retries", "5"]));
+        assert_eq!(result.retries, 5);
+    }
+
+    #[test]
+    fn test_retries_zero() {
+        let result = parse_cli_args(&args(&["-retries", "0"]));
+        assert_eq!(result.retries, 0);
+    }
+
+    #[test]
+    fn test_logdir_set() {
+        let result = parse_cli_args(&args(&["-logdir", "/some/path"]));
+        assert_eq!(result.log_dir, Some(s("/some/path")));
+    }
+
+    #[test]
+    fn test_logdir_long_flag() {
+        let result = parse_cli_args(&args(&["--logdir", "/another/path"]));
+        assert_eq!(result.log_dir, Some(s("/another/path")));
+    }
+
+    #[test]
+    fn test_unknown_flags_treated_as_paths() {
+        let result = parse_cli_args(&args(&["/music", "/more"]));
+        assert_eq!(result.paths, vec![s("/music"), s("/more")]);
+    }
+
+    #[test]
+    fn test_combined_flags_and_paths() {
+        let result = parse_cli_args(&args(&["-silent", "-threads", "2", "/music", "/more"]));
+        assert!(result.silent);
+        assert_eq!(result.threads, Some(2));
+        assert_eq!(result.paths, vec![s("/music"), s("/more")]);
+        assert!(!result.help);
+    }
+
+    #[test]
+    fn test_all_options_together() {
+        let result = parse_cli_args(&args(&[
+            "-silent",
+            "--threads", "4",
+            "-retries", "7",
+            "-logdir", "/logs",
+            "/path/to/music",
+        ]));
+        assert!(result.silent);
+        assert_eq!(result.threads, Some(4));
+        assert_eq!(result.retries, 7);
+        assert_eq!(result.log_dir, Some(s("/logs")));
+        assert_eq!(result.paths, vec![s("/path/to/music")]);
+    }
+
+    #[test]
+    fn test_help_does_not_affect_other_fields() {
+        let result = parse_cli_args(&args(&["--help"]));
+        assert!(result.help);
+        assert!(!result.silent);
+        assert!(result.threads.is_none());
     }
 }
 

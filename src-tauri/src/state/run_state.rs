@@ -205,3 +205,327 @@ impl RunState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_ok_event(file: &str, before: u64, after: u64, saved: i64, compression_pct: f64) -> FileEvent {
+        FileEvent {
+            time: "12:00:00".to_string(),
+            status: FileStatus::OK,
+            file: file.to_string(),
+            attempt: "1".to_string(),
+            verification: "OK".to_string(),
+            before_size: before,
+            after_size: after,
+            saved_bytes: saved,
+            compression_pct,
+            detail: String::new(),
+            source_hash: None,
+            output_hash: None,
+            embedded_md5: None,
+            artwork_saved_bytes: 0,
+            artwork_raw_saved_bytes: 0,
+            artwork_blocks_optimized: 0,
+        }
+    }
+
+    fn make_fail_event(file: &str) -> FileEvent {
+        FileEvent {
+            time: "12:00:00".to_string(),
+            status: FileStatus::FAIL,
+            file: file.to_string(),
+            attempt: "3".to_string(),
+            verification: String::new(),
+            before_size: 0,
+            after_size: 0,
+            saved_bytes: 0,
+            compression_pct: 0.0,
+            detail: "some error".to_string(),
+            source_hash: None,
+            output_hash: None,
+            embedded_md5: None,
+            artwork_saved_bytes: 0,
+            artwork_raw_saved_bytes: 0,
+            artwork_blocks_optimized: 0,
+        }
+    }
+
+    fn make_retry_event(file: &str) -> FileEvent {
+        FileEvent {
+            time: "12:00:00".to_string(),
+            status: FileStatus::RETRY,
+            file: file.to_string(),
+            attempt: "1".to_string(),
+            verification: String::new(),
+            before_size: 0,
+            after_size: 0,
+            saved_bytes: 0,
+            compression_pct: 0.0,
+            detail: String::new(),
+            source_hash: None,
+            output_hash: None,
+            embedded_md5: None,
+            artwork_saved_bytes: 0,
+            artwork_raw_saved_bytes: 0,
+            artwork_blocks_optimized: 0,
+        }
+    }
+
+    // --- RunCounters ---
+
+    #[test]
+    fn test_run_counters_default_all_zero() {
+        let c = RunCounters::default();
+        assert_eq!(c.total_files, 0);
+        assert_eq!(c.processed, 0);
+        assert_eq!(c.successful, 0);
+        assert_eq!(c.failed, 0);
+        assert_eq!(c.total_original_bytes, 0);
+        assert_eq!(c.total_new_bytes, 0);
+        assert_eq!(c.total_saved_bytes, 0);
+        assert_eq!(c.total_metadata_saved, 0);
+        assert_eq!(c.total_padding_saved, 0);
+        assert_eq!(c.total_artwork_saved, 0);
+        assert_eq!(c.total_artwork_raw_saved, 0);
+        assert_eq!(c.artwork_optimized_files, 0);
+        assert_eq!(c.artwork_optimized_blocks, 0);
+    }
+
+    #[test]
+    fn test_run_counters_clone() {
+        let mut c = RunCounters::default();
+        c.total_files = 10;
+        c.successful = 8;
+        let c2 = c.clone();
+        assert_eq!(c2.total_files, 10);
+        assert_eq!(c2.successful, 8);
+    }
+
+    // --- FileStatus ---
+
+    #[test]
+    fn test_file_status_eq() {
+        assert_eq!(FileStatus::OK, FileStatus::OK);
+        assert_eq!(FileStatus::FAIL, FileStatus::FAIL);
+        assert_eq!(FileStatus::RETRY, FileStatus::RETRY);
+        assert_ne!(FileStatus::OK, FileStatus::FAIL);
+    }
+
+    #[test]
+    fn test_file_status_clone() {
+        let s = FileStatus::OK;
+        let s2 = s.clone();
+        assert_eq!(s, s2);
+    }
+
+    // --- WorkerState ---
+
+    #[test]
+    fn test_worker_state_variants_eq() {
+        assert_eq!(WorkerState::Idle, WorkerState::Idle);
+        assert_eq!(WorkerState::Converting, WorkerState::Converting);
+        assert_eq!(WorkerState::Hashing, WorkerState::Hashing);
+        assert_eq!(WorkerState::Artwork, WorkerState::Artwork);
+        assert_eq!(WorkerState::Finalizing, WorkerState::Finalizing);
+        assert_ne!(WorkerState::Idle, WorkerState::Converting);
+    }
+
+    #[test]
+    fn test_worker_state_clone() {
+        let ws = WorkerState::Hashing;
+        assert_eq!(ws.clone(), WorkerState::Hashing);
+    }
+
+    // --- RunState construction ---
+
+    #[test]
+    fn test_run_state_new_initialises_workers() {
+        let rs = RunState::new("run-1".to_string(), 3);
+        let workers = rs.workers.read().unwrap();
+        assert_eq!(workers.len(), 3);
+        for (i, w) in workers.iter().enumerate() {
+            assert_eq!(w.id, i);
+            assert_eq!(w.state, WorkerState::Idle);
+            assert!(w.file.is_none());
+            assert_eq!(w.percent, 0);
+            assert!(w.ratio.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_run_state_initial_status_is_scanning() {
+        let rs = RunState::new("run-2".to_string(), 1);
+        let status = rs.status.read().unwrap();
+        assert_eq!(*status, ProcessingStatus::Scanning);
+    }
+
+    #[test]
+    fn test_run_state_counters_start_zero() {
+        let rs = RunState::new("run-3".to_string(), 2);
+        let counters = rs.counters.read().unwrap();
+        assert_eq!(counters.processed, 0);
+        assert_eq!(counters.successful, 0);
+        assert_eq!(counters.failed, 0);
+    }
+
+    // --- RunState::record_event ---
+
+    #[test]
+    fn test_record_ok_event_updates_counters() {
+        let rs = RunState::new("run-4".to_string(), 1);
+        let event = make_ok_event("/music/a.flac", 1000, 800, 200, 20.0);
+        rs.record_event(event);
+        let c = rs.counters.read().unwrap();
+        assert_eq!(c.processed, 1);
+        assert_eq!(c.successful, 1);
+        assert_eq!(c.failed, 0);
+        assert_eq!(c.total_saved_bytes, 200);
+        assert_eq!(c.total_original_bytes, 1000);
+        assert_eq!(c.total_new_bytes, 800);
+    }
+
+    #[test]
+    fn test_record_fail_event_updates_counters() {
+        let rs = RunState::new("run-5".to_string(), 1);
+        let event = make_fail_event("/music/bad.flac");
+        rs.record_event(event);
+        let c = rs.counters.read().unwrap();
+        assert_eq!(c.processed, 1);
+        assert_eq!(c.successful, 0);
+        assert_eq!(c.failed, 1);
+    }
+
+    #[test]
+    fn test_record_retry_does_not_increment_processed() {
+        let rs = RunState::new("run-6".to_string(), 1);
+        let event = make_retry_event("/music/retry.flac");
+        rs.record_event(event);
+        let c = rs.counters.read().unwrap();
+        // RETRY increments then decrements processed, net 0
+        assert_eq!(c.processed, 0);
+    }
+
+    #[test]
+    fn test_recent_events_capped_at_25() {
+        let rs = RunState::new("run-7".to_string(), 1);
+        for i in 0..30 {
+            let event = make_ok_event(&format!("/music/{i}.flac"), 1000, 900, 100, 10.0);
+            rs.record_event(event);
+        }
+        let events = rs.recent_events.read().unwrap();
+        assert_eq!(events.len(), 25);
+    }
+
+    #[test]
+    fn test_top_compression_sorted_and_truncated() {
+        let rs = RunState::new("run-8".to_string(), 1);
+        rs.record_event(make_ok_event("/a.flac", 1000, 800, 200, 20.0));
+        rs.record_event(make_ok_event("/b.flac", 2000, 1400, 600, 30.0));
+        rs.record_event(make_ok_event("/c.flac", 3000, 2000, 1000, 33.3));
+        rs.record_event(make_ok_event("/d.flac", 5000, 4500, 500, 10.0));
+        let top = rs.top_compression.read().unwrap();
+        assert_eq!(top.len(), 3);
+        // should be sorted by saved_bytes descending: 1000, 600, 500
+        assert_eq!(top[0].saved_bytes, 1000);
+        assert_eq!(top[1].saved_bytes, 600);
+        assert_eq!(top[2].saved_bytes, 500);
+    }
+
+    #[test]
+    fn test_ok_event_with_no_savings_does_not_enter_top_compression() {
+        let rs = RunState::new("run-9".to_string(), 1);
+        let event = make_ok_event("/music/flat.flac", 1000, 1000, 0, 0.0);
+        rs.record_event(event);
+        let top = rs.top_compression.read().unwrap();
+        assert!(top.is_empty());
+    }
+
+    // --- RunState::update_worker ---
+
+    #[test]
+    fn test_update_worker_changes_state() {
+        let rs = RunState::new("run-10".to_string(), 2);
+        rs.update_worker(1, WorkerState::Converting, Some("/music/x.flac".to_string()), 50, "0.80".to_string());
+        let workers = rs.workers.read().unwrap();
+        let w = &workers[1];
+        assert_eq!(w.state, WorkerState::Converting);
+        assert_eq!(w.file, Some("/music/x.flac".to_string()));
+        assert_eq!(w.percent, 50);
+        assert_eq!(w.ratio, "0.80");
+    }
+
+    #[test]
+    fn test_update_worker_out_of_range_is_no_op() {
+        let rs = RunState::new("run-11".to_string(), 2);
+        // Worker id 99 does not exist; should not panic
+        rs.update_worker(99, WorkerState::Hashing, None, 0, String::new());
+        let workers = rs.workers.read().unwrap();
+        assert_eq!(workers.len(), 2);
+    }
+
+    // --- ProcessingStatus ---
+
+    #[test]
+    fn test_processing_status_eq() {
+        assert_eq!(ProcessingStatus::Idle, ProcessingStatus::Idle);
+        assert_ne!(ProcessingStatus::Idle, ProcessingStatus::Processing);
+    }
+
+    // --- Serde roundtrips ---
+
+    #[test]
+    fn test_file_status_serde_roundtrip() {
+        let statuses = [FileStatus::OK, FileStatus::FAIL, FileStatus::RETRY];
+        for status in &statuses {
+            let json = serde_json::to_string(status).expect("serialize");
+            let back: FileStatus = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(status, &back);
+        }
+    }
+
+    #[test]
+    fn test_worker_state_serde_roundtrip() {
+        let states = [
+            WorkerState::Idle,
+            WorkerState::Converting,
+            WorkerState::Hashing,
+            WorkerState::Artwork,
+            WorkerState::Finalizing,
+        ];
+        for state in &states {
+            let json = serde_json::to_string(state).expect("serialize");
+            let back: WorkerState = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(state, &back);
+        }
+    }
+
+    #[test]
+    fn test_run_counters_serde_roundtrip() {
+        let mut c = RunCounters::default();
+        c.total_files = 5;
+        c.successful = 4;
+        c.failed = 1;
+        let json = serde_json::to_string(&c).expect("serialize");
+        let back: RunCounters = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.total_files, 5);
+        assert_eq!(back.successful, 4);
+        assert_eq!(back.failed, 1);
+    }
+
+    #[test]
+    fn test_artwork_blocks_optimized_counter() {
+        let rs = RunState::new("run-art".to_string(), 1);
+        let mut event = make_ok_event("/art.flac", 2000, 1800, 200, 10.0);
+        event.artwork_saved_bytes = 50;
+        event.artwork_raw_saved_bytes = 60;
+        event.artwork_blocks_optimized = 2;
+        rs.record_event(event);
+        let c = rs.counters.read().unwrap();
+        assert_eq!(c.artwork_optimized_files, 1);
+        assert_eq!(c.artwork_optimized_blocks, 2);
+        assert_eq!(c.total_artwork_saved, 50);
+        assert_eq!(c.total_artwork_raw_saved, 60);
+    }
+}

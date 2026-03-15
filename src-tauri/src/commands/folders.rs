@@ -228,7 +228,7 @@ pub async fn scan_folders(folders: Vec<String>) -> Result<scanner::ScanResult, S
 /// Validate that a folder path exists and is writable.
 #[tauri::command]
 pub async fn validate_folder(path: String) -> Result<bool, String> {
-    match scanner::validate_folder(&PathBuf::from(&path).as_path()) {
+    match scanner::validate_folder(PathBuf::from(&path).as_path()) {
         Ok(()) => Ok(true),
         Err(e) => Err(e),
     }

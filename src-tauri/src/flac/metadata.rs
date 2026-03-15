@@ -177,7 +177,7 @@ fn export_picture_native(flac_path: &Path, target_block: u32, output_path: &Path
                 let pic = &(*block).data.picture;
                 if !pic.data.is_null() && pic.data_length > 0 {
                     let data = std::slice::from_raw_parts(pic.data, pic.data_length as usize);
-                    std::fs::write(&output_path, data)
+                    std::fs::write(output_path, data)
                         .map_err(|e| format!("Failed to write picture: {e}"))?;
                     found = true;
                 }
@@ -444,11 +444,9 @@ fn remove_padding_native(flac_path: &Path) -> Result<(), String> {
 
         FLAC__metadata_iterator_delete(iter);
 
-        if removed_any {
-            if FLAC__metadata_chain_write(chain, 0, 0) == 0 { // no padding
-                FLAC__metadata_chain_delete(chain);
-                return Err("Failed to write metadata chain after padding removal".to_string());
-            }
+        if removed_any && FLAC__metadata_chain_write(chain, 0, 0) == 0 { // no padding
+            FLAC__metadata_chain_delete(chain);
+            return Err("Failed to write metadata chain after padding removal".to_string());
         }
 
         FLAC__metadata_chain_delete(chain);

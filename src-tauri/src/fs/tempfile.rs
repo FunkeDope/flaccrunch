@@ -43,7 +43,7 @@ pub fn safe_move(from: &Path, to: &Path) -> io::Result<()> {
             Ok(())
         }
         Err(_) => Err(last_err.unwrap_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "Failed to move file after retries")
+            io::Error::other("Failed to move file after retries")
         })),
     }
 }

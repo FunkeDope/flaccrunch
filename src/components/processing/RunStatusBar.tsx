@@ -37,12 +37,14 @@ export function RunStatusBar({
   const isComplete = status === "complete";
   const elapsed = useElapsed(startTime, isRunning);
 
-  // pct shown in text label (integer, stable); barPct drives the bar width (live, smooth)
-  const pct =
-    counters.totalFiles > 0
+  // barPct drives the bar width (live, blended with in-flight worker progress).
+  // pct is the integer label — always matches the bar so they stay in sync.
+  const barPct =
+    livePct ??
+    (counters.totalFiles > 0
       ? Math.round((counters.processed / counters.totalFiles) * 100)
-      : 0;
-  const barPct = livePct ?? pct;
+      : 0);
+  const pct = Math.round(barPct);
 
   // Determine completion color class
   let barClass = "";
