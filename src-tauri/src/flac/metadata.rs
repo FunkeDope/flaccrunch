@@ -104,7 +104,7 @@ fn list_picture_blocks_native(flac_path: &Path) -> Result<Vec<PictureBlock>, Str
                     String::new()
                 } else {
                     // description is FLAC__byte* (u8*), treat as UTF-8
-                    let desc_cstr = std::ffi::CStr::from_ptr(pic.description as *const i8);
+                    let desc_cstr = std::ffi::CStr::from_ptr(pic.description as *const std::os::raw::c_char);
                     desc_cstr.to_string_lossy().into_owned()
                 };
 
@@ -342,7 +342,7 @@ fn import_picture_native(flac_path: &Path, spec: &str) -> Result<(), String> {
 
         FLAC__metadata_object_picture_set_mime_type(
             picture,
-            mime_cstr.as_ptr() as *mut i8,
+            mime_cstr.as_ptr() as *mut std::os::raw::c_char,
             1, // copy
         );
         FLAC__metadata_object_picture_set_description(

@@ -6,10 +6,15 @@ use std::path::PathBuf;
 pub async fn select_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
-    let folder = app
-        .dialog()
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    app.dialog()
         .file()
-        .blocking_pick_folder();
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+
+    let folder = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
 
     match folder {
         Some(path) => Ok(vec![path.to_string()]),
