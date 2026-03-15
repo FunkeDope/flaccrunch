@@ -15,8 +15,21 @@ Root directory to scan recursively for FLAC files.
 .PARAMETER LogFolder
 Directory where run logs are stored. A timestamped subfolder is created per run.
 
+.PARAMETER Threads
+Optional worker count. Default: logical CPU count minus one.
+
+.PARAMETER RunTests
+Run Pester test suite and exit.
+
+.PARAMETER InstallDeps
+Auto-install required and optional dependencies without prompting.
+
+.PARAMETER ShowVersion
+Display version information and exit.
+
 .NOTES
-Requires `flac` and `metaflac` in PATH.
+Requires `flac` and `metaflac` in PATH or beside the script.
+Supports PowerShell 7+ on Windows and Linux.
 #>
 
 [CmdletBinding()]
@@ -27,14 +40,24 @@ param(
     $RootFolder,
 
     [Parameter(Mandatory = $false)]
-    [ValidateNotNullOrEmpty()]
-    [string]$LogFolder = (Join-Path -Path ([Environment]::GetFolderPath('Desktop')) -ChildPath 'EFC-logs'),
+    [string]$LogFolder,
 
     [Parameter(Mandatory = $false)]
     [Alias('Workers')]
     [ValidateRange(1, [int]::MaxValue)]
-    [int]$Threads
+    [int]$Threads,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$RunTests,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$InstallDeps,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ShowVersion
 )
+
+#region Script Header
 
 if (($null -eq $PSVersionTable) -or ($null -eq $PSVersionTable.PSVersion) -or ($PSVersionTable.PSVersion.Major -lt 7)) {
     throw "Start-ExactFlacCrunch.ps1 requires PowerShell 7 or newer. Windows PowerShell 5.x is not supported. Rerun this script with pwsh 7."
@@ -42,10 +65,40 @@ if (($null -eq $PSVersionTable) -or ($null -eq $PSVersionTable.PSVersion) -or ($
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+#endregion Script Header
+
+#region Constants
+
+$script:Version = '2.0.0'
+$script:NullHash = '00000000000000000000000000000000'
+$script:MaxAttemptsPerFile = 3
+$script:MoveItemMaxRetries = 5
+$script:MoveItemRetryBaseMs = 200
+$script:RunLogFlushIntervalSeconds = 2
+$script:RunLogMaxBufferedLines = 40
+$script:UiFrameIntervalMs = 250
+$script:StatusIntervalSeconds = 10
+$script:RecentEventsCapacity = 250
+$script:RecentEventsDisplayCount = 25
+$script:FlacEncodeArgs = '-8 -e -p -V -f'
+$script:ProgressTailBytes = 24576L
+$script:HashBufferSize = 65536
+$script:ProgressCacheDelayMs = 700
+$script:MinFlacVersion = '1.3.0'
+
+#endregion Constants
+
+#region Platform Detection
+
+# Avoid overriding $IsWindows (automatic variable in PowerShell 7).
+$script:IsWindowsHost = ($env:OS -eq 'Windows_NT')
+
+#endregion Platform Detection
+
 $script:RunLogBuffer = [System.Collections.Generic.List[string]]::new()
 $script:RunLogLastFlushUtc = [DateTime]::UtcNow
-$script:RunLogFlushInterval = [TimeSpan]::FromSeconds(2)
-$script:RunLogMaxBufferedLines = 40
+$script:RunLogFlushInterval = [TimeSpan]::FromSeconds($script:RunLogFlushIntervalSeconds)
 $script:VerboseUiMessages = [System.Collections.Generic.List[string]]::new()
 $script:UiInteractiveMode = $false
 $script:VerboseLogFile = $null
@@ -59,7 +112,14 @@ try {
 }
 catch { }
 
-# Core helper functions
+# Handle -ShowVersion early exit
+if ($ShowVersion) {
+    Write-Host ("Exact Flac Cruncher v{0}" -f $script:Version)
+    Write-Host ("PowerShell {0} on {1}" -f $PSVersionTable.PSVersion, $(if ($script:IsWindowsHost) { 'Windows' } else { 'Linux/macOS' }))
+    return
+}
+
+#region Formatting Functions
 
 function Format-Bytes {
     param(
@@ -176,6 +236,10 @@ function Format-EacLogDateTime {
     return $Value.ToString('d. MMMM yyyy, H:mm', [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
+#endregion Formatting Functions
+
+#region Utility Functions
+
 function Get-TextSha256 {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
 
@@ -241,17 +305,24 @@ function Get-DefaultLogFolder {
         $homePath = (Get-Location).Path
     }
 
-    $desktopPath = [Environment]::GetFolderPath('Desktop')
-    if ([string]::IsNullOrWhiteSpace($desktopPath) -and -not [string]::IsNullOrWhiteSpace($homePath)) {
-        $desktopPath = Join-Path -Path $homePath -ChildPath 'Desktop'
+    # On Windows, prefer Desktop if it exists
+    if ($script:IsWindowsHost) {
+        $desktopPath = [Environment]::GetFolderPath('Desktop')
+        if ([string]::IsNullOrWhiteSpace($desktopPath) -and -not [string]::IsNullOrWhiteSpace($homePath)) {
+            $desktopPath = Join-Path -Path $homePath -ChildPath 'Desktop'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($desktopPath) -and (Test-Path -LiteralPath $desktopPath)) {
+            return (Join-Path -Path $desktopPath -ChildPath 'EFC-logs')
+        }
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($desktopPath) -and (Test-Path -LiteralPath $desktopPath)) {
-        return (Join-Path -Path $desktopPath -ChildPath 'EFC-logs')
-    }
-
+    # On Linux or when Desktop is unavailable, use $HOME/EFC-logs directly
     return (Join-Path -Path $homePath -ChildPath 'EFC-logs')
 }
+
+#endregion Utility Functions
+
+#region File Operations
 
 function Test-DirectoryWriteAccess {
     param([Parameter(Mandatory)][string]$Path)
@@ -328,6 +399,10 @@ function Escape-WildcardPath {
     param([Parameter(Mandatory)][string]$Path)
     return [System.Management.Automation.WildcardPattern]::Escape($Path)
 }
+
+#endregion File Operations
+
+#region Logging
 
 function Flush-RunLog {
     param([switch]$Force)
@@ -406,6 +481,10 @@ function Format-ErrSnippet {
     if ($singleLine.Length -le $MaxLength) { return $singleLine }
     return ("{0}..." -f $singleLine.Substring(0, $MaxLength))
 }
+
+#endregion Logging
+
+#region File Metadata
 
 function Safe-RemoveFile {
     param([Parameter(Mandatory)][string]$Path)
@@ -535,6 +614,10 @@ function Quote-WinArg {
     $sb.ToString()
 }
 
+#endregion File Metadata
+
+#region FLAC Operations
+
 function Try-GetFlacMd5 {
     param([Parameter(Mandatory)][string]$Path)
     try {
@@ -575,18 +658,33 @@ function Set-FlacMd5IfMissing {
     return ($after -eq $ExpectedMd5)
 }
 
+#endregion FLAC Operations
+
+#region Tool Resolution
+
 function Get-OptionalToolSearchDirectories {
     $dirs = [System.Collections.Generic.List[string]]::new()
 
-    $candidates = @(
-        "$env:LOCALAPPDATA\Microsoft\WinGet\Links",
-        "$env:LOCALAPPDATA\Microsoft\WindowsApps",
-        'C:\libjpeg-turbo64\bin',
-        'C:\libjpeg-turbo\bin',
-        "$env:ProgramFiles\libjpeg-turbo\bin",
-        "$env:ProgramFiles\libjpeg-turbo64\bin",
-        "$env:ProgramFiles(x86)\libjpeg-turbo\bin"
-    )
+    if ($script:IsWindowsHost) {
+        $candidates = @(
+            "$env:LOCALAPPDATA\Microsoft\WinGet\Links",
+            "$env:LOCALAPPDATA\Microsoft\WindowsApps",
+            'C:\libjpeg-turbo64\bin',
+            'C:\libjpeg-turbo\bin',
+            "$env:ProgramFiles\libjpeg-turbo\bin",
+            "$env:ProgramFiles\libjpeg-turbo64\bin",
+            "$env:ProgramFiles(x86)\libjpeg-turbo\bin"
+        )
+    }
+    else {
+        $candidates = @(
+            '/usr/bin',
+            '/usr/local/bin',
+            "$HOME/.local/bin",
+            '/snap/bin',
+            '/usr/lib/libjpeg-turbo/bin'
+        )
+    }
 
     foreach ($candidate in $candidates) {
         if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
@@ -599,6 +697,31 @@ function Get-OptionalToolSearchDirectories {
     return @($dirs)
 }
 
+function Find-ToolInDirectory {
+    param(
+        [Parameter(Mandatory)][string[]]$Names,
+        [Parameter(Mandatory)][string]$Directory
+    )
+
+    foreach ($name in $Names) {
+        $candidate = Join-Path -Path $Directory -ChildPath $name
+        if (Test-Path -LiteralPath $candidate) {
+            try {
+                $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+                if (-not $item.PSIsContainer) {
+                    return [PSCustomObject]@{
+                        Name   = [System.IO.Path]::GetFileNameWithoutExtension($item.Name)
+                        Source = $item.FullName
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
+    return $null
+}
+
 function Resolve-OptionalTool {
     param(
         [Parameter(Mandatory)][string[]]$Names,
@@ -606,39 +729,13 @@ function Resolve-OptionalTool {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($BaseDirectory)) {
-        foreach ($name in $Names) {
-            $candidate = Join-Path -Path $BaseDirectory -ChildPath $name
-            if (Test-Path -LiteralPath $candidate) {
-                try {
-                    $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
-                    if (-not $item.PSIsContainer) {
-                        return [PSCustomObject]@{
-                            Name   = [System.IO.Path]::GetFileNameWithoutExtension($item.Name)
-                            Source = $item.FullName
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
+        $found = Find-ToolInDirectory -Names $Names -Directory $BaseDirectory
+        if ($null -ne $found) { return $found }
     }
 
     foreach ($searchDir in @(Get-OptionalToolSearchDirectories)) {
-        foreach ($name in $Names) {
-            $candidate = Join-Path -Path $searchDir -ChildPath $name
-            if (Test-Path -LiteralPath $candidate) {
-                try {
-                    $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
-                    if (-not $item.PSIsContainer) {
-                        return [PSCustomObject]@{
-                            Name   = [System.IO.Path]::GetFileNameWithoutExtension($item.Name)
-                            Source = $item.FullName
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
+        $found = Find-ToolInDirectory -Names $Names -Directory $searchDir
+        if ($null -ne $found) { return $found }
     }
 
     foreach ($name in $Names) {
@@ -677,6 +774,176 @@ function Refresh-ProcessPathFromRegistry {
         }
     }
     catch { }
+}
+
+#endregion Tool Resolution
+
+#region Dependency Bootstrap
+
+function Get-SystemPackageManager {
+    if ($script:IsWindowsHost) {
+        $winget = Get-Command winget -ErrorAction SilentlyContinue
+        if ($winget) { return 'winget' }
+        $choco = Get-Command choco -ErrorAction SilentlyContinue
+        if ($choco) { return 'choco' }
+        return $null
+    }
+
+    $aptGet = Get-Command apt-get -ErrorAction SilentlyContinue
+    if ($aptGet) { return 'apt-get' }
+    $dnf = Get-Command dnf -ErrorAction SilentlyContinue
+    if ($dnf) { return 'dnf' }
+    $pacman = Get-Command pacman -ErrorAction SilentlyContinue
+    if ($pacman) { return 'pacman' }
+    return $null
+}
+
+function Install-RequiredDependencies {
+    param([switch]$NonInteractive)
+
+    $pkgMgr = Get-SystemPackageManager
+    if ($null -eq $pkgMgr) {
+        throw "No supported package manager found. Install flac and metaflac manually and add them to PATH."
+    }
+
+    if (-not $NonInteractive) {
+        $reply = ''
+        try {
+            $reply = [string](Read-Host ("flac/metaflac not found. Attempt install via {0}? [y/N]" -f $pkgMgr))
+        }
+        catch { return }
+        if ($reply.Trim().ToLowerInvariant() -notin @('y', 'yes')) { return }
+    }
+
+    Write-Host ("Installing FLAC tools via {0}..." -f $pkgMgr) -ForegroundColor Cyan
+    switch ($pkgMgr) {
+        'winget' {
+            & winget install FLAC.FLAC -e --source winget --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+            Refresh-ProcessPathFromRegistry
+        }
+        'choco' {
+            & choco install flac -y 2>&1 | Out-Null
+            Refresh-ProcessPathFromRegistry
+        }
+        'apt-get' {
+            & sudo apt-get install -y flac 2>&1 | Out-Null
+        }
+        'dnf' {
+            & sudo dnf install -y flac 2>&1 | Out-Null
+        }
+        'pacman' {
+            & sudo pacman -S --noconfirm flac 2>&1 | Out-Null
+        }
+    }
+}
+
+function Install-OptionalDependencies {
+    param(
+        [switch]$NeedPng,
+        [switch]$NeedJpeg,
+        [switch]$NonInteractive
+    )
+
+    $pkgMgr = Get-SystemPackageManager
+    if ($null -eq $pkgMgr) { return }
+
+    if (-not $NonInteractive) {
+        Write-Host ""
+        Write-Host "Optional album-art tools are missing." -ForegroundColor Yellow
+        if ($NeedPng) {
+            Write-Host "  PNG  : missing ('oxipng' preferred, or 'pngcrush')." -ForegroundColor DarkYellow
+        }
+        if ($NeedJpeg) {
+            Write-Host "  JPEG : missing ('jpegtran')." -ForegroundColor DarkYellow
+        }
+
+        $reply = ''
+        try {
+            $reply = [string](Read-Host ("Attempt install via {0}? [y/N]" -f $pkgMgr))
+        }
+        catch { return }
+        if ($reply.Trim().ToLowerInvariant() -notin @('y', 'yes')) { return }
+    }
+
+    switch ($pkgMgr) {
+        'winget' {
+            if ($NeedPng) {
+                Write-Host "Installing PNG optimizer (oxipng)..." -ForegroundColor Cyan
+                try { $null = & winget install Shssoichiro.Oxipng -e --source winget --accept-source-agreements --accept-package-agreements 2>&1 }
+                catch { Write-Warning ("winget could not install oxipng: {0}" -f $_.Exception.Message) }
+            }
+            if ($NeedJpeg) {
+                Write-Host "Installing JPEG optimizer (jpegtran)..." -ForegroundColor Cyan
+                try { $null = & winget install --id libjpeg-turbo.libjpeg-turbo.VC -e --source winget --accept-source-agreements --accept-package-agreements 2>&1 }
+                catch { Write-Warning ("winget could not install libjpeg-turbo: {0}" -f $_.Exception.Message) }
+            }
+            Refresh-ProcessPathFromRegistry
+        }
+        'choco' {
+            if ($NeedPng) {
+                Write-Host "Installing PNG optimizer (oxipng)..." -ForegroundColor Cyan
+                try { $null = & choco install oxipng -y 2>&1 }
+                catch { Write-Warning ("choco could not install oxipng: {0}" -f $_.Exception.Message) }
+            }
+            if ($NeedJpeg) {
+                Write-Host "Installing JPEG optimizer (jpegtran)..." -ForegroundColor Cyan
+                try { $null = & choco install libjpeg-turbo -y 2>&1 }
+                catch { Write-Warning ("choco could not install libjpeg-turbo: {0}" -f $_.Exception.Message) }
+            }
+            Refresh-ProcessPathFromRegistry
+        }
+        'apt-get' {
+            if ($NeedPng) {
+                Write-Host "Installing PNG optimizer (oxipng)..." -ForegroundColor Cyan
+                try { $null = & sudo apt-get install -y oxipng 2>&1 }
+                catch { Write-Warning ("apt-get could not install oxipng: {0}" -f $_.Exception.Message) }
+            }
+            if ($NeedJpeg) {
+                Write-Host "Installing JPEG optimizer (jpegtran)..." -ForegroundColor Cyan
+                try { $null = & sudo apt-get install -y libjpeg-turbo-progs 2>&1 }
+                catch { Write-Warning ("apt-get could not install libjpeg-turbo-progs: {0}" -f $_.Exception.Message) }
+            }
+        }
+        'dnf' {
+            if ($NeedPng) {
+                try { $null = & sudo dnf install -y oxipng 2>&1 }
+                catch { Write-Warning ("dnf could not install oxipng: {0}" -f $_.Exception.Message) }
+            }
+            if ($NeedJpeg) {
+                try { $null = & sudo dnf install -y libjpeg-turbo-utils 2>&1 }
+                catch { Write-Warning ("dnf could not install libjpeg-turbo-utils: {0}" -f $_.Exception.Message) }
+            }
+        }
+        'pacman' {
+            if ($NeedPng) {
+                try { $null = & sudo pacman -S --noconfirm oxipng 2>&1 }
+                catch { Write-Warning ("pacman could not install oxipng: {0}" -f $_.Exception.Message) }
+            }
+            if ($NeedJpeg) {
+                try { $null = & sudo pacman -S --noconfirm libjpeg-turbo 2>&1 }
+                catch { Write-Warning ("pacman could not install libjpeg-turbo: {0}" -f $_.Exception.Message) }
+            }
+        }
+    }
+}
+
+function Test-FlacVersion {
+    param([Parameter(Mandatory)][string]$FlacExePath)
+
+    try {
+        $versionOutput = & $FlacExePath --version 2>&1
+        $versionText = [string]($versionOutput | Select-Object -First 1)
+        if ($versionText -match '(\d+\.\d+\.\d+)') {
+            $detected = [version]$Matches[1]
+            $minimum = [version]$script:MinFlacVersion
+            if ($detected -lt $minimum) {
+                Write-Warning ("flac version {0} detected; minimum recommended is {1}. Some features may not work correctly." -f $detected, $minimum)
+            }
+            return $detected
+        }
+    }
+    catch { }
+    return $null
 }
 
 function Invoke-OptionalOptimizerInstallPrompt {
@@ -767,6 +1034,10 @@ function Invoke-OptionalOptimizerInstallPrompt {
     return $result
 }
 
+#endregion Dependency Bootstrap
+
+#region Album Art Optimization
+
 function Get-ImageSignatureKind {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -814,14 +1085,16 @@ function Get-FlacPictureBlocks {
 
     $items = [System.Collections.Generic.List[object]]::new()
     $lines = @()
+    $listExitCode = 0
     try {
         $lines = @(& $MetaflacExePath --list --block-type=PICTURE -- $Path 2>$null)
+        $listExitCode = $LASTEXITCODE
     }
     catch {
         return @()
     }
 
-    if ($LASTEXITCODE -ne 0 -or $lines.Count -eq 0) {
+    if ($listExitCode -ne 0 -or $lines.Count -eq 0) {
         return @()
     }
 
@@ -957,8 +1230,10 @@ function Optimize-FlacAlbumArt {
         Safe-RemoveFile -Path $jpegOutputPath
 
         $exportOutput = @()
+        $exportExitCode = 0
         try {
             $exportOutput = @(& $MetaflacExePath "--block-number=$($block.BlockNumber)" "--export-picture-to=$picturePath" -- $Path 2>&1)
+            $exportExitCode = $LASTEXITCODE
         }
         catch {
             Write-VerboseUi -Message ("metaflac export threw | File: {0} | Block: {1} | Detail: {2}" -f $Path, $block.BlockNumber, $_.Exception.Message)
@@ -971,7 +1246,7 @@ function Optimize-FlacAlbumArt {
             Write-VerboseUi -Message ("metaflac export | File: {0} | Block: {1} | Output: {2}" -f $Path, $block.BlockNumber, (Format-ErrSnippet -Text ([string]::Join(' ', @($exportOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
         }
 
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $picturePath)) {
+        if ($exportExitCode -ne 0 -or -not (Test-Path -LiteralPath $picturePath)) {
             Write-VerboseUi -Message ("Album art export failed | File: {0} | Block: {1} | Exit: {2}" -f $Path, $block.BlockNumber, $LASTEXITCODE)
             Safe-RemoveFile -Path $picturePath
             Safe-RemoveFile -Path $jpegOutputPath
@@ -1002,6 +1277,7 @@ function Optimize-FlacAlbumArt {
 
             $pngTool = [System.IO.Path]::GetFileNameWithoutExtension($PngOptimizerPath).ToLowerInvariant()
             $pngOutput = @()
+            $pngExitCode = 0
             try {
                 if ($pngTool -eq 'pngcrush') {
                     $pngOutput = @(& $PngOptimizerPath '-q' '-ow' $picturePath 2>&1)
@@ -1009,6 +1285,7 @@ function Optimize-FlacAlbumArt {
                 else {
                     $pngOutput = @(& $PngOptimizerPath '-o' '4' '-q' $picturePath 2>&1)
                 }
+                $pngExitCode = $LASTEXITCODE
             }
             catch {
                 Write-RunLog -Level WARN -Message ("Album art PNG optimization failed | File: {0} | Block: {1} | Tool: {2} | Detail: {3}" -f $Path, $block.BlockNumber, $PngOptimizerPath, $_.Exception.Message)
@@ -1017,8 +1294,8 @@ function Optimize-FlacAlbumArt {
                 continue
             }
 
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $picturePath)) {
-                Write-RunLog -Level WARN -Message ("Album art PNG optimization failed | File: {0} | Block: {1} | Tool: {2} | Exit: {3}" -f $Path, $block.BlockNumber, $PngOptimizerPath, $LASTEXITCODE)
+            if ($pngExitCode -ne 0 -or -not (Test-Path -LiteralPath $picturePath)) {
+                Write-RunLog -Level WARN -Message ("Album art PNG optimization failed | File: {0} | Block: {1} | Tool: {2} | Exit: {3}" -f $Path, $block.BlockNumber, $PngOptimizerPath, $pngExitCode)
                 Safe-RemoveFile -Path $picturePath
                 Safe-RemoveFile -Path $jpegOutputPath
                 continue
@@ -1039,8 +1316,10 @@ function Optimize-FlacAlbumArt {
             }
 
             $jpegOutput = @()
+            $jpegExitCode = 0
             try {
                 $jpegOutput = @(& $JpegOptimizerPath '-copy' 'all' '-optimize' '-outfile' $jpegOutputPath $picturePath 2>&1)
+                $jpegExitCode = $LASTEXITCODE
             }
             catch {
                 Write-RunLog -Level WARN -Message ("Album art JPEG optimization failed | File: {0} | Block: {1} | Tool: {2} | Detail: {3}" -f $Path, $block.BlockNumber, $JpegOptimizerPath, $_.Exception.Message)
@@ -1053,8 +1332,8 @@ function Optimize-FlacAlbumArt {
                 Write-VerboseUi -Message ("JPEG optimizer | File: {0} | Block: {1} | Output: {2}" -f $Path, $block.BlockNumber, (Format-ErrSnippet -Text ([string]::Join(' ', @($jpegOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
             }
 
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $jpegOutputPath)) {
-                Write-RunLog -Level WARN -Message ("Album art JPEG optimization failed | File: {0} | Block: {1} | Tool: {2} | Exit: {3}" -f $Path, $block.BlockNumber, $JpegOptimizerPath, $LASTEXITCODE)
+            if ($jpegExitCode -ne 0 -or -not (Test-Path -LiteralPath $jpegOutputPath)) {
+                Write-RunLog -Level WARN -Message ("Album art JPEG optimization failed | File: {0} | Block: {1} | Tool: {2} | Exit: {3}" -f $Path, $block.BlockNumber, $JpegOptimizerPath, $jpegExitCode)
                 Safe-RemoveFile -Path $picturePath
                 Safe-RemoveFile -Path $jpegOutputPath
                 continue
@@ -1145,15 +1424,17 @@ function Optimize-FlacAlbumArt {
     $applyError = $null
     foreach ($staged in @($stagedPictures | Sort-Object -Property BlockNumber -Descending)) {
         $insertAfter = [Math]::Max(0, ([int]$staged.BlockNumber - 1))
+        $removeExitCode = 0
         try {
             $removeOutput = @(& $MetaflacExePath --preserve-modtime --dont-use-padding "--block-number=$($staged.BlockNumber)" --remove -- $workingPath 2>&1)
+            $removeExitCode = $LASTEXITCODE
         }
         catch {
             $applyError = "remove block $($staged.BlockNumber): $($_.Exception.Message)"
             break
         }
 
-        if ($LASTEXITCODE -ne 0) {
+        if ($removeExitCode -ne 0) {
             $applyError = "remove block $($staged.BlockNumber): $(Format-ErrSnippet -Text ([string]::Join(' ', @($removeOutput | ForEach-Object { [string]$_ }))))"
             break
         }
@@ -1162,15 +1443,17 @@ function Optimize-FlacAlbumArt {
             Write-VerboseUi -Message ("metaflac remove picture | File: {0} | Block: {1} | Output: {2}" -f $Path, $staged.BlockNumber, (Format-ErrSnippet -Text ([string]::Join(' ', @($removeOutput | ForEach-Object { [string]$_ }))) -MaxLength 250))
         }
 
+        $importExitCode = 0
         try {
             $importOutput = @(& $MetaflacExePath --preserve-modtime --dont-use-padding "--block-number=$insertAfter" "--import-picture-from=$($staged.Spec)" -- $workingPath 2>&1)
+            $importExitCode = $LASTEXITCODE
         }
         catch {
             $applyError = "import block $($staged.BlockNumber): $($_.Exception.Message)"
             break
         }
 
-        if ($LASTEXITCODE -ne 0) {
+        if ($importExitCode -ne 0) {
             $applyError = "import block $($staged.BlockNumber): $(Format-ErrSnippet -Text ([string]::Join(' ', @($importOutput | ForEach-Object { [string]$_ }))))"
             break
         }
@@ -1192,14 +1475,16 @@ function Optimize-FlacAlbumArt {
 
     $paddingOutput = @()
     $paddingWarning = $null
+    $paddingExitCode = 0
     try {
         $paddingOutput = @(& $MetaflacExePath --dont-use-padding --remove --block-type=PADDING -- $workingPath 2>&1)
+        $paddingExitCode = $LASTEXITCODE
     }
     catch {
         $paddingWarning = $_.Exception.Message
     }
 
-    if ([string]::IsNullOrWhiteSpace($paddingWarning) -and $LASTEXITCODE -ne 0) {
+    if ([string]::IsNullOrWhiteSpace($paddingWarning) -and $paddingExitCode -ne 0) {
         $paddingWarning = Format-ErrSnippet -Text ([string]::Join(' ', @($paddingOutput | ForEach-Object { [string]$_ })))
     }
 
@@ -1264,7 +1549,9 @@ function Optimize-FlacAlbumArt {
     return $result
 }
 
-# UI and status helper functions
+#endregion Album Art Optimization
+
+#region Progress and Hash Display
 
 function Read-FlacProgress {
     param(
@@ -1480,6 +1767,10 @@ function Fit-DisplayText {
     return $sb.ToString()
 }
 
+#endregion Progress and Hash Display
+
+#region UI Colors
+
 function Get-CompressionColor {
     param([AllowNull()][string]$CompressionPct)
 
@@ -1558,6 +1849,10 @@ function Format-VerificationText {
     if ([string]::IsNullOrWhiteSpace($Verification)) { return 'N/A' }
     return $Verification
 }
+
+#endregion UI Colors
+
+#region UI Rendering
 
 function Render-InteractiveUi {
     param(
@@ -2030,6 +2325,10 @@ function Sync-ConsoleBufferToWindow {
     catch { }
 }
 
+#endregion UI Rendering
+
+#region Event Tracking
+
 function Push-RecentEvent {
     param(
         [Parameter(Mandatory)][object]$List,
@@ -2113,6 +2412,10 @@ function Add-FinalLogEvent {
             FailureReason   = $FailureReason
         }) | Out-Null
 }
+
+#endregion Event Tracking
+
+#region Reporting
 
 function New-EfcStatusReportLines {
     param(
@@ -2255,6 +2558,10 @@ function New-EfcFinalLogText {
     return ($body + [Environment]::NewLine + [Environment]::NewLine + $checksumLine)
 }
 
+#endregion Reporting
+
+#region Job Management
+
 function Stop-ActiveJobsAndCleanup {
     param([Parameter(Mandatory)][object[]]$Workers)
 
@@ -2336,8 +2643,32 @@ function Stop-ActiveJobsAndCleanup {
     }
 }
 
-# Avoid overriding $IsWindows (automatic variable in PowerShell 7).
-$script:IsWindowsHost = ($env:OS -eq 'Windows_NT')
+#endregion Job Management
+
+#region Test Runner
+
+# Handle -RunTests early exit
+if ($RunTests) {
+    $pesterModule = Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+    if ($null -eq $pesterModule -or $pesterModule.Version.Major -lt 5) {
+        Write-Host "Installing Pester 5+..." -ForegroundColor Cyan
+        Install-Module Pester -Force -Scope CurrentUser -MinimumVersion 5.0.0 -SkipPublisherCheck
+    }
+    Import-Module Pester -MinimumVersion 5.0.0
+    $testFile = Join-Path $PSScriptRoot 'Tests' 'Start-ExactFlacCrunch.Tests.ps1'
+    if (-not (Test-Path -LiteralPath $testFile)) {
+        throw "Test file not found: $testFile"
+    }
+    Invoke-Pester $testFile -CI
+    return
+}
+
+#endregion Test Runner
+
+# Guard: when EFC_LOAD_FUNCTIONS_ONLY is '1', export all function definitions but skip main orchestration.
+if ($env:EFC_LOAD_FUNCTIONS_ONLY -eq '1') { return }
+
+#region Main Orchestration
 
 # Preconditions
 
@@ -2378,8 +2709,33 @@ if ($script:IsWindowsHost) {
     Refresh-ProcessPathFromRegistry
 }
 
-$flacCmd = Resolve-RequiredTool -Names @('flac', 'flac.exe') -BaseDirectory $toolBaseDirectory -DisplayName 'flac'
-$metaflacCmd = Resolve-RequiredTool -Names @('metaflac', 'metaflac.exe') -BaseDirectory $toolBaseDirectory -DisplayName 'metaflac'
+# Attempt to resolve required tools; if missing and -InstallDeps is set, auto-install them
+$flacCmd = Resolve-OptionalTool -Names @('flac', 'flac.exe') -BaseDirectory $toolBaseDirectory
+$metaflacCmd = Resolve-OptionalTool -Names @('metaflac', 'metaflac.exe') -BaseDirectory $toolBaseDirectory
+
+if ($null -eq $flacCmd -or $null -eq $metaflacCmd) {
+    if ($InstallDeps) {
+        Write-Host 'Required tools not found. Installing dependencies...' -ForegroundColor Yellow
+        Install-RequiredDependencies
+        if ($script:IsWindowsHost) { Refresh-ProcessPathFromRegistry }
+        # Retry resolution
+        $flacCmd = Resolve-RequiredTool -Names @('flac', 'flac.exe') -BaseDirectory $toolBaseDirectory -DisplayName 'flac'
+        $metaflacCmd = Resolve-RequiredTool -Names @('metaflac', 'metaflac.exe') -BaseDirectory $toolBaseDirectory -DisplayName 'metaflac'
+    }
+    else {
+        $missing = @()
+        if ($null -eq $flacCmd) { $missing += 'flac' }
+        if ($null -eq $metaflacCmd) { $missing += 'metaflac' }
+        throw ("Required tool(s) not found: {0}. Add them to PATH, place beside this script, or rerun with -InstallDeps." -f ($missing -join ', '))
+    }
+}
+
+# Validate flac version
+$flacVersion = Test-FlacVersion -FlacExePath $flacCmd.Source
+if ($null -ne $flacVersion) {
+    Write-Host ("flac version: {0}" -f $flacVersion) -ForegroundColor DarkGray
+}
+
 $pngOptimizerCmd = Resolve-OptionalTool -Names @('oxipng', 'oxipng.exe', 'pngcrush', 'pngcrush.exe') -BaseDirectory $toolBaseDirectory
 $jpegOptimizerCmd = Resolve-OptionalTool -Names @('jpegtran', 'jpegtran.exe') -BaseDirectory $toolBaseDirectory
 
@@ -2425,7 +2781,7 @@ Started: $($runStartedLocal.ToString('o'))
 }
 
 @"
-Exact Flac Cruncher v20250225.codex5.3
+Exact Flac Cruncher v$($script:Version)
 Target: $targetDisplay
 Log Root: $LogFolder
 Run Logs: $runLogDir
@@ -2449,6 +2805,8 @@ function Set-SingleCoreAffinity {
         [Parameter(Mandatory)][int]$CoreIndexZeroBased
     )
 
+    # ProcessorAffinity is only supported on Windows.
+    if (-not $script:IsWindowsHost) { return }
     if (-not $affinityEnabled) { return }
 
     if ($CoreIndexZeroBased -lt 0 -or $CoreIndexZeroBased -gt 63) {
@@ -2639,7 +2997,7 @@ else {
 $maxWorkers = [Math]::Min($availableWorkerSlots, $totalFiles)
 if ($maxWorkers -lt 1) { $maxWorkers = 1 }
 
-$maxAttemptsPerFile = 3
+$maxAttemptsPerFile = $script:MaxAttemptsPerFile
 $queue = [System.Collections.Generic.Queue[object]]::new()
 $fileOrdinal = 0
 foreach ($f in $files) {
@@ -2652,7 +3010,7 @@ foreach ($f in $files) {
         })
 }
 
-$nullHash = '00000000000000000000000000000000'
+$nullHash = $script:NullHash
 
 [long]$totalOriginalBytes = 0
 [long]$totalNewBytes = 0
@@ -3066,17 +3424,23 @@ try {
                         $newSize = (Get-Item -LiteralPath $job.Temp -Force).Length
                         $saved = $job.OrigSize - $newSize
 
-                        # Replace original file, retrying to tolerate transient locks.
+                        # Replace original file, retrying with exponential backoff to tolerate transient locks.
                         $replaced = $false
                         $lastMoveException = $null
-                        for ($attempt = 1; $attempt -le 5 -and -not $replaced; $attempt++) {
+                        for ($attempt = 1; $attempt -le $script:MoveItemMaxRetries -and -not $replaced; $attempt++) {
                             try {
                                 Move-Item -LiteralPath $job.Temp -Destination $job.Original -Force
-                                $null = Restore-FileMetadata -Path $job.Original -Snapshot $job.SourceMetadata
+                                $metadataRestored = Restore-FileMetadata -Path $job.Original -Snapshot $job.SourceMetadata
+                                if (-not $metadataRestored) {
+                                    Write-RunLog -Level WARN -Message ("File metadata restoration was only partially successful | File: {0}" -f $job.Original)
+                                }
                                 $replaced = $true
                             }
                             catch {
                                 $lastMoveException = $_.Exception
+                                if ($attempt -lt $script:MoveItemMaxRetries) {
+                                    Start-Sleep -Milliseconds ($script:MoveItemRetryBaseMs * $attempt)
+                                }
                             }
                         }
 
@@ -3667,3 +4031,5 @@ else {
 }
 Write-SummaryLine -Label 'Logs' -Value $runLogDir -ValueColor Gray
 Write-SummaryLine -Label 'Log' -Value $logFile -ValueColor Gray
+
+#endregion Main Orchestration
