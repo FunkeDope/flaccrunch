@@ -23,7 +23,7 @@ pub enum HashPhase {
 
 /// Events emitted by the pipeline for UI updates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum PipelineEvent {
     WorkerStarted {
         worker_id: usize,
@@ -76,4 +76,58 @@ pub struct VerificationResult {
     pub source_hash: Option<String>,
     pub output_hash: Option<String>,
     pub embedded_md5: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pipeline_event_serialization() {
+        // WorkerStarted
+        let event = PipelineEvent::WorkerStarted {
+            worker_id: 0,
+            file: "test.flac".to_string(),
+            stage: PipelineStage::Converting,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        eprintln!("WorkerStarted: {}", json);
+        assert!(json.contains(r#""type":"workerStarted""#), "type field wrong: {}", json);
+        assert!(json.contains(r#""workerId":0"#), "worker_id field should be camelCase 'workerId': {}", json);
+
+        // WorkerProgress
+        let event = PipelineEvent::WorkerProgress {
+            worker_id: 1,
+            percent: 45,
+            ratio: "45%".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        eprintln!("WorkerProgress: {}", json);
+
+        // WorkerStageChanged with Hashing
+        let event = PipelineEvent::WorkerStageChanged {
+            worker_id: 0,
+            stage: PipelineStage::Hashing(HashPhase::Source),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        eprintln!("WorkerStageChanged(Hashing): {}", json);
+
+        // WorkerStageChanged with Artwork
+        let event = PipelineEvent::WorkerStageChanged {
+            worker_id: 0,
+            stage: PipelineStage::Artwork,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        eprintln!("WorkerStageChanged(Artwork): {}", json);
+
+        // WorkerIdle
+        let event = PipelineEvent::WorkerIdle { worker_id: 2 };
+        let json = serde_json::to_string(&event).unwrap();
+        eprintln!("WorkerIdle: {}", json);
+
+        // RunComplete
+        let event = PipelineEvent::RunComplete;
+        let json = serde_json::to_string(&event).unwrap();
+        eprintln!("RunComplete: {}", json);
+    }
 }
