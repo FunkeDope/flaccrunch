@@ -653,11 +653,12 @@ body {
   text-align: right;
 }
 
-.worker-ratio {
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-top: 3px;
+/* inline ratio / saved% appended to the OUT hash row */
+.hash-extra {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 /* ======================================================

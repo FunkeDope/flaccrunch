@@ -238,12 +238,16 @@ export function useProcessing() {
           if (fileEvent) {
             setAllEvents((prev) => [...prev, fileEvent]);
 
-            // Store hash results on the worker for display in the card
+            // Mark worker idle immediately so livePct doesn't double-count
+            // (processed counter just incremented; worker contribution must drop to 0).
             setWorkers((prev) => {
               if (workerId >= prev.length) return prev;
               const updated = [...prev];
               updated[workerId] = {
                 ...updated[workerId],
+                state: "idle",
+                percent: 0,
+                ratio: "",
                 lastSourceHash: fileEvent.sourceHash,
                 lastOutputHash: fileEvent.outputHash,
                 lastEmbeddedMd5: fileEvent.embeddedMd5,

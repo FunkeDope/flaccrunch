@@ -20,10 +20,14 @@ function App() {
     const inFlightWeight = processing.workers
       .filter((w) => w.state !== "idle")
       .reduce((sum, w) => {
-        // Post-encoding stages: encoding is done — count as full weight to
-        // prevent the bar jumping backward when percent resets to 0 on stage change.
+        // Post-encoding stages: encoding is done — count as full weight.
         if (w.state === "hashing-output" || w.state === "artwork" || w.state === "finalizing") {
           return sum + 1.0;
+        }
+        // Pre-encoding hash: file is being read, count as small nonzero so bar
+        // doesn't stall at a whole number while workers spin up.
+        if (w.state === "hashing-source") {
+          return sum + 0.05;
         }
         return sum + w.percent / 100;
       }, 0);

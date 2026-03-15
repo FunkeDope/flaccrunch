@@ -11,22 +11,6 @@ function isRealHash(h: string | undefined | null): h is string {
   return !!h && h !== NULL_MD5;
 }
 
-/**
- * Derive per-row color classes for EMB, PRE, and OUT given what we know so far.
- *
- * Color semantics (matching the PowerShell script):
- *   hash-match    = green  — value verified correct
- *   hash-mismatch = red    — value confirmed wrong (critical)
- *   hash-warn     = yellow — noteworthy discrepancy (original had bad EMB, or no reference)
- *   hash-neutral  = dim white — present but nothing to compare yet
- *   hash-missing  = muted  — absent / null MD5
- *
- * Two separate checks:
- *   1. EMB vs PRE  (was the original file internally consistent?)
- *      Done as soon as both are known — gives live feedback while encoding.
- *   2. PRE vs OUT  (did audio survive re-encoding?)
- *      Only possible once OUT is computed.
- */
 function hashColors(
   src: string | undefined,
   out: string | undefined,
@@ -37,10 +21,8 @@ function hashColors(
   const hasEmb = isRealHash(emb);
 
   const embMatchesSrc = hasEmb && hasSrc && emb === src;
-  const embMismatchesSrc = hasEmb && hasSrc && emb !== src;
 
   if (hasOut) {
-    // ── Phase 2: POST hash available — primary verification is PRE == OUT ──
     let srcColor: string;
     let outColor: string;
 
@@ -53,48 +35,38 @@ function hashColors(
         outColor = "hash-mismatch";
       }
     } else {
-      // No PRE → fall back to EMB == OUT (MATCH|EMB)
       srcColor = "hash-missing";
       if (hasEmb) {
         outColor = emb === out ? "hash-match" : "hash-mismatch";
       } else {
-        outColor = "hash-warn"; // no reference at all
+        outColor = "hash-warn";
       }
     }
 
-    // EMB: was the original file internally consistent? (EMB == PRE)
     let embColor: string;
     if (!hasEmb) {
-      embColor = "hash-missing"; // null / not embedded
+      embColor = "hash-missing";
     } else if (hasSrc) {
       embColor = embMatchesSrc ? "hash-match" : "hash-warn";
     } else {
-      // No PRE, compare EMB vs OUT
       embColor = emb === out ? "hash-match" : "hash-warn";
     }
 
     return { srcColor, outColor, embColor };
   }
 
-  // ── Phase 1: OUT not yet computed — show EMB vs PRE for early feedback ──
   let srcColor: string;
   let embColor: string;
 
   if (hasSrc && hasEmb) {
     if (embMatchesSrc) {
-      // Original file's MD5 matched what we calculated — all good so far
       srcColor = "hash-match";
       embColor = "hash-match";
-    } else if (embMismatchesSrc) {
-      // Original file had a wrong embedded MD5 — flag it
+    } else {
       srcColor = "hash-warn";
       embColor = "hash-warn";
-    } else {
-      srcColor = "hash-neutral";
-      embColor = "hash-neutral";
     }
   } else if (hasSrc) {
-    // PRE known but EMB is null (no embedded MD5 in original)
     srcColor = "hash-neutral";
     embColor = "hash-missing";
   } else {
@@ -105,7 +77,6 @@ function hashColors(
   return { srcColor, outColor: "hash-neutral", embColor };
 }
 
-/** Abbreviated hash for display: first8…last4, or special label */
 function abbrev(hash: string | undefined | null): string {
   if (!hash || hash === NULL_MD5) return "null";
   if (hash.length <= 12) return hash;
@@ -114,17 +85,13 @@ function abbrev(hash: string | undefined | null): string {
 
 export function WorkerCard({ worker }: WorkerCardProps) {
   const isActive = worker.state !== "idle";
-  const showPercent = worker.state === "converting" && worker.percent > 0;
-
+  const isConverting = worker.state === "converting";
   const isHashingSrc = worker.state === "hashing-source";
   const isHashingOut = worker.state === "hashing-output";
 
-  // embReady: we received the embedded MD5 value (may be null/NULL_MD5 — still "ready")
   const embReady = worker.lastEmbeddedMd5 !== undefined;
   const srcReady = !!worker.lastSourceHash;
   const outReady = !!worker.lastOutputHash;
-
-  const showHashes = isActive || srcReady || outReady;
 
   const { srcColor, outColor, embColor } = hashColors(
     worker.lastSourceHash,
@@ -132,33 +99,32 @@ export function WorkerCard({ worker }: WorkerCardProps) {
     worker.lastEmbeddedMd5
   );
 
-  // Per-slot display element
+  // EMB slot — always rendered
   function embSlot() {
     if (isHashingSrc && !embReady) return <span className="hash-val hash-computing">…</span>;
-    if (!embReady && !srcReady) return null; // nothing to show yet
+    if (!embReady) return <span className="hash-val hash-missing">—</span>;
     const val = worker.lastEmbeddedMd5;
-    if (!val || val === NULL_MD5) {
-      return <span className="hash-val hash-missing">null</span>;
-    }
+    if (!val || val === NULL_MD5) return <span className="hash-val hash-missing">null</span>;
     return <span className={`hash-val ${embColor}`}>{abbrev(val)}</span>;
   }
 
+  // PRE slot — always rendered
   function srcSlot() {
     if (isHashingSrc && !srcReady) return <span className="hash-val hash-computing">…</span>;
-    if (!srcReady) return null;
+    if (!srcReady) return <span className="hash-val hash-missing">—</span>;
     return <span className={`hash-val ${srcColor}`}>{abbrev(worker.lastSourceHash)}</span>;
   }
 
+  // OUT slot — always rendered
   function outSlot() {
     if (isHashingOut && !outReady) return <span className="hash-val hash-computing">…</span>;
-    if (!outReady) return null;
+    if (!outReady) return <span className="hash-val hash-missing">—</span>;
     return <span className={`hash-val ${outColor}`}>{abbrev(worker.lastOutputHash)}</span>;
   }
 
-  const embEl = embSlot();
-  const srcEl = srcSlot();
-  const outEl = outSlot();
-  const anyHash = embEl || srcEl || outEl;
+  // Ratio shown during encoding; saved% shown after idle with result
+  const showRatio = isConverting && !!worker.ratio;
+  const showSaved = !isActive && worker.lastCompressionPct !== undefined;
 
   return (
     <div className={`worker-card ${isActive ? "active" : "idle-card"}`}>
@@ -169,59 +135,45 @@ export function WorkerCard({ worker }: WorkerCardProps) {
         </span>
       </div>
       <div className="file-name">
-        {worker.file
-          ? (worker.file.split(/[/\\]/).pop() ?? worker.file)
-          : "idle"}
+        {worker.file ? (worker.file.split(/[/\\]/).pop() ?? worker.file) : "idle"}
       </div>
-      {isActive && (
-        <div className="worker-progress-row">
-          <div className="progress-bar">
-            <div className="fill" style={{ width: `${worker.percent}%` }} />
-          </div>
-          {showPercent && (
-            <span className="worker-percent">{worker.percent}%</span>
+
+      {/* Progress bar — always reserve height, hide when not active */}
+      <div className="worker-progress-row" style={{ visibility: isActive ? "visible" : "hidden" }}>
+        <div className="progress-bar">
+          <div className="fill" style={{ width: `${worker.percent}%` }} />
+        </div>
+        {isConverting && worker.percent > 0 && (
+          <span className="worker-percent">{worker.percent}%</span>
+        )}
+      </div>
+
+      {/* Always render all 3 hash rows — fixed height, no layout shift */}
+      <div className="worker-hashes">
+        <div className="hash-row">
+          <span className="hash-label">EMB</span>
+          {embSlot()}
+        </div>
+        <div className="hash-row">
+          <span className="hash-label">PRE</span>
+          {srcSlot()}
+        </div>
+        <div className="hash-row">
+          <span className="hash-label">OUT</span>
+          {outSlot()}
+          {showRatio && (
+            <span className="hash-extra hash-match">≈{worker.ratio}</span>
+          )}
+          {showSaved && (
+            <span
+              className="hash-extra"
+              style={{ color: worker.lastCompressionPct! >= 5 ? "var(--success)" : "var(--text-muted)" }}
+            >
+              {worker.lastCompressionPct!.toFixed(1)}%↓
+            </span>
           )}
         </div>
-      )}
-      {showHashes && anyHash && (
-        <div className="worker-hashes">
-          {embEl && (
-            <div className="hash-row">
-              <span className="hash-label">EMB</span>
-              {embEl}
-            </div>
-          )}
-          {srcEl && (
-            <div className="hash-row">
-              <span className="hash-label">PRE</span>
-              {srcEl}
-              {/* Ratio lives here when OUT is not yet computed */}
-              {!outEl && isActive && worker.ratio ? (
-                <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: "var(--success)", fontFamily: "var(--font-mono)", fontSize: 10 }}>≈{worker.ratio}</span>
-              ) : null}
-              {!outEl && !isActive && worker.lastCompressionPct !== undefined ? (
-                <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
-                  {worker.lastCompressionPct.toFixed(1)}%↓
-                </span>
-              ) : null}
-            </div>
-          )}
-          {outEl && (
-            <div className="hash-row">
-              <span className="hash-label">OUT</span>
-              {outEl}
-              {isActive && worker.ratio ? (
-                <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: "var(--success)", fontFamily: "var(--font-mono)", fontSize: 10 }}>≈{worker.ratio}</span>
-              ) : null}
-              {!isActive && worker.lastCompressionPct !== undefined ? (
-                <span style={{ flexShrink: 0, whiteSpace: "nowrap", color: worker.lastCompressionPct >= 5 ? "var(--success)" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
-                  {worker.lastCompressionPct.toFixed(1)}%↓
-                </span>
-              ) : null}
-            </div>
-          )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
