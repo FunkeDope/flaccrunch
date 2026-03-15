@@ -161,9 +161,10 @@ jobs:
       - name: Collect APK files
         run: |
           mkdir -p release-apks
+          REF_SLUG=$(echo "${{ github.ref_name }}" | sed 's|/|-|g')
           find . -name "*.apk" -not -path "./.git/*" -type f | while read apk; do
             BASENAME=$(basename "$apk")
-            cp "$apk" "release-apks/FlacCrunch-${{ github.ref_name }}-${BASENAME}"
+            cp "$apk" "release-apks/FlacCrunch-${REF_SLUG}-${BASENAME}"
           done
           echo "Collected APKs:"
           ls -la release-apks/ 2>/dev/null || echo "No APKs found"
