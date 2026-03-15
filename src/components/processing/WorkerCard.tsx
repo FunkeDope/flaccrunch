@@ -19,7 +19,7 @@ export function WorkerCard({ worker }: WorkerCardProps) {
       </div>
       <div className="file-name">
         {worker.file
-          ? (worker.file.split("/").pop() ?? worker.file)
+          ? (worker.file.split(/[/\\]/).pop() ?? worker.file)
           : "Idle"}
       </div>
       {isActive && (

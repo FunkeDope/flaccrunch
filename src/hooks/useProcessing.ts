@@ -47,15 +47,17 @@ export function useProcessing() {
           setWorkers((prev) => {
             const workerId = payload.workerId as number;
             const updated = [...prev];
-            if (updated[workerId]) {
-              updated[workerId] = {
-                ...updated[workerId],
-                state: "converting",
-                file: payload.file as string,
-                percent: 0,
-                ratio: "",
-              };
+            // Grow the array if needed (events can arrive before React processes setWorkers)
+            while (updated.length <= workerId) {
+              updated.push({ id: updated.length, state: "idle", file: null, percent: 0, ratio: "" });
             }
+            updated[workerId] = {
+              ...updated[workerId],
+              state: "converting",
+              file: payload.file as string,
+              percent: 0,
+              ratio: "",
+            };
             return updated;
           });
           break;
@@ -63,14 +65,13 @@ export function useProcessing() {
         case "workerProgress":
           setWorkers((prev) => {
             const workerId = payload.workerId as number;
+            if (workerId >= prev.length) return prev;
             const updated = [...prev];
-            if (updated[workerId]) {
-              updated[workerId] = {
-                ...updated[workerId],
-                percent: payload.percent as number,
-                ratio: (payload.ratio as string) ?? "",
-              };
-            }
+            updated[workerId] = {
+              ...updated[workerId],
+              percent: payload.percent as number,
+              ratio: (payload.ratio as string) ?? "",
+            };
             return updated;
           });
           break;
@@ -91,14 +92,15 @@ export function useProcessing() {
           }
           setWorkers((prev) => {
             const updated = [...prev];
-            if (updated[workerId]) {
-              updated[workerId] = {
-                ...updated[workerId],
-                state: stageStr,
-                percent: 0,
-                ratio: "",
-              };
+            while (updated.length <= workerId) {
+              updated.push({ id: updated.length, state: "idle", file: null, percent: 0, ratio: "" });
             }
+            updated[workerId] = {
+              ...updated[workerId],
+              state: stageStr,
+              percent: 0,
+              ratio: "",
+            };
             return updated;
           });
           break;
@@ -107,16 +109,15 @@ export function useProcessing() {
         case "workerIdle":
           setWorkers((prev) => {
             const workerId = payload.workerId as number;
+            if (workerId >= prev.length) return prev;
             const updated = [...prev];
-            if (updated[workerId]) {
-              updated[workerId] = {
-                ...updated[workerId],
-                state: "idle",
-                file: null,
-                percent: 0,
-                ratio: "",
-              };
-            }
+            updated[workerId] = {
+              ...updated[workerId],
+              state: "idle",
+              file: null,
+              percent: 0,
+              ratio: "",
+            };
             return updated;
           });
           break;

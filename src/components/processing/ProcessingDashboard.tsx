@@ -32,17 +32,12 @@ export function ProcessingDashboard({
 
       <StatsBar counters={counters} />
 
+      <TopCompression results={topCompression} successCount={counters.successful} />
+
       {workers.length > 0 && (
         <div className="card">
           <h2>Workers</h2>
           <WorkerGrid workers={workers} />
-        </div>
-      )}
-
-      {topCompression.length > 0 && (
-        <div className="card">
-          <h2>Top Compression</h2>
-          <TopCompression results={topCompression} />
         </div>
       )}
 

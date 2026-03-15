@@ -32,7 +32,7 @@ export function RecentEventsTable({ events }: RecentEventsTableProps) {
                 }}
                 title={event.file}
               >
-                {event.file.split("/").pop() ?? event.file}
+                {event.file.split(/[/\\]/).pop() ?? event.file}
               </td>
               <td>{formatBytes(event.savedBytes, true)}</td>
               <td>{event.verification}</td>
