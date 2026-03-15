@@ -1,5 +1,7 @@
 use crate::fs::scanner;
+use crate::state::app_state::AppState;
 use std::path::PathBuf;
+use tauri::State;
 use tauri_plugin_dialog::FilePath;
 
 /// Open a native folder selection dialog (desktop only).
@@ -146,4 +148,12 @@ pub async fn validate_folder(path: String) -> Result<bool, String> {
         Ok(()) => Ok(true),
         Err(e) => Err(e),
     }
+}
+
+/// Return any paths that were supplied on the command line so the frontend
+/// can pre-populate the folder list. Consumed (cleared) after first call.
+#[tauri::command]
+pub async fn get_startup_paths(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut paths = state.startup_paths.write().unwrap_or_else(|e| e.into_inner());
+    Ok(std::mem::take(&mut *paths))
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import * as api from "../../lib/tauri";
 import type { RunStatus } from "../../types/processing";
 
@@ -8,11 +8,10 @@ interface FolderSelectorProps {
   onAddFiles: () => void;
   onRemoveFolder: (folder: string) => void;
   onStart: () => void;
-  onCancel: () => void;
-  onReset: () => void;
   canStart: boolean;
   status: RunStatus;
   error: string | null;
+  isDragOver?: boolean;
 }
 
 export function FolderSelector({
@@ -21,65 +20,80 @@ export function FolderSelector({
   onAddFiles,
   onRemoveFolder,
   onStart,
-  onCancel,
-  onReset,
   canStart,
   status,
   error,
+  isDragOver: nativeDragOver,
 }: FolderSelectorProps) {
-  const [dragOver, setDragOver] = useState(false);
+  const [localDragOver, setLocalDragOver] = useState(false);
   const [mobile, setMobile] = useState(false);
+
+  // Combine native OS drag (from Tauri) and local HTML5 drag state
+  const dragOver = nativeDragOver || localDragOver;
 
   useEffect(() => {
     api.isMobile().then(setMobile).catch(() => setMobile(false));
   }, []);
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      onAddFolder();
-    },
-    [onAddFolder]
-  );
+  const isActive = status === "processing" || status === "cancelling" || status === "complete";
 
-  const isProcessing = status === "processing" || status === "cancelling";
-  const isComplete = status === "complete";
+  // During/after processing: show a compact "add more" strip
+  if (isActive) {
+    const queueLabel =
+      folders.length === 0
+        ? "Queue additional files while processing"
+        : folders.length === 1
+        ? folders[0]
+        : `${folders[0]}  (+${folders.length - 1} more)`;
 
+    return (
+      <div className="folder-section">
+        {error && <div className="error-banner">{error}</div>}
+        <div className="add-more-strip">
+          <span className="queue-label" title={folders.join("\n")}>
+            {queueLabel}
+          </span>
+          {mobile ? (
+            <button className="btn btn-secondary" style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }} onClick={onAddFiles}>
+              + Files
+            </button>
+          ) : (
+            <>
+              <button className="btn btn-secondary" style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }} onClick={onAddFolder}>
+                + Folder
+              </button>
+              <button className="btn btn-secondary" style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }} onClick={onAddFiles}>
+                + Files
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Idle state: full UI
   return (
     <div className="folder-section">
-      {error && (
-        <div className="error-banner">
-          {error}
-        </div>
-      )}
+      {error && <div className="error-banner">{error}</div>}
 
       {mobile ? (
-        <div
-          className={`drop-zone ${isProcessing ? "disabled" : ""}`}
-          onClick={isProcessing ? undefined : onAddFiles}
-        >
-          Select FLAC files
+        <div className="drop-zone" onClick={onAddFiles}>
+          Tap to select FLAC files
         </div>
       ) : (
         <div className="drop-zone-row">
           <div
-            className={`drop-zone ${dragOver ? "active" : ""} ${isProcessing ? "disabled" : ""}`}
-            onClick={isProcessing ? undefined : onAddFolder}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
+            className={`drop-zone ${dragOver ? "active" : ""}`}
+            onClick={onAddFolder}
+            onDragOver={(e) => { e.preventDefault(); setLocalDragOver(true); }}
+            onDragLeave={() => setLocalDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setLocalDragOver(false); }}
           >
-            Add Folders
+            Drop folders here or click to browse
           </div>
-          <div
-            className={`drop-zone ${isProcessing ? "disabled" : ""}`}
-            onClick={isProcessing ? undefined : onAddFiles}
-          >
-            Add Files
+          <div className="drop-zone" onClick={onAddFiles}>
+            Click to add individual FLAC files
           </div>
         </div>
       )}
@@ -93,15 +107,13 @@ export function FolderSelector({
             {folders.map((folder) => (
               <li key={folder} className="folder-item">
                 <span className="path">{folder}</span>
-                {!isProcessing && (
-                  <button
-                    className="remove-btn"
-                    onClick={() => onRemoveFolder(folder)}
-                    title="Remove"
-                  >
-                    x
-                  </button>
-                )}
+                <button
+                  className="remove-btn"
+                  onClick={() => onRemoveFolder(folder)}
+                  title="Remove"
+                >
+                  ×
+                </button>
               </li>
             ))}
           </ul>
@@ -109,27 +121,13 @@ export function FolderSelector({
       )}
 
       <div className="action-bar">
-        {isComplete ? (
-          <button className="btn btn-primary" onClick={onReset}>
-            New Run
-          </button>
-        ) : isProcessing ? (
-          <button
-            className="btn btn-danger"
-            onClick={onCancel}
-            disabled={status === "cancelling"}
-          >
-            {status === "cancelling" ? "Cancelling..." : "Cancel"}
-          </button>
-        ) : (
-          <button
-            className="btn btn-primary"
-            onClick={onStart}
-            disabled={!canStart}
-          >
-            Start Processing
-          </button>
-        )}
+        <button
+          className="btn btn-primary btn-full"
+          onClick={onStart}
+          disabled={!canStart}
+        >
+          Start Processing
+        </button>
       </div>
     </div>
   );

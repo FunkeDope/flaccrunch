@@ -6,10 +6,9 @@ interface OverallProgressProps {
 }
 
 export function OverallProgress({ counters }: OverallProgressProps) {
-  const pct =
-    counters.totalFiles > 0
-      ? (counters.processed / counters.totalFiles) * 100
-      : 0;
+  const pct = counters.totalFiles > 0
+    ? Math.max(0, Math.min(100, (counters.processed / counters.totalFiles) * 100))
+    : 0;
 
   return (
     <div className="overall-progress">
@@ -22,7 +21,7 @@ export function OverallProgress({ counters }: OverallProgressProps) {
         <strong>{counters.processed}</strong> / {counters.totalFiles} files
       </div>
       <div className="counter">
-        Saved: <strong>{formatBytes(counters.totalSavedBytes, true)}</strong>
+        Saved: <strong>{formatBytes(counters.totalSavedBytes)}</strong>
       </div>
     </div>
   );

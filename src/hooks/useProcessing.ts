@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import * as api from "../lib/tauri";
+import { formatBytes, formatElapsed } from "../lib/format";
 import type {
   RunStatus,
   WorkerStatus,
   RunCounters,
   FileEvent,
-  CompressionResult,
+  JobRecord,
   ProcessingSettings,
 } from "../types/processing";
 
@@ -26,41 +30,124 @@ const defaultCounters: RunCounters = {
   artworkOptimizedBlocks: 0,
 };
 
+function buildLogText(
+  folders: string[],
+  counters: RunCounters,
+  events: FileEvent[],
+  startTime: number,
+  endTime: number
+): string {
+  const startStr = new Date(startTime).toISOString().replace("T", " ").slice(0, 19);
+  const endStr = new Date(endTime).toISOString().replace("T", " ").slice(0, 19);
+  const duration = formatElapsed(Math.round((endTime - startTime) / 1000));
+
+  const lines: string[] = [
+    "=".repeat(72),
+    "  FlacCrunch Job Log",
+    `  Started : ${startStr}`,
+    `  Finished: ${endStr}  (${duration})`,
+    "=".repeat(72),
+    "",
+    "Folders processed:",
+    ...folders.map((f) => `  ${f}`),
+    "",
+    "Summary:",
+    `  Total files : ${counters.totalFiles}`,
+    `  Successful  : ${counters.successful}`,
+    `  Failed      : ${counters.failed}`,
+    `  Total saved : ${formatBytes(counters.totalSavedBytes)}`,
+    `  Audio saved : ${formatBytes(counters.totalSavedBytes - counters.totalArtworkSaved)}`,
+    `  Art saved   : ${formatBytes(counters.totalArtworkSaved)}`,
+    `  Meta/pad    : ${formatBytes(counters.totalMetadataSaved + counters.totalPaddingSaved)}`,
+    `  Art files   : ${counters.artworkOptimizedFiles}`,
+    "",
+  ];
+
+  if (counters.failed > 0) {
+    lines.push("FAILED FILES:", "-".repeat(72));
+    for (const e of events) {
+      if (e.status === "FAIL") {
+        lines.push(`  [FAIL] ${e.file}`);
+        if (e.detail) lines.push(`         ${e.detail}`);
+        if (e.verification) lines.push(`         ${e.verification}`);
+      }
+    }
+    lines.push("");
+  }
+
+  lines.push("ALL FILES:", "-".repeat(72));
+  for (const e of events) {
+    const saved =
+      e.savedBytes > 0
+        ? `saved ${formatBytes(e.savedBytes)} (${e.compressionPct.toFixed(1)}%)`
+        : "no savings";
+    lines.push(
+      `  [${e.time}] [${e.status}] ${e.file.split(/[/\\]/).pop()} | ${saved} | ${e.verification || e.detail || "ok"}`
+    );
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 export function useProcessing() {
   const [status, setStatus] = useState<RunStatus>("idle");
   const [folders, setFolders] = useState<string[]>([]);
   const [workers, setWorkers] = useState<WorkerStatus[]>([]);
   const [counters, setCounters] = useState<RunCounters>(defaultCounters);
-  const [recentEvents, setRecentEvents] = useState<FileEvent[]>([]);
-  const [topCompression, setTopCompression] = useState<CompressionResult[]>([]);
+  const [allEvents, setAllEvents] = useState<FileEvent[]>([]);
+  const [topCompression, setTopCompression] = useState<FileEvent[]>([]);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [jobHistory, setJobHistory] = useState<JobRecord[]>([]);
 
-  // Listen for pipeline events from the Rust backend
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [currentFolders, setCurrentFolders] = useState<string[]>([]);
+
+  // On mount: load any paths supplied via CLI args
+  useEffect(() => {
+    api.getStartupPaths().then((paths) => {
+      if (paths.length > 0) {
+        setFolders(paths);
+      }
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const unlisten = listen<Record<string, unknown>>("pipeline-event", (event) => {
       const payload = event.payload;
       const type = payload.type as string;
 
       switch (type) {
-        case "workerStarted":
+        case "workerStarted": {
+          const workerId = payload.workerId as number;
+          const stage = payload.stage as string | Record<string, unknown>;
+          let stageStr: WorkerStatus["state"] = "converting";
+          if (stage && typeof stage === "object" && "hashing" in stage) {
+            stageStr = "hashing-source";
+          }
           setWorkers((prev) => {
-            const workerId = payload.workerId as number;
             const updated = [...prev];
-            // Grow the array if needed (events can arrive before React processes setWorkers)
             while (updated.length <= workerId) {
               updated.push({ id: updated.length, state: "idle", file: null, percent: 0, ratio: "" });
             }
             updated[workerId] = {
               ...updated[workerId],
-              state: "converting",
+              state: stageStr,
               file: payload.file as string,
               percent: 0,
               ratio: "",
+              // Clear previous file's hashes when a new file starts
+              lastSourceHash: undefined,
+              lastOutputHash: undefined,
+              lastEmbeddedMd5: undefined,
+              lastVerification: undefined,
             };
             return updated;
           });
           break;
+        }
 
         case "workerProgress":
           setWorkers((prev) => {
@@ -83,9 +170,10 @@ export function useProcessing() {
           if (typeof stage === "string") {
             stageStr = stage as WorkerStatus["state"];
           } else if (stage && typeof stage === "object") {
-            // Hashing comes as { "hashing": "source" } or { "hashing": "output" }
-            if ("hashing" in stage) stageStr = "hashing";
-            else if ("converting" in stage) stageStr = "converting";
+            if ("hashing" in stage) {
+              const phase = (stage as Record<string, unknown>).hashing;
+              stageStr = phase === "output" ? "hashing-output" : "hashing-source";
+            } else if ("converting" in stage) stageStr = "converting";
             else if ("artwork" in stage) stageStr = "artwork";
             else if ("finalizing" in stage) stageStr = "finalizing";
             else if ("complete" in stage) stageStr = "idle";
@@ -95,12 +183,32 @@ export function useProcessing() {
             while (updated.length <= workerId) {
               updated.push({ id: updated.length, state: "idle", file: null, percent: 0, ratio: "" });
             }
-            updated[workerId] = {
-              ...updated[workerId],
-              state: stageStr,
-              percent: 0,
-              ratio: "",
-            };
+            updated[workerId] = { ...updated[workerId], state: stageStr, percent: 0, ratio: "" };
+            return updated;
+          });
+          break;
+        }
+
+        case "workerHashComputed": {
+          const workerId = payload.workerId as number;
+          const phase = payload.phase as string;
+          const hash = payload.hash as string;
+          const embeddedMd5 = payload.embeddedMd5 as string | null | undefined;
+          setWorkers((prev) => {
+            if (workerId >= prev.length) return prev;
+            const updated = [...prev];
+            if (phase === "source") {
+              updated[workerId] = {
+                ...updated[workerId],
+                lastSourceHash: hash,
+                lastEmbeddedMd5: embeddedMd5 ?? undefined,
+              };
+            } else if (phase === "output") {
+              updated[workerId] = {
+                ...updated[workerId],
+                lastOutputHash: hash,
+              };
+            }
             return updated;
           });
           break;
@@ -111,13 +219,9 @@ export function useProcessing() {
             const workerId = payload.workerId as number;
             if (workerId >= prev.length) return prev;
             const updated = [...prev];
-            updated[workerId] = {
-              ...updated[workerId],
-              state: "idle",
-              file: null,
-              percent: 0,
-              ratio: "",
-            };
+            // Keep file so the card still shows the filename next to the hashes.
+            // It will be overwritten when the next workerStarted fires.
+            updated[workerId] = { ...updated[workerId], state: "idle", percent: 0, ratio: "" };
             return updated;
           });
           break;
@@ -125,28 +229,33 @@ export function useProcessing() {
         case "fileCompleted": {
           const fileEvent = payload.event as FileEvent;
           const eventCounters = payload.counters as RunCounters | undefined;
+          const workerId = payload.workerId as number;
 
-          // Use backend counter snapshot if available
           if (eventCounters) {
             setCounters(eventCounters);
           }
 
           if (fileEvent) {
-            setRecentEvents((prev) => {
-              const updated = [...prev, fileEvent];
-              return updated.slice(-25);
+            setAllEvents((prev) => [...prev, fileEvent]);
+
+            // Store hash results on the worker for display in the card
+            setWorkers((prev) => {
+              if (workerId >= prev.length) return prev;
+              const updated = [...prev];
+              updated[workerId] = {
+                ...updated[workerId],
+                lastSourceHash: fileEvent.sourceHash,
+                lastOutputHash: fileEvent.outputHash,
+                lastEmbeddedMd5: fileEvent.embeddedMd5,
+                lastVerification: fileEvent.verification,
+                lastCompressionPct: fileEvent.status === "OK" ? fileEvent.compressionPct : undefined,
+              };
+              return updated;
             });
-            // Update top compression
+
             if (fileEvent.status === "OK" && fileEvent.savedBytes > 0) {
               setTopCompression((prev) => {
-                const updated = [
-                  ...prev,
-                  {
-                    path: fileEvent.file,
-                    savedBytes: fileEvent.savedBytes,
-                    savedPct: fileEvent.compressionPct,
-                  },
-                ];
+                const updated = [...prev, fileEvent];
                 updated.sort((a, b) => b.savedBytes - a.savedBytes);
                 return updated.slice(0, 3);
               });
@@ -157,6 +266,7 @@ export function useProcessing() {
 
         case "runComplete":
           setStatus("complete");
+          // Snapshot will be handled via a useEffect watching status + allEvents
           break;
       }
     });
@@ -166,17 +276,104 @@ export function useProcessing() {
     };
   }, []);
 
+  // Native drag-and-drop from the OS file manager (Windows Explorer, Finder, etc.)
+  useEffect(() => {
+    const appWindow = getCurrentWebviewWindow();
+    const unlistenPromise = appWindow.onDragDropEvent((event) => {
+      const payload = event.payload as { type: string; paths?: string[] };
+      if (payload.type === "enter" || payload.type === "over") {
+        setIsDragOver(true);
+      } else if (payload.type === "leave") {
+        setIsDragOver(false);
+      } else if (payload.type === "drop" && payload.paths && payload.paths.length > 0) {
+        setIsDragOver(false);
+        setFolders((prev) => [
+          ...prev,
+          ...payload.paths!.filter((p) => !prev.includes(p)),
+        ]);
+      }
+    });
+    return () => {
+      unlistenPromise.then((fn) => fn());
+    };
+  }, []);
+
+  // When run completes: save to job history and auto-export error log if needed
+  useEffect(() => {
+    if (status !== "complete") return;
+
+    setAllEvents((events) => {
+      setCounters((c) => {
+        setStartTime((st) => {
+          const endTime = Date.now();
+
+          // Save job record
+          const job: JobRecord = {
+            id: `job-${st ?? endTime}`,
+            startTime: st ?? endTime,
+            endTime,
+            folders: currentFolders,
+            counters: c,
+            events,
+            topCompression: [],
+          };
+          setJobHistory((prev) => [...prev, job]);
+
+          // Auto-export error log if there are failures
+          if (c.failed > 0) {
+            const logContent = buildLogText(currentFolders, c, events, st ?? endTime, endTime);
+            const ts = new Date(endTime).toISOString().slice(0, 19).replace(/[T:]/g, "-");
+            const filename = `flaccrunch-errors-${ts}.txt`;
+            tauriSaveDialog({
+              title: "Save Error Log",
+              defaultPath: filename,
+              filters: [{ name: "Text files", extensions: ["txt"] }],
+            }).then((path) => {
+              if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
+            }).catch(() => {});
+          }
+
+          return st;
+        });
+        return c;
+      });
+      return events;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  const exportLog = useCallback(() => {
+    setAllEvents((events) => {
+      setCounters((c) => {
+        setStartTime((st) => {
+          const endTime = Date.now();
+          const logContent = buildLogText(currentFolders, c, events, st ?? endTime, endTime);
+          const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+          const filename = `flaccrunch-log-${ts}.txt`;
+          // Use Tauri's native save dialog — never blocked by the WebView download policy
+          tauriSaveDialog({
+            title: "Save Log",
+            defaultPath: filename,
+            filters: [{ name: "Text files", extensions: ["txt"] }],
+          }).then((path) => {
+            if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
+          }).catch(() => {});
+          return st;
+        });
+        return c;
+      });
+      return events;
+    });
+  }, [currentFolders]);
+
   const addFolder = useCallback(async () => {
     try {
       const selected = await api.selectFolders();
       if (selected.length > 0) {
-        setFolders((prev) => [
-          ...prev,
-          ...selected.filter((f) => !prev.includes(f)),
-        ]);
+        setFolders((prev) => [...prev, ...selected.filter((f) => !prev.includes(f))]);
       }
     } catch {
-      // User cancelled or not supported on platform
+      // User cancelled
     }
   }, []);
 
@@ -184,10 +381,7 @@ export function useProcessing() {
     try {
       const selected = await api.selectFiles();
       if (selected.length > 0) {
-        setFolders((prev) => [
-          ...prev,
-          ...selected.filter((f) => !prev.includes(f)),
-        ]);
+        setFolders((prev) => [...prev, ...selected.filter((f) => !prev.includes(f))]);
       }
     } catch {
       // User cancelled
@@ -205,7 +399,6 @@ export function useProcessing() {
       setError(null);
 
       try {
-        // Scan first to get file count
         const scan = await api.scanFolders(folders);
 
         if (scan.files.length === 0) {
@@ -213,16 +406,15 @@ export function useProcessing() {
           return;
         }
 
+        setCurrentFolders(folders);
         setStatus("processing");
-        setStartTime(Date.now());
+        const now = Date.now();
+        setStartTime(now);
         setCounters(defaultCounters);
-        setRecentEvents([]);
+        setAllEvents([]);
         setTopCompression([]);
 
-        const workerCount = Math.min(
-          settings.threadCount,
-          scan.files.length
-        );
+        const workerCount = Math.min(settings.threadCount, scan.files.length);
         setWorkers(
           Array.from({ length: workerCount }, (_, i) => ({
             id: i,
@@ -260,7 +452,7 @@ export function useProcessing() {
     setStatus("idle");
     setCounters(defaultCounters);
     setWorkers([]);
-    setRecentEvents([]);
+    setAllEvents([]);
     setTopCompression([]);
     setStartTime(null);
     setError(null);
@@ -271,15 +463,18 @@ export function useProcessing() {
     folders,
     workers,
     counters,
-    recentEvents,
+    recentEvents: allEvents,
     topCompression,
     startTime,
     error,
+    jobHistory,
+    isDragOver,
     addFolder,
     addFiles,
     removeFolder,
     startRun,
     cancelRun,
     resetRun,
+    exportLog,
   };
 }

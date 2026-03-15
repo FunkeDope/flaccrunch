@@ -7,7 +7,6 @@ use std::path::Path;
 /// The hash is computed over raw PCM samples in little-endian signed format,
 /// matching the output of `flac -d -c -s --force-raw-format --endian=little --sign=signed`.
 pub async fn hash_decoded_audio(
-    _flac_bin: &Path,
     file_path: &Path,
 ) -> Result<String, String> {
     let file_path = file_path.to_path_buf();

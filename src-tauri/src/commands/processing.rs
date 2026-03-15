@@ -3,7 +3,6 @@ use crate::logging::run_log::RunLog;
 use crate::pipeline::job::ProcessingContext;
 use crate::pipeline::queue::JobQueue;
 use crate::pipeline::worker_pool::run_worker_pool;
-use crate::sidecar::resolve;
 use crate::state::app_state::AppState;
 use crate::state::run_state::{
     CompressionResult, FileEvent, ProcessingStatus, RunState, WorkerStatus,
@@ -32,10 +31,6 @@ pub async fn start_processing(
             }
         }
     }
-
-    // Resolve sidecar binaries (optional — native libFLAC is used for all operations)
-    let flac_bin = resolve::resolve_flac(&app).unwrap_or_else(|_| PathBuf::from("flac"));
-    let metaflac_bin = resolve::resolve_metaflac(&app).unwrap_or_else(|_| PathBuf::from("metaflac"));
 
     let folder_paths: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
 
@@ -95,8 +90,6 @@ pub async fn start_processing(
 
     // Create processing context
     let context = Arc::new(ProcessingContext {
-        flac_bin,
-        metaflac_bin,
         max_retries: settings.max_retries,
         scratch_dir: run_log_dir.join("scratch"),
     });

@@ -20,13 +20,13 @@ export function StatsBar({ counters }: StatsBarProps) {
       </div>
       <div className="stat-item">
         <div className="stat-value">
-          {formatBytes(counters.totalSavedBytes, true)}
+          {formatBytes(counters.totalSavedBytes)}
         </div>
         <div className="stat-label">Total Saved</div>
       </div>
       <div className="stat-item">
         <div className="stat-value">
-          {formatBytes(counters.totalArtworkSaved, true)}
+          {formatBytes(counters.totalArtworkSaved)}
         </div>
         <div className="stat-label">Artwork Saved</div>
       </div>

@@ -44,6 +44,15 @@ pub enum PipelineEvent {
         event: FileEvent,
         counters: RunCounters,
     },
+    /// Emitted immediately after a hash finishes computing, so the UI can
+    /// display the value live before the file is fully processed.
+    WorkerHashComputed {
+        worker_id: usize,
+        phase: HashPhase,
+        hash: String,
+        /// Only present for the Source phase: the embedded STREAMINFO MD5.
+        embedded_md5: Option<String>,
+    },
     WorkerIdle {
         worker_id: usize,
     },

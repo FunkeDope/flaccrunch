@@ -60,3 +60,8 @@ export async function getRunLog(): Promise<string> {
 export async function getSummaryLog(): Promise<string> {
   return invoke<string>("get_summary_log");
 }
+
+// Startup paths from CLI args (consumed on first call)
+export async function getStartupPaths(): Promise<string[]> {
+  return invoke<string[]>("get_startup_paths");
+}

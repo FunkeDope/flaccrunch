@@ -2,10 +2,16 @@ export type RunStatus = "idle" | "scanning" | "processing" | "cancelling" | "com
 
 export interface WorkerStatus {
   id: number;
-  state: "idle" | "converting" | "hashing" | "artwork" | "finalizing";
+  state: "idle" | "converting" | "hashing-source" | "hashing-output" | "artwork" | "finalizing";
   file: string | null;
   percent: number;
   ratio: string;
+  // Populated after the most recent file completes on this worker
+  lastSourceHash?: string;
+  lastOutputHash?: string;
+  lastEmbeddedMd5?: string;
+  lastVerification?: string;
+  lastCompressionPct?: number;
 }
 
 export interface RunCounters {
@@ -35,12 +41,20 @@ export interface FileEvent {
   savedBytes: number;
   compressionPct: number;
   detail: string;
+  sourceHash?: string;
+  outputHash?: string;
+  embeddedMd5?: string;
+  artworkSavedBytes: number;
+  artworkRawSavedBytes: number;
+  artworkBlocksOptimized: number;
 }
 
 export interface CompressionResult {
   path: string;
   savedBytes: number;
   savedPct: number;
+  beforeSize: number;
+  afterSize: number;
 }
 
 export interface ScanResult {
@@ -53,4 +67,14 @@ export interface ProcessingSettings {
   threadCount: number;
   logFolder: string;
   maxRetries: number;
+}
+
+export interface JobRecord {
+  id: string;
+  startTime: number;
+  endTime: number;
+  folders: string[];
+  counters: RunCounters;
+  events: FileEvent[];
+  topCompression: CompressionResult[];
 }

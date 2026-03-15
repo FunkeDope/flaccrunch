@@ -18,7 +18,6 @@ pub struct PictureBlock {
 
 /// Get the embedded MD5 hash from a FLAC file's STREAMINFO using native libFLAC.
 pub async fn get_md5sum(
-    _metaflac_bin: &Path,
     flac_path: &Path,
 ) -> Result<Option<String>, String> {
     let flac_path = flac_path.to_path_buf();
@@ -53,7 +52,6 @@ fn get_md5sum_native(flac_path: &Path) -> Result<Option<String>, String> {
 
 /// List all PICTURE blocks in a FLAC file using native libFLAC metadata API.
 pub async fn list_picture_blocks(
-    _metaflac_bin: &Path,
     flac_path: &Path,
 ) -> Result<Vec<PictureBlock>, String> {
     let flac_path = flac_path.to_path_buf();
@@ -135,7 +133,6 @@ fn list_picture_blocks_native(flac_path: &Path) -> Result<Vec<PictureBlock>, Str
 
 /// Export a PICTURE block from a FLAC file to a file using native libFLAC.
 pub async fn export_picture(
-    _metaflac_bin: &Path,
     flac_path: &Path,
     block_number: u32,
     output_path: &Path,
@@ -205,7 +202,6 @@ fn export_picture_native(flac_path: &Path, target_block: u32, output_path: &Path
 
 /// Remove a specific metadata block from a FLAC file using native libFLAC.
 pub async fn remove_block(
-    _metaflac_bin: &Path,
     flac_path: &Path,
     block_number: u32,
 ) -> Result<(), String> {
@@ -270,7 +266,6 @@ fn remove_block_native(flac_path: &Path, target_block: u32) -> Result<(), String
 /// Import a picture into a FLAC file using a spec string.
 /// Spec format: "TYPE|MIME|DESCRIPTION|WIDTHxHEIGHTxDEPTH/COLORS|FILE"
 pub async fn import_picture(
-    _metaflac_bin: &Path,
     flac_path: &Path,
     spec: &str,
 ) -> Result<(), String> {
@@ -396,7 +391,6 @@ fn parse_dimensions(dim_str: &str) -> (u32, u32, u32, u32) {
 
 /// Remove all PADDING blocks from a FLAC file using native libFLAC.
 pub async fn remove_padding(
-    _metaflac_bin: &Path,
     flac_path: &Path,
 ) -> Result<(), String> {
     let flac_path = flac_path.to_path_buf();
@@ -436,7 +430,11 @@ fn remove_padding_native(flac_path: &Path) -> Result<(), String> {
             if !block.is_null() && (*block).type_ == FLAC__METADATA_TYPE_PADDING {
                 FLAC__metadata_iterator_delete_block(iter, 0);
                 removed_any = true;
-                // After deletion, iterator advances to next block, so don't call next
+                // libFLAC moves the iterator to the PRECEDING block after deletion,
+                // not the next one. Using continue skips the next() call and lets
+                // us re-examine the preceding block (harmlessly not-PADDING), then
+                // next() advances us to what was originally the block after the
+                // deleted one. All blocks are visited exactly once.
                 continue;
             }
             if FLAC__metadata_iterator_next(iter) == 0 {
@@ -456,6 +454,146 @@ fn remove_padding_native(flac_path: &Path) -> Result<(), String> {
         FLAC__metadata_chain_delete(chain);
     }
 
+    Ok(())
+}
+
+/// Copy all Vorbis Comment, Picture, Application, and Cuesheet metadata blocks
+/// from `src` FLAC file into `dst` FLAC file.
+///
+/// This is called after re-encoding so that the newly encoded file (which only
+/// contains audio frames + STREAMINFO) gets all the original tags/artwork back.
+pub async fn copy_metadata_blocks(src: &Path, dst: &Path) -> Result<(), String> {
+    let src = src.to_path_buf();
+    let dst = dst.to_path_buf();
+    tokio::task::spawn_blocking(move || copy_metadata_blocks_native(&src, &dst))
+        .await
+        .map_err(|e| format!("Metadata copy task panicked: {e}"))?
+}
+
+fn copy_metadata_blocks_native(src: &Path, dst: &Path) -> Result<(), String> {
+    use libflac_sys::*;
+
+    let src_cstr = CString::new(src.to_string_lossy().as_bytes())
+        .map_err(|_| "Invalid src path")?;
+    let dst_cstr = CString::new(dst.to_string_lossy().as_bytes())
+        .map_err(|_| "Invalid dst path")?;
+
+    let types_to_copy: &[u32] = &[
+        FLAC__METADATA_TYPE_VORBIS_COMMENT,
+        FLAC__METADATA_TYPE_PICTURE,
+        FLAC__METADATA_TYPE_APPLICATION,
+        FLAC__METADATA_TYPE_CUESHEET,
+    ];
+
+    unsafe {
+        // Read source chain and clone desired blocks
+        let src_chain = FLAC__metadata_chain_new();
+        if src_chain.is_null() {
+            return Err("Failed to create src metadata chain".to_string());
+        }
+        if FLAC__metadata_chain_read(src_chain, src_cstr.as_ptr()) == 0 {
+            FLAC__metadata_chain_delete(src_chain);
+            return Err("Failed to read source FLAC metadata".to_string());
+        }
+
+        let src_iter = FLAC__metadata_iterator_new();
+        if src_iter.is_null() {
+            FLAC__metadata_chain_delete(src_chain);
+            return Err("Failed to create src iterator".to_string());
+        }
+        FLAC__metadata_iterator_init(src_iter, src_chain);
+
+        let mut cloned: Vec<*mut FLAC__StreamMetadata> = Vec::new();
+        loop {
+            let block = FLAC__metadata_iterator_get_block(src_iter);
+            if !block.is_null() && types_to_copy.contains(&((*block).type_ as u32)) {
+                let copy = FLAC__metadata_object_clone(block);
+                if !copy.is_null() {
+                    cloned.push(copy);
+                }
+            }
+            if FLAC__metadata_iterator_next(src_iter) == 0 {
+                break;
+            }
+        }
+        FLAC__metadata_iterator_delete(src_iter);
+        FLAC__metadata_chain_delete(src_chain);
+
+        if cloned.is_empty() {
+            return Ok(());
+        }
+
+        // Open destination chain and append the cloned blocks
+        let dst_chain = FLAC__metadata_chain_new();
+        if dst_chain.is_null() {
+            for b in &cloned { FLAC__metadata_object_delete(*b); }
+            return Err("Failed to create dst metadata chain".to_string());
+        }
+        if FLAC__metadata_chain_read(dst_chain, dst_cstr.as_ptr()) == 0 {
+            FLAC__metadata_chain_delete(dst_chain);
+            for b in &cloned { FLAC__metadata_object_delete(*b); }
+            return Err("Failed to read destination FLAC metadata".to_string());
+        }
+
+        let dst_iter = FLAC__metadata_iterator_new();
+        if dst_iter.is_null() {
+            FLAC__metadata_chain_delete(dst_chain);
+            for b in &cloned { FLAC__metadata_object_delete(*b); }
+            return Err("Failed to create dst iterator".to_string());
+        }
+        FLAC__metadata_iterator_init(dst_iter, dst_chain);
+        while FLAC__metadata_iterator_next(dst_iter) != 0 {}
+
+        for block in cloned {
+            // insert_block_after takes ownership on success; free only on failure
+            if FLAC__metadata_iterator_insert_block_after(dst_iter, block) == 0 {
+                FLAC__metadata_object_delete(block);
+            }
+        }
+
+        FLAC__metadata_iterator_delete(dst_iter);
+        FLAC__metadata_chain_sort_padding(dst_chain);
+        if FLAC__metadata_chain_write(dst_chain, 0, 0) == 0 {
+            FLAC__metadata_chain_delete(dst_chain);
+            return Err("Failed to write dst chain after metadata copy".to_string());
+        }
+        FLAC__metadata_chain_delete(dst_chain);
+    }
+
+    Ok(())
+}
+
+/// Extract any bytes that precede the FLAC stream marker ("fLaC") in a file.
+///
+/// Some taggers incorrectly prepend an ID3v2 header before the FLAC data.
+/// We preserve these bytes verbatim so the output is byte-for-byte equivalent
+/// in terms of non-FLAC prefix content.
+pub fn extract_non_flac_prefix(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    const FLAC_MARKER: &[u8] = b"fLaC";
+    let mut buf = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|e| format!("open: {e}"))?
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("read: {e}"))?;
+    match buf.windows(4).position(|w| w == FLAC_MARKER) {
+        Some(0) | None => Ok(Vec::new()), // starts with fLaC or no marker found
+        Some(pos) => Ok(buf[..pos].to_vec()),
+    }
+}
+
+/// Prepend raw bytes to an existing file.
+///
+/// Used to re-attach a preserved ID3v2 (or other) prefix after re-encoding.
+pub fn prepend_bytes_to_file(path: &Path, prefix: &[u8]) -> Result<(), String> {
+    if prefix.is_empty() {
+        return Ok(());
+    }
+    use std::io::Write;
+    let body = std::fs::read(path).map_err(|e| format!("read for prepend: {e}"))?;
+    let mut f = std::fs::File::create(path).map_err(|e| format!("create for prepend: {e}"))?;
+    f.write_all(prefix).map_err(|e| format!("write prefix: {e}"))?;
+    f.write_all(&body).map_err(|e| format!("write body: {e}"))?;
     Ok(())
 }
 

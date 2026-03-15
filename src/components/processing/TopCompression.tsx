@@ -1,38 +1,15 @@
-import { formatBytes, formatPercent } from "../../lib/format";
-import type { CompressionResult } from "../../types/processing";
+import { RecentEventsTable } from "./RecentEventsTable";
+import type { FileEvent } from "../../types/processing";
 
 interface TopCompressionProps {
-  results: CompressionResult[];
-  successCount: number;
+  results: FileEvent[];
 }
 
-export function TopCompression({ results, successCount }: TopCompressionProps) {
+export function TopCompression({ results }: TopCompressionProps) {
   return (
     <div className="top-compression-section">
-      <div className="top-compression-header">Top 3 Compression (live)</div>
-      {results.length === 0 ? (
-        <div className="top-compression-empty">
-          {successCount > 0
-            ? "(No net-positive file reductions yet)"
-            : "(No successful file conversions yet)"}
-        </div>
-      ) : (
-        <div className="top-compression-list">
-          {results.map((result, i) => {
-            const fileName = result.path.split(/[/\\]/).pop() ?? result.path;
-            return (
-              <div key={i} className="top-compression-entry" title={result.path}>
-                <span className="top-compression-rank">{i + 1}.</span>
-                <span className="top-compression-detail">
-                  Saved {formatBytes(result.savedBytes, true)} ({formatPercent(result.savedPct)})
-                </span>
-                <span className="top-compression-sep">|</span>
-                <span className="top-compression-file">{fileName}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div className="top-compression-header">Top Compression</div>
+      <RecentEventsTable events={results} maxRows={3} minRows={3} defaultSortKey="audio" />
     </div>
   );
 }

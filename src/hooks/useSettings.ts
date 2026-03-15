@@ -8,7 +8,6 @@ const defaultSettings: AppSettings = {
   logFolder: null,
   maxRetries: 3,
   recentFolders: [],
-  theme: "system",
 };
 
 export function useSettings() {
@@ -19,7 +18,12 @@ export function useSettings() {
   useEffect(() => {
     api.getCpuCount().then(setCpuCount).catch(() => {});
     api.getDefaultLogFolder().then(setDefaultLogFolder).catch(() => {});
-    api.getSettings().then(setSettings).catch(() => {});
+    api.getSettings().then((s) => {
+      // Strip legacy theme field if present
+      const { theme: _theme, ...rest } = s as AppSettings & { theme?: unknown };
+      void _theme;
+      setSettings({ ...defaultSettings, ...rest });
+    }).catch(() => {});
   }, []);
 
   const updateSettings = useCallback(
@@ -41,10 +45,5 @@ export function useSettings() {
     maxRetries: settings.maxRetries,
   };
 
-  return {
-    settings,
-    cpuCount,
-    processingSettings,
-    updateSettings,
-  };
+  return { settings, cpuCount, processingSettings, updateSettings };
 }

@@ -27,7 +27,7 @@ pub async fn run_worker_pool(
         let event_tx = event_tx.clone();
 
         let handle = tokio::spawn(async move {
-            worker_loop(worker_id, queue, context, event_tx, cancel_token).await;
+            worker_loop(worker_id, queue, context, event_tx, cancel_token.clone()).await;
         });
         worker_handles.push(handle);
     }
@@ -41,9 +41,13 @@ pub async fn run_worker_pool(
             PipelineEvent::WorkerStarted {
                 worker_id,
                 file,
-                stage: _,
+                stage,
             } => {
-                run_state.update_worker(*worker_id, WorkerState::Converting, Some(file.clone()), 0, String::new());
+                let initial_state = match stage {
+                    crate::pipeline::stages::PipelineStage::Hashing(_) => WorkerState::Hashing,
+                    _ => WorkerState::Converting,
+                };
+                run_state.update_worker(*worker_id, initial_state, Some(file.clone()), 0, String::new());
                 event
             }
             PipelineEvent::WorkerProgress {
@@ -87,6 +91,10 @@ pub async fn run_worker_pool(
                 let _ = app_handle.emit("pipeline-event", &enriched);
                 continue;
             }
+            PipelineEvent::WorkerHashComputed { .. } => {
+                // Pass through to frontend unchanged — no run_state update needed
+                event
+            }
             PipelineEvent::WorkerIdle { worker_id } => {
                 run_state.update_worker(*worker_id, WorkerState::Idle, None, 0, String::new());
                 event
@@ -124,7 +132,7 @@ async fn worker_loop(
             None => break, // Queue empty, worker done
         };
 
-        let result = execute_job(&item, worker_id, &context, &event_tx).await;
+        let result = execute_job(&item, worker_id, &context, &event_tx, cancel_token.clone()).await;
 
         // Handle retry
         let file_event = make_file_event(&result);
@@ -169,5 +177,11 @@ fn make_file_event(
         saved_bytes: result.saved_bytes,
         compression_pct: result.compression_pct,
         detail: result.error.clone().unwrap_or_default(),
+        source_hash: result.source_hash.clone(),
+        output_hash: result.output_hash.clone(),
+        embedded_md5: result.embedded_md5.clone(),
+        artwork_saved_bytes: result.artwork_result.as_ref().map(|a| a.saved_bytes).unwrap_or(0),
+        artwork_raw_saved_bytes: result.artwork_result.as_ref().map(|a| a.raw_saved_bytes).unwrap_or(0),
+        artwork_blocks_optimized: result.artwork_result.as_ref().map(|a| a.blocks_optimized).unwrap_or(0),
     }
 }

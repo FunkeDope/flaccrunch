@@ -1,38 +1,25 @@
-import { OverallProgress } from "./OverallProgress";
-import { StatsBar } from "./StatsBar";
 import { WorkerGrid } from "./WorkerGrid";
 import { RecentEventsTable } from "./RecentEventsTable";
 import { TopCompression } from "./TopCompression";
 import type {
-  RunStatus,
-  RunCounters,
   WorkerStatus,
   FileEvent,
-  CompressionResult,
 } from "../../types/processing";
 
 interface ProcessingDashboardProps {
-  status: RunStatus;
-  counters: RunCounters;
   workers: WorkerStatus[];
   recentEvents: FileEvent[];
-  topCompression: CompressionResult[];
+  topCompression: FileEvent[];
 }
 
 export function ProcessingDashboard({
-  status,
-  counters,
   workers,
   recentEvents,
   topCompression,
 }: ProcessingDashboardProps) {
   return (
     <div className="processing-section">
-      <OverallProgress counters={counters} />
-
-      <StatsBar counters={counters} />
-
-      <TopCompression results={topCompression} successCount={counters.successful} />
+      <TopCompression results={topCompression} />
 
       {workers.length > 0 && (
         <div className="card">
@@ -42,33 +29,11 @@ export function ProcessingDashboard({
       )}
 
       {recentEvents.length > 0 && (
-        <div className="card">
-          <h2>Recent Files</h2>
-          <RecentEventsTable events={recentEvents} />
-        </div>
-      )}
-
-      {status === "complete" && counters.processed > 0 && (
-        <div className="card">
-          <h2>Summary</h2>
-          <div className="stats-bar">
-            <div className="stat-item">
-              <div className="stat-value">
-                {counters.totalFiles > 0
-                  ? ((counters.successful / counters.totalFiles) * 100).toFixed(1) + "%"
-                  : "0%"}
-              </div>
-              <div className="stat-label">Success Rate</div>
-            </div>
-            <div className="stat-item">
-              <div className="stat-value">{counters.artworkOptimizedFiles}</div>
-              <div className="stat-label">Art Files</div>
-            </div>
-            <div className="stat-item">
-              <div className="stat-value">{counters.artworkOptimizedBlocks}</div>
-              <div className="stat-label">Art Blocks</div>
-            </div>
+        <div className="card files-card">
+          <div className="card-header">
+            <h2>Files</h2>
           </div>
+          <RecentEventsTable events={recentEvents} />
         </div>
       )}
     </div>

@@ -26,6 +26,8 @@ tokio-util = "0.7"
 md-5 = "0.10"
 sha2 = "0.10"
 oxipng = "9"
+zune-jpeg = "0.4"
+jpeg-encoder = "0.6"
 walkdir = "2"
 log = "0.4"
 env_logger = "0.11"
@@ -33,7 +35,6 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 directories = "6"
 num_cpus = "1"
-which = "7"
 libc = "0.2"
 libflac-sys = { version = "0.3", default-features = false, features = ["build-flac"] }
 

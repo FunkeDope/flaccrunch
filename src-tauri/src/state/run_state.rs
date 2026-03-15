@@ -52,6 +52,12 @@ pub struct FileEvent {
     pub saved_bytes: i64,
     pub compression_pct: f64,
     pub detail: String,
+    pub source_hash: Option<String>,
+    pub output_hash: Option<String>,
+    pub embedded_md5: Option<String>,
+    pub artwork_saved_bytes: i64,
+    pub artwork_raw_saved_bytes: i64,
+    pub artwork_blocks_optimized: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -68,6 +74,8 @@ pub struct CompressionResult {
     pub path: String,
     pub saved_bytes: i64,
     pub saved_pct: f64,
+    pub before_size: u64,
+    pub after_size: u64,
 }
 
 /// Counters tracking the progress of a processing run.
@@ -154,6 +162,12 @@ impl RunState {
                     counters.total_original_bytes += event.before_size;
                     counters.total_new_bytes += event.after_size;
                     counters.total_saved_bytes += event.saved_bytes;
+                    counters.total_artwork_saved += event.artwork_saved_bytes;
+                    counters.total_artwork_raw_saved += event.artwork_raw_saved_bytes;
+                    if event.artwork_blocks_optimized > 0 {
+                        counters.artwork_optimized_files += 1;
+                        counters.artwork_optimized_blocks += event.artwork_blocks_optimized as usize;
+                    }
                 }
                 FileStatus::FAIL => {
                     counters.failed += 1;
@@ -172,6 +186,8 @@ impl RunState {
                 path: event.file,
                 saved_bytes: event.saved_bytes,
                 saved_pct: event.compression_pct,
+                before_size: event.before_size,
+                after_size: event.after_size,
             });
             top.sort_by(|a, b| b.saved_bytes.cmp(&a.saved_bytes));
             top.truncate(3);

@@ -1,5 +1,7 @@
 use std::ffi::CString;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Result of a FLAC encoding operation.
 #[derive(Debug)]
@@ -20,16 +22,15 @@ pub struct EncodeResult {
 ///
 /// If `progress_tx` is provided, sends percent complete (0-100) during encoding.
 pub async fn encode_flac(
-    _flac_bin: &Path,
     input: &Path,
     output: &Path,
     progress_tx: Option<std::sync::mpsc::Sender<u8>>,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<EncodeResult, String> {
     let input = input.to_path_buf();
     let output = output.to_path_buf();
 
-    // Run the CPU-intensive FLAC encoding on a blocking thread
-    tokio::task::spawn_blocking(move || encode_flac_native(&input, &output, progress_tx))
+    tokio::task::spawn_blocking(move || encode_flac_native(&input, &output, progress_tx, cancel))
         .await
         .map_err(|e| format!("Encoding task panicked: {e}"))?
 }
@@ -39,12 +40,10 @@ fn encode_flac_native(
     input: &Path,
     output: &Path,
     progress_tx: Option<std::sync::mpsc::Sender<u8>>,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<EncodeResult, String> {
-    // Step 1: Decode the input FLAC file to get PCM data and stream info
     let decoded = decode_flac_to_pcm(input)?;
-
-    // Step 2: Encode the PCM data to a new FLAC file with maximum compression
-    encode_pcm_to_flac(&decoded, output, progress_tx)
+    encode_pcm_to_flac(&decoded, output, progress_tx, cancel)
 }
 
 struct DecodedFlac {
@@ -184,6 +183,7 @@ fn encode_pcm_to_flac(
     decoded: &DecodedFlac,
     output: &Path,
     progress_tx: Option<std::sync::mpsc::Sender<u8>>,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<EncodeResult, String> {
     use libflac_sys::*;
 
@@ -259,6 +259,18 @@ fn encode_pcm_to_flac(
                 if percent != last_percent {
                     last_percent = percent;
                     let _ = tx.send(percent);
+                }
+            }
+
+            // Check for cancellation every ~4096 frames (~100ms at 44.1kHz)
+            if let Some(ref c) = cancel {
+                if c.load(Ordering::Relaxed) {
+                    FLAC__stream_encoder_delete(encoder);
+                    return Ok(EncodeResult {
+                        success: false,
+                        exit_code: None,
+                        stderr: "cancelled".to_string(),
+                    });
                 }
             }
         }

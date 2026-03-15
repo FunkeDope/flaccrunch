@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { AppShell } from "./components/layout/AppShell";
 import { FolderSelector } from "./components/folders/FolderSelector";
 import { ProcessingDashboard } from "./components/processing/ProcessingDashboard";
+import { RunStatusBar } from "./components/processing/RunStatusBar";
 import { SettingsModal } from "./components/settings/SettingsPanel";
 import { useProcessing } from "./hooks/useProcessing";
 import { useSettings } from "./hooks/useSettings";
@@ -11,25 +12,49 @@ function App() {
   const processing = useProcessing();
   const settings = useSettings();
 
+  const isActive = processing.status !== "idle";
+
+  // Live blended progress: completed files + fractional in-flight worker progress
+  const livePct = useMemo(() => {
+    if (processing.counters.totalFiles === 0) return 0;
+    const activeStages = ["converting", "hashing-source", "hashing-output", "artwork", "finalizing"];
+    const inFlightWeight = processing.workers
+      .filter((w) => activeStages.includes(w.state))
+      .reduce((sum, w) => sum + w.percent / 100, 0);
+    return Math.min(
+      100,
+      ((processing.counters.processed + inFlightWeight) / processing.counters.totalFiles) * 100
+    );
+  }, [processing.counters, processing.workers]);
+
   return (
     <AppShell onSettingsClick={() => setSettingsOpen(true)}>
+      {isActive && (
+        <RunStatusBar
+          status={processing.status}
+          counters={processing.counters}
+          startTime={processing.startTime}
+          livePct={livePct}
+          onCancel={processing.cancelRun}
+          onReset={processing.resetRun}
+          onExport={processing.exportLog}
+        />
+      )}
+
       <FolderSelector
         folders={processing.folders}
         onAddFolder={processing.addFolder}
         onAddFiles={processing.addFiles}
         onRemoveFolder={processing.removeFolder}
         onStart={() => processing.startRun(settings.processingSettings)}
-        onCancel={processing.cancelRun}
-        onReset={processing.resetRun}
         canStart={processing.folders.length > 0 && processing.status === "idle"}
         status={processing.status}
         error={processing.error}
+        isDragOver={processing.isDragOver}
       />
 
-      {processing.status !== "idle" && (
+      {isActive && (
         <ProcessingDashboard
-          status={processing.status}
-          counters={processing.counters}
           workers={processing.workers}
           recentEvents={processing.recentEvents}
           topCompression={processing.topCompression}

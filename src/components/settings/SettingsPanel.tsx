@@ -19,13 +19,12 @@ export function SettingsModal({ settings, cpuCount, onUpdate, onClose }: Setting
         <div className="modal-header">
           <h2>Settings</h2>
           <button className="btn-icon modal-close" onClick={onClose} aria-label="Close">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <line x1="4" y1="4" x2="14" y2="14" />
               <line x1="14" y1="4" x2="4" y2="14" />
             </svg>
           </button>
         </div>
-
         <div className="modal-body">
           <div className="card">
             <h3>Performance</h3>
@@ -35,7 +34,6 @@ export function SettingsModal({ settings, cpuCount, onUpdate, onClose }: Setting
               onChange={(v) => onUpdate({ threadCount: v })}
             />
           </div>
-
           <div className="card">
             <h3>Processing</h3>
             <div className="settings-group">
@@ -50,39 +48,6 @@ export function SettingsModal({ settings, cpuCount, onUpdate, onClose }: Setting
                 value={settings.maxRetries}
                 onChange={(e) => onUpdate({ maxRetries: parseInt(e.target.value) })}
               />
-            </div>
-          </div>
-
-          <div className="card">
-            <h3>Log Folder</h3>
-            <div className="settings-group">
-              <label>Custom log folder (leave empty for default)</label>
-              <input
-                type="text"
-                value={settings.logFolder ?? ""}
-                placeholder="Default: Desktop/EFC-logs"
-                onChange={(e) =>
-                  onUpdate({ logFolder: e.target.value || null })
-                }
-              />
-            </div>
-          </div>
-
-          <div className="card">
-            <h3>Appearance</h3>
-            <div className="settings-group">
-              <label>Theme</label>
-              <div style={{ display: "flex", gap: 8 }}>
-                {(["system", "dark", "light"] as const).map((t) => (
-                  <button
-                    key={t}
-                    className={`btn ${settings.theme === t ? "btn-primary" : "btn-secondary"}`}
-                    onClick={() => onUpdate({ theme: t })}
-                  >
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         </div>
