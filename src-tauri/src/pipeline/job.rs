@@ -13,6 +13,8 @@ use tokio::sync::mpsc;
 
 /// Context shared across all jobs in a processing run.
 pub struct ProcessingContext {
+    /// Unused on Android — native libFLAC is linked directly.
+    /// On desktop, still resolved for logging purposes but not required.
     pub flac_bin: PathBuf,
     pub metaflac_bin: PathBuf,
     pub max_retries: u32,

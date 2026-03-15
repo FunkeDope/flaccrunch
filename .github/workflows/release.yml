@@ -58,43 +58,7 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libjavascriptcoregtk-4.1-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev \
-            flac
-
-      - name: Install FLAC (macOS)
-        if: runner.os == 'macOS'
-        run: brew install flac
-
-      - name: Install FLAC (Windows)
-        if: runner.os == 'Windows'
-        run: choco install flac -y
-
-      - name: Place sidecar binaries
-        shell: bash
-        run: |
-          EXT=""
-          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
-
-          FLAC_PATH=$(which flac 2>/dev/null || true)
-          METAFLAC_PATH=$(which metaflac 2>/dev/null || true)
-
-          if [ -n "$FLAC_PATH" ]; then
-            cp "$FLAC_PATH" "src-tauri/binaries/flac-${{ matrix.target }}${EXT}"
-          else
-            echo "::error::flac binary not found in PATH"
-            exit 1
-          fi
-
-          if [ -n "$METAFLAC_PATH" ]; then
-            cp "$METAFLAC_PATH" "src-tauri/binaries/metaflac-${{ matrix.target }}${EXT}"
-          else
-            echo "::error::metaflac binary not found in PATH"
-            exit 1
-          fi
-
-          chmod +x src-tauri/binaries/* 2>/dev/null || true
-          echo "Sidecar binaries:"
-          ls -la src-tauri/binaries/
+            librsvg2-dev
 
       - name: Install npm dependencies
         run: npm ci
@@ -108,12 +72,13 @@ jobs:
           releaseName: 'FlacCrunch ${{ github.ref_name }}'
           releaseBody: |
             Cross-platform lossless FLAC recompression with album art optimization.
+            FLAC encoding is built natively into the app — no external dependencies required.
 
             ## Downloads
             - **Windows**: `.msi` installer or `.exe` setup
             - **macOS**: `.dmg` disk image
             - **Linux**: `.deb` package or `.AppImage`
-            - **Android**: `.apk` (experimental — requires Termux with flac installed)
+            - **Android**: `.apk`
 
             ## Features
             - Lossless FLAC recompression at maximum compression (level 8, exhaustive)
@@ -181,96 +146,26 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libjavascriptcoregtk-4.1-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev \
-            cmake
-
-      - name: Cross-compile FLAC for Android
-        run: |
-          git clone --depth 1 --branch 1.4.3 https://github.com/xiph/flac.git /tmp/flac-src
-
-          for ARCH_ABI in arm64-v8a armeabi-v7a x86_64 x86; do
-            case $ARCH_ABI in
-              arm64-v8a)    TARGET=aarch64-linux-android ;;
-              armeabi-v7a)  TARGET=armv7-linux-androideabi ;;
-              x86_64)       TARGET=x86_64-linux-android ;;
-              x86)          TARGET=i686-linux-android ;;
-            esac
-
-            echo "Building FLAC for $ARCH_ABI ($TARGET)..."
-            cd /tmp/flac-src
-            mkdir -p build-$ARCH_ABI && cd build-$ARCH_ABI
-            cmake .. \
-              -DCMAKE_TOOLCHAIN_FILE=$NDK_HOME/build/cmake/android.toolchain.cmake \
-              -DANDROID_ABI=$ARCH_ABI \
-              -DANDROID_NATIVE_API_LEVEL=24 \
-              -DBUILD_SHARED_LIBS=OFF \
-              -DBUILD_PROGRAMS=ON \
-              -DBUILD_EXAMPLES=OFF \
-              -DBUILD_TESTING=OFF \
-              -DBUILD_DOCS=OFF \
-              -DINSTALL_MANPAGES=OFF \
-              -DWITH_OGG=OFF
-            cmake --build . -j$(nproc)
-
-            cp src/flac/flac $GITHUB_WORKSPACE/src-tauri/binaries/flac-$TARGET
-            cp src/metaflac/metaflac $GITHUB_WORKSPACE/src-tauri/binaries/metaflac-$TARGET
-            chmod +x $GITHUB_WORKSPACE/src-tauri/binaries/flac-$TARGET
-            chmod +x $GITHUB_WORKSPACE/src-tauri/binaries/metaflac-$TARGET
-            echo "Done: $ARCH_ABI"
-          done
-
-          echo "Android sidecar binaries:"
-          ls -la $GITHUB_WORKSPACE/src-tauri/binaries/
+            librsvg2-dev
 
       - name: Install npm dependencies
         run: npm ci
 
       - name: Initialize Tauri Android project
-        run: |
-          npx tauri android init
-          echo "Android project initialized"
-          ls -la src-tauri/gen/android/ || true
+        run: npx tauri android init
 
       - name: Build Android APK
-        run: |
-          npx tauri android build --apk 2>&1 || {
-            echo "::warning::Android APK build failed. Tauri v2 Android support is experimental."
-            echo "Attempting debug build as fallback..."
-            npx tauri android build --apk --debug 2>&1 || {
-              echo "::warning::Android debug APK build also failed."
-              exit 0
-            }
-          }
+        run: npx tauri android build --apk
         env:
           NDK_HOME: ${{ env.NDK_HOME }}
 
       - name: Collect APK files
-        id: collect-apk
         run: |
           mkdir -p release-apks
-          FOUND=0
-
-          # Search for APKs in multiple possible locations
-          for dir in \
-            "src-tauri/gen/android/app/build/outputs/apk" \
-            "src-tauri/gen/android/app/build/outputs/flutter-apk" \
-            "src-tauri/gen/android"; do
-            if [ -d "$dir" ]; then
-              find "$dir" -name "*.apk" -type f | while read apk; do
-                BASENAME=$(basename "$apk")
-                cp "$apk" "release-apks/FlacCrunch-${{ github.ref_name }}-${BASENAME}"
-                echo "Found APK: $apk"
-                FOUND=1
-              done
-            fi
-          done
-
-          # Also do a broad search
-          find . -name "*.apk" -not -path "./.git/*" -type f 2>/dev/null | while read apk; do
+          find . -name "*.apk" -not -path "./.git/*" -type f | while read apk; do
             BASENAME=$(basename "$apk")
-            cp "$apk" "release-apks/FlacCrunch-${{ github.ref_name }}-${BASENAME}" 2>/dev/null || true
+            cp "$apk" "release-apks/FlacCrunch-${{ github.ref_name }}-${BASENAME}"
           done
-
           echo "Collected APKs:"
           ls -la release-apks/ 2>/dev/null || echo "No APKs found"
 
