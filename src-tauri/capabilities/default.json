@@ -8,6 +8,7 @@
     "shell:allow-execute",
     "dialog:allow-open",
     "dialog:allow-save",
+    "fs:default",
     "notification:default",
     "store:default"
   ]

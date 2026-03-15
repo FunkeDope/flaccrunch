@@ -16,6 +16,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .manage(AppState::default())
@@ -27,6 +28,8 @@ pub fn run() {
             commands::processing::get_recent_events,
             commands::processing::get_top_compression,
             commands::folders::select_folders,
+            commands::folders::select_files,
+            commands::folders::is_mobile,
             commands::folders::scan_folders,
             commands::folders::validate_folder,
             commands::settings::get_settings,

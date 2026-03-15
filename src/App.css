@@ -558,6 +558,17 @@ body {
 }
 
 /* Drop zone */
+.drop-zone-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.drop-zone-row .drop-zone {
+  flex: 1;
+  margin-bottom: 0;
+}
+
 .drop-zone {
   border: 2px dashed var(--border);
   border-radius: var(--radius);

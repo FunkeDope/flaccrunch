@@ -16,6 +16,7 @@ function App() {
       <FolderSelector
         folders={processing.folders}
         onAddFolder={processing.addFolder}
+        onAddFiles={processing.addFiles}
         onRemoveFolder={processing.removeFolder}
         onStart={() => processing.startRun(settings.processingSettings)}
         onCancel={processing.cancelRun}

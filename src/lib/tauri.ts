@@ -2,9 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ScanResult, ProcessingSettings } from "../types/processing";
 import type { AppSettings } from "../types/settings";
 
-// Folder operations
+// Folder/file selection
 export async function selectFolders(): Promise<string[]> {
   return invoke<string[]>("select_folders");
+}
+
+export async function selectFiles(): Promise<string[]> {
+  return invoke<string[]>("select_files");
+}
+
+export async function isMobile(): Promise<boolean> {
+  return invoke<boolean>("is_mobile");
 }
 
 export async function scanFolders(folders: string[]): Promise<ScanResult> {

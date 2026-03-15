@@ -1,9 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
+import * as api from "../../lib/tauri";
 import type { RunStatus } from "../../types/processing";
 
 interface FolderSelectorProps {
   folders: string[];
   onAddFolder: () => void;
+  onAddFiles: () => void;
   onRemoveFolder: (folder: string) => void;
   onStart: () => void;
   onCancel: () => void;
@@ -16,6 +18,7 @@ interface FolderSelectorProps {
 export function FolderSelector({
   folders,
   onAddFolder,
+  onAddFiles,
   onRemoveFolder,
   onStart,
   onCancel,
@@ -25,6 +28,11 @@ export function FolderSelector({
   error,
 }: FolderSelectorProps) {
   const [dragOver, setDragOver] = useState(false);
+  const [mobile, setMobile] = useState(false);
+
+  useEffect(() => {
+    api.isMobile().then(setMobile).catch(() => setMobile(false));
+  }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -46,18 +54,35 @@ export function FolderSelector({
         </div>
       )}
 
-      <div
-        className={`drop-zone ${dragOver ? "active" : ""} ${isProcessing ? "disabled" : ""}`}
-        onClick={isProcessing ? undefined : onAddFolder}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-      >
-        Click to select FLAC files
-      </div>
+      {mobile ? (
+        <div
+          className={`drop-zone ${isProcessing ? "disabled" : ""}`}
+          onClick={isProcessing ? undefined : onAddFiles}
+        >
+          Select FLAC files
+        </div>
+      ) : (
+        <div className="drop-zone-row">
+          <div
+            className={`drop-zone ${dragOver ? "active" : ""} ${isProcessing ? "disabled" : ""}`}
+            onClick={isProcessing ? undefined : onAddFolder}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+          >
+            Add Folders
+          </div>
+          <div
+            className={`drop-zone ${isProcessing ? "disabled" : ""}`}
+            onClick={isProcessing ? undefined : onAddFiles}
+          >
+            Add Files
+          </div>
+        </div>
+      )}
 
       {folders.length > 0 && (
         <div className="card">
@@ -72,7 +97,7 @@ export function FolderSelector({
                   <button
                     className="remove-btn"
                     onClick={() => onRemoveFolder(folder)}
-                    title="Remove folder"
+                    title="Remove"
                   >
                     x
                   </button>

@@ -176,6 +176,20 @@ export function useProcessing() {
         ]);
       }
     } catch {
+      // User cancelled or not supported on platform
+    }
+  }, []);
+
+  const addFiles = useCallback(async () => {
+    try {
+      const selected = await api.selectFiles();
+      if (selected.length > 0) {
+        setFolders((prev) => [
+          ...prev,
+          ...selected.filter((f) => !prev.includes(f)),
+        ]);
+      }
+    } catch {
       // User cancelled
     }
   }, []);
@@ -262,6 +276,7 @@ export function useProcessing() {
     startTime,
     error,
     addFolder,
+    addFiles,
     removeFolder,
     startRun,
     cancelRun,
