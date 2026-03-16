@@ -1,9 +1,10 @@
-// FlacCrunch — Android bridge plugin for ContentResolver queries.
+// FlacCrunch — Android bridge plugin for ContentResolver queries and SAF write-back.
 //
-// Exposes getDisplayName: queries OpenableColumns.DISPLAY_NAME for a
-// content URI, which is the standard way every Android file manager
-// retrieves the human-readable filename for any URI returned by the
-// Storage Access Framework (ACTION_OPEN_DOCUMENT / ACTION_GET_CONTENT).
+// Commands:
+//   getDisplayName  — queries OpenableColumns.DISPLAY_NAME for a content URI,
+//                     the standard Android way to resolve the real filename.
+//   writeCacheFileToUri — writes a local cache file back to a SAF content URI
+//                         via contentResolver.openOutputStream(uri, "wt").
 //
 // Placed in com.flaccrunch.bridge so it doesn't conflict with the
 // auto-generated app package (com.flaccrunch.app).
@@ -19,11 +20,30 @@ import android.app.Activity
 import android.net.Uri
 import android.provider.OpenableColumns
 import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.FileInputStream
+
+// ---------------------------------------------------------------------------
+// Arg types — @InvokeArg with lateinit var gives non-null String after parseArgs,
+// avoiding the String? overload-resolution ambiguity in constructors like
+// FileInputStream(String!/File!/FileDescriptor!).
+// This is the same pattern used in the project's DialogPlugin.kt.
+// ---------------------------------------------------------------------------
+
+@InvokeArg
+internal class GetDisplayNameArgs {
+    lateinit var uri: String
+}
+
+@InvokeArg
+internal class WriteCacheFileArgs {
+    lateinit var cachePath: String
+    lateinit var uri: String
+}
 
 @TauriPlugin
 class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
@@ -38,14 +58,11 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun getDisplayName(invoke: Invoke) {
-        val uriStr = invoke.getString("uri") ?: run {
-            invoke.reject("Missing uri parameter")
-            return
-        }
+        val args = invoke.parseArgs(GetDisplayNameArgs::class.java)
 
         var displayName: String? = null
         try {
-            val uri = Uri.parse(uriStr)
+            val uri = Uri.parse(args.uri)
             activity.contentResolver.query(
                 uri,
                 arrayOf(OpenableColumns.DISPLAY_NAME),
@@ -80,23 +97,19 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun writeCacheFileToUri(invoke: Invoke) {
-        val cachePath = invoke.getString("cachePath") ?: run {
-            invoke.reject("Missing cachePath parameter")
-            return
-        }
-        val uriStr = invoke.getString("uri") ?: run {
-            invoke.reject("Missing uri parameter")
-            return
-        }
+        val args = invoke.parseArgs(WriteCacheFileArgs::class.java)
+        // args.cachePath and args.uri are non-null String (guaranteed by @InvokeArg
+        // lateinit var), so FileInputStream(args.cachePath) resolves unambiguously
+        // to FileInputStream(String!) without any nullable overload confusion.
 
         try {
-            val uri = Uri.parse(uriStr)
+            val uri = Uri.parse(args.uri)
             activity.contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
-                FileInputStream(cachePath).use { inputStream ->
+                FileInputStream(args.cachePath).use { inputStream ->
                     inputStream.copyTo(outputStream)
                 }
             } ?: run {
-                invoke.reject("contentResolver.openOutputStream returned null for URI: $uriStr")
+                invoke.reject("contentResolver.openOutputStream returned null for URI: ${args.uri}")
                 return
             }
         } catch (e: Exception) {
