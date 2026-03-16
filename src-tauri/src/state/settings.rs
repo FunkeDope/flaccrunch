@@ -85,6 +85,7 @@ mod tests {
             log_folder: Some("/var/log".to_string()),
             max_retries: 5,
             recent_folders: vec!["/music".to_string(), "/more".to_string()],
+            verbose_logging: false,
         };
         let json = serde_json::to_string(&original).expect("serialize");
         let back: AppSettings = serde_json::from_str(&json).expect("deserialize");
@@ -101,6 +102,7 @@ mod tests {
             log_folder: None,
             max_retries: 2,
             recent_folders: vec![],
+            verbose_logging: false,
         };
         let json = serde_json::to_string(&s).expect("serialize");
         assert!(json.contains("threadCount"), "expected 'threadCount' in JSON: {json}");
