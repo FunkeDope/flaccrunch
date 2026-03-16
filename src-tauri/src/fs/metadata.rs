@@ -6,15 +6,24 @@ use std::time::SystemTime;
 /// Snapshot of a file's metadata for preservation across processing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadataSnapshot {
+    pub created: Option<u64>,
     pub modified: Option<u64>,
     pub accessed: Option<u64>,
     #[cfg(unix)]
     pub mode: Option<u32>,
+    #[cfg(windows)]
+    pub attributes: Option<u32>,
 }
 
 /// Capture the metadata of a file for later restoration.
 pub fn snapshot_metadata(path: &Path) -> io::Result<FileMetadataSnapshot> {
     let meta = std::fs::metadata(path)?;
+
+    let created = meta
+        .created()
+        .ok()
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
 
     let modified = meta
         .modified()
@@ -29,6 +38,7 @@ pub fn snapshot_metadata(path: &Path) -> io::Result<FileMetadataSnapshot> {
         .map(|d| d.as_secs());
 
     Ok(FileMetadataSnapshot {
+        created,
         modified,
         accessed,
         #[cfg(unix)]
@@ -36,24 +46,17 @@ pub fn snapshot_metadata(path: &Path) -> io::Result<FileMetadataSnapshot> {
             use std::os::unix::fs::PermissionsExt;
             Some(meta.permissions().mode())
         },
+        #[cfg(windows)]
+        attributes: {
+            use std::os::windows::fs::MetadataExt;
+            Some(meta.file_attributes())
+        },
     })
 }
 
 /// Restore previously captured metadata to a file.
 pub fn restore_metadata(path: &Path, snapshot: &FileMetadataSnapshot) -> io::Result<()> {
-    // Restore modification time using filetime crate or std
-    if let Some(mtime) = snapshot.modified {
-        let mtime_system = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(mtime);
-        // Use the file's current accessed time if we don't have one
-        let atime_system = if let Some(atime) = snapshot.accessed {
-            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(atime)
-        } else {
-            SystemTime::now()
-        };
-
-        // Set file times using platform-specific methods
-        set_file_times(path, atime_system, mtime_system)?;
-    }
+    set_file_times(path, snapshot)?;
 
     #[cfg(unix)]
     if let Some(mode) = snapshot.mode {
@@ -62,46 +65,67 @@ pub fn restore_metadata(path: &Path, snapshot: &FileMetadataSnapshot) -> io::Res
         std::fs::set_permissions(path, perms)?;
     }
 
+    #[cfg(windows)]
+    if let Some(attrs) = snapshot.attributes {
+        set_file_attributes_windows(path, attrs)?;
+    }
+
     Ok(())
 }
 
-#[cfg(unix)]
-fn set_file_times(path: &Path, atime: SystemTime, mtime: SystemTime) -> io::Result<()> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
+fn set_file_times(path: &Path, snapshot: &FileMetadataSnapshot) -> io::Result<()> {
+    use std::fs::{FileTimes, OpenOptions};
 
-    let atime_dur = atime
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let mtime_dur = mtime
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
+    let Some(mtime) = snapshot.modified else {
+        return Ok(());
+    };
 
-    let times = [
-        libc::timespec {
-            tv_sec: atime_dur.as_secs() as libc::time_t,
-            tv_nsec: atime_dur.subsec_nanos() as libc::c_long,
-        },
-        libc::timespec {
-            tv_sec: mtime_dur.as_secs() as libc::time_t,
-            tv_nsec: mtime_dur.subsec_nanos() as libc::c_long,
-        },
-    ];
+    let mtime_system = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(mtime);
+    let atime_system = snapshot
+        .accessed
+        .map(|a| SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(a))
+        .unwrap_or(mtime_system);
 
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let mut times = FileTimes::new()
+        .set_accessed(atime_system)
+        .set_modified(mtime_system);
 
-    let ret = unsafe { libc::utimensat(libc::AT_FDCWD, c_path.as_ptr(), times.as_ptr(), 0) };
-    if ret != 0 {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTimesExt;
+        if let Some(ctime) = snapshot.created {
+            let ctime_system =
+                SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(ctime);
+            times = times.set_created(ctime_system);
+        }
+    }
+
+    let file = OpenOptions::new().write(true).open(path)?;
+    file.set_times(times)?;
+
+    Ok(())
+}
+
+/// Restore Windows file attributes (hidden, system, read-only, etc.) using
+/// the Win32 SetFileAttributesW API. This is a no-op on non-Windows targets.
+#[cfg(windows)]
+fn set_file_attributes_windows(path: &Path, attributes: u32) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    extern "system" {
+        fn SetFileAttributesW(lp_file_name: *const u16, dw_file_attributes: u32) -> i32;
+    }
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let result = unsafe { SetFileAttributesW(wide.as_ptr(), attributes) };
+    if result == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_file_times(_path: &Path, _atime: SystemTime, _mtime: SystemTime) -> io::Result<()> {
-    // On non-unix, we'd use Windows-specific APIs
-    // For now, this is a no-op placeholder
     Ok(())
 }
 

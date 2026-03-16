@@ -1,6 +1,19 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io, thread, time::Duration};
 
+/// Test whether the given directory is writable by creating and immediately
+/// deleting a probe file. Mirrors PowerShell's `Test-DirectoryWriteAccess`.
+pub fn test_directory_write_access(dir: &Path) -> bool {
+    let probe = dir.join(format!(".efc-write-test-{}.tmp", uuid::Uuid::new_v4().simple()));
+    match fs::write(&probe, b"") {
+        Ok(_) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// Generate the temp file path for a FLAC file (.flac → .tmp).
 pub fn temp_path_for(original: &Path) -> PathBuf {
     original.with_extension("tmp")

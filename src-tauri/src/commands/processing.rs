@@ -1,4 +1,5 @@
 use crate::fs::scanner::{cleanup_stale_temps, scan_for_flac_files};
+use crate::fs::tempfile::test_directory_write_access;
 use crate::logging::efc_log::generate_efc_log;
 use crate::pipeline::job::ProcessingContext;
 use crate::pipeline::queue::JobQueue;
@@ -33,6 +34,25 @@ pub async fn start_processing(
     }
 
     let folder_paths: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
+
+    // Verify write access on all target folders before doing any work.
+    // Mirrors PowerShell's Test-DirectoryWriteAccess — fail fast with a clear
+    // error rather than discovering permission problems mid-run.
+    let unwritable: Vec<&PathBuf> = folder_paths
+        .iter()
+        .filter(|p| p.is_dir() && !test_directory_write_access(p))
+        .collect();
+    if !unwritable.is_empty() {
+        let paths = unwritable
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "Permission denied: cannot write to folder(s): {paths}. \
+             Check that the folders are not read-only and that you have write access."
+        ));
+    }
 
     // Clean up stale temp files
     let dir_paths: Vec<PathBuf> = folder_paths.iter().filter(|p| p.is_dir()).cloned().collect();
