@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { AppShell } from "./components/layout/AppShell";
 import { FolderSelector } from "./components/folders/FolderSelector";
 import { ProcessingDashboard } from "./components/processing/ProcessingDashboard";
@@ -13,6 +14,12 @@ function App() {
   const settings = useSettings();
 
   const isActive = processing.status !== "idle";
+
+  useEffect(() => {
+    if (settings.appVersion) {
+      getCurrentWebviewWindow().setTitle(`FlacCrunch v${settings.appVersion}`).catch(() => {});
+    }
+  }, [settings.appVersion]);
 
   // Live blended progress: completed files + fractional in-flight worker progress
   const livePct = useMemo(() => {
@@ -38,7 +45,7 @@ function App() {
   }, [processing.counters, processing.workers]);
 
   return (
-    <AppShell onSettingsClick={() => setSettingsOpen(true)} appVersion={settings.appVersion}>
+    <AppShell onSettingsClick={() => setSettingsOpen(true)}>
       {isActive && (
         <RunStatusBar
           status={processing.status}

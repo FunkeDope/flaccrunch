@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.5 — 2026-03-15
+
+### Fixed
+
+- Version now displayed in the OS window title bar (`FlacCrunch v1.0.5`) instead of the in-app header
+
+---
+
 ## v1.0.4 — 2026-03-15
 
 ### Changed

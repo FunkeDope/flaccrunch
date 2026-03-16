@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 
 interface AppShellProps {
   onSettingsClick: () => void;
-  appVersion?: string;
   children: ReactNode;
 }
 
@@ -13,7 +12,7 @@ const SettingsIcon = () => (
   </svg>
 );
 
-export function AppShell({ onSettingsClick, appVersion, children }: AppShellProps) {
+export function AppShell({ onSettingsClick, children }: AppShellProps) {
   return (
     <div className="app-shell">
       <header className="header-bar">
@@ -26,7 +25,6 @@ export function AppShell({ onSettingsClick, appVersion, children }: AppShellProp
             </svg>
           </span>
           <span className="header-name">FlacCrunch</span>
-          {appVersion && <span className="header-version">v{appVersion}</span>}
           <span className="header-tag">lossless optimizer</span>
         </div>
         <button
