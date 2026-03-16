@@ -26,7 +26,7 @@ Get the latest build from [GitHub Releases](../../releases).
 
 - **Maximum FLAC compression** — re-encodes at level 8 with exhaustive model search (all encoder passes enabled)
 - **Audio integrity verification** — MD5 hash of decoded PCM computed before and after; original replaced only if hashes match
-- **Album art optimization** — PNG images processed with oxipng (lossless); JPEG images decoded and re-encoded at quality 85; PADDING blocks stripped
+- **Album art optimization** — PNG images processed with oxipng (lossless); JPEG images losslessly reoptimized by stripping non-essential metadata markers and rebuilding Huffman tables with optimal prefix codes (original quantization tables preserved — no pixel data is altered); PADDING blocks stripped
 - **Multi-threaded worker pool** — configurable thread count, defaults to CPU count − 1
 - **Live dashboard** — per-worker progress bars, live compression ratio, hash values with color-coded verification status
 - **CLI mode** — pass `-silent` to skip the GUI entirely and print results to stdout
@@ -68,7 +68,7 @@ Each file is processed through five stages in order:
 |-------|-------------|
 | **1. Hashing source** | Reads embedded MD5 from FLAC STREAMINFO; decodes original audio and computes MD5 (PRE hash). Result emitted to UI immediately. |
 | **2. Converting** | Re-encodes at FLAC level 8, exhaustive mode. Live progress % and compression ratio (output bytes / PCM bytes consumed) are emitted every 100 ms. All metadata blocks are re-applied after encode. |
-| **3. Artwork** | Optimizes embedded PNG images (oxipng lossless) and JPEG images (re-encode at quality 85). Strips PADDING blocks. |
+| **3. Artwork** | Optimizes embedded PNG images (oxipng, lossless) and JPEG images (lossless: strips non-essential APP markers, then rebuilds Huffman tables with optimal prefix codes using the original DQT quantization tables — identical pixel output). Strips PADDING blocks. |
 | **4. Hashing output** | Decodes the fully-assembled output file and computes MD5 (OUT hash). Verified against PRE. Mismatch → temp file deleted, file marked FAIL. |
 | **5. Finalizing** | Atomically replaces the original file; restores filesystem timestamps. |
 
@@ -158,7 +158,7 @@ flaccrunch/
 │   │   ├── processing/         # RunStatusBar, WorkerCard, WorkerGrid,
 │   │   │                       # RecentEventsTable, TopCompression, OverallProgress
 │   │   └── settings/           # SettingsPanel
-│   ├── hooks/                  # useProcessing, useSettings, useTheme
+│   ├── hooks/                  # useProcessing, useSettings, useWorkerStatus
 │   ├── types/                  # TypeScript interfaces (processing, settings)
 │   └── lib/                    # Tauri IPC wrapper, format utilities
 ├── src-tauri/
@@ -176,8 +176,7 @@ flaccrunch/
 │       │   ├── hasher.rs       # Decoded-audio MD5 via libFLAC decoder
 │       │   └── metadata.rs     # FLAC metadata block copy, STREAMINFO MD5 read
 │       ├── artwork/
-│       │   ├── optimize.rs     # PNG (oxipng) + JPEG (zune-jpeg/jpeg-encoder) optimization
-│       │   └── extract.rs      # PICTURE block extraction
+│       │   └── optimize.rs     # PNG (oxipng) + JPEG (zune-jpeg/jpeg-encoder) lossless optimization
 │       ├── image/              # PNG/JPEG detect, recompress helpers
 │       ├── fs/
 │       │   ├── scanner.rs      # Recursive FLAC scan, permission error collection
