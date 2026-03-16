@@ -23,7 +23,7 @@ Full Tauri v2 + React UI with a single-screen layout:
 - **Top compression** — top 3 files by total savings, sortable table with placeholder rows
 - **Recent events table** — all processed files with time, status, file name, audio saved, art saved, total %, and color-coded verification result (MATCH / MATCH|NEW / MISMATCH / FAIL)
 - **Folder selector** — add folders (recursive scan) or individual FLAC files; drag-and-drop from Explorer/Finder; mobile: tap to pick files
-- **Settings panel** — thread count, log folder, max retries per file, light/dark/system theme
+- **Settings panel** — thread count, log folder, max retries per file
 
 Progress bar uses live blended weighting: completed files + fractional in-flight worker contribution. Post-encoding stages (hashing output, artwork, finalizing) are weighted at 1.0 to prevent the bar jumping backward.
 
@@ -64,7 +64,7 @@ Each file goes through five stages in this order:
 |---|-------|-------------|
 | 1 | **Hashing source** | Read embedded MD5 from STREAMINFO; decode original audio and compute MD5 (PRE hash). Emits live to UI. |
 | 2 | **Converting** | Re-encode at FLAC level 8 with exhaustive model search (all encoder passes). Live progress % and compression ratio (output size / PCM bytes consumed) emitted every 100 ms. Metadata blocks re-applied after encode. |
-| 3 | **Artwork** | Optimize embedded PNG images with oxipng (lossless), re-encode JPEG images at quality 85, strip PADDING blocks from metadata. |
+| 3 | **Artwork** | Optimize embedded PNG images with oxipng (lossless). Losslessly reoptimize JPEG images: strip non-essential APP markers, then rebuild Huffman tables with optimal prefix codes using the original DQT quantization tables (pixel data bit-identical). Strip PADDING blocks. |
 | 4 | **Hashing output** | Decode final output file and compute MD5 (OUT hash). Verified against PRE. If mismatch: temp file deleted, file marked FAIL. |
 | 5 | **Finalizing** | Atomic replace of original file, filesystem timestamp restore. |
 
@@ -74,10 +74,10 @@ Verification result strings: `MATCH` (PRE==OUT, original had embedded MD5), `MAT
 
 Embedded images in FLAC PICTURE blocks are optimized in-place:
 
-- **PNG**: passed through oxipng (lossless, all optimization strategies)
-- **JPEG**: decoded with zune-jpeg, re-encoded with jpeg-encoder at quality 85
+- **PNG**: passed through oxipng (lossless, preset 4)
+- **JPEG**: non-essential APP markers stripped (EXIF, ICC, XMP, COM), then Huffman tables rebuilt with optimal prefix codes using the original DQT quantization tables — equivalent to `jpegtran -optimize`, pixel data is bit-identical
 - **PADDING blocks**: stripped from all files (savings tracked separately)
-- Savings reported as: raw bytes removed (before re-encoding) + net bytes saved after re-encoding
+- Savings reported as: raw bytes removed + net bytes saved after re-import
 
 ### Build and release artifacts
 

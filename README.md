@@ -34,7 +34,6 @@ Get the latest build from [GitHub Releases](../../releases).
 - **Drag-and-drop** — drop folders or files directly onto the app window (desktop)
 - **Export log** — save a full run summary as a text file after completion
 - **Configurable retries** — failed files automatically re-queued up to N times (default 3)
-- **Theme support** — light, dark, or follow system
 
 ---
 
@@ -122,7 +121,7 @@ All processed files, newest first. Columns: time, status (OK / FAIL / RETRY), fi
 - Permission errors from scan reported inline
 
 ### Settings
-Thread count, log output folder, max retries per file, UI theme (Light / Dark / System).
+Thread count, log output folder, max retries per file.
 
 ---
 

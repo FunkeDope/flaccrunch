@@ -19,10 +19,7 @@ export function useSettings() {
     api.getCpuCount().then(setCpuCount).catch(() => {});
     api.getDefaultLogFolder().then(setDefaultLogFolder).catch(() => {});
     api.getSettings().then((s) => {
-      // Strip legacy theme field if present
-      const { theme: _theme, ...rest } = s as AppSettings & { theme?: unknown };
-      void _theme;
-      setSettings({ ...defaultSettings, ...rest });
+      setSettings({ ...defaultSettings, ...s });
     }).catch(() => {});
   }, []);
 
