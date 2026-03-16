@@ -4,8 +4,6 @@ A cross-platform FLAC optimizer with a modern desktop UI and full CLI support. L
 
 Built with **Tauri v2** (Rust) and **React** (TypeScript). Runs on Windows, macOS, Linux, and Android.
 
-> The original PowerShell script is preserved at the [`powershell-original`](../../tree/powershell-original) tag.
-
 ---
 
 ## Downloads
@@ -24,16 +22,18 @@ Get the latest build from [GitHub Releases](../../releases).
 
 ## Features
 
-- **Maximum FLAC compression** — re-encodes at level 8 with exhaustive model search (all encoder passes enabled)
-- **Audio integrity verification** — MD5 hash of decoded PCM computed before and after; original replaced only if hashes match
-- **Album art optimization** — PNG images processed with oxipng (lossless); JPEG images losslessly reoptimized by stripping non-essential metadata markers and rebuilding Huffman tables with optimal prefix codes (original quantization tables preserved — no pixel data is altered); PADDING blocks stripped
+- **Maximum FLAC compression** — re-encodes at level 8 with exhaustive model search and exhaustive QLP coefficient precision search (equivalent to `flac -8 -e -p`)
+- **Audio integrity verification** — MD5 of decoded PCM computed before and after re-encoding; original file replaced only on hash match
+- **Lossless album art optimization** — PNG via oxipng (lossless); JPEG via metadata stripping + Huffman table reoptimization (original quantization tables preserved — pixel data is bit-identical)
+- **PADDING removal** — all PADDING metadata blocks stripped; savings tracked separately
+- **Full metadata preservation** — all Vorbis comments, PICTURE blocks, cue sheets, and application metadata copied to re-encoded output
 - **Multi-threaded worker pool** — configurable thread count, defaults to CPU count − 1
-- **Live dashboard** — per-worker progress bars, live compression ratio, hash values with color-coded verification status
-- **CLI mode** — pass `-silent` to skip the GUI entirely and print results to stdout
+- **Live dashboard** — per-worker progress bars, live compression ratio, hash values with color-coded verification
+- **CLI mode** — `-silent` flag skips the GUI entirely and prints results to stdout
 - **GUI pre-load** — pass paths on the command line to open the GUI with folders already loaded
 - **Drag-and-drop** — drop folders or files directly onto the app window (desktop)
-- **Export log** — save a full run log as a text file at any time after completion
-- **Configurable retries** — failed files are retried up to N times (default 3)
+- **Export log** — save a full run summary as a text file after completion
+- **Configurable retries** — failed files automatically re-queued up to N times (default 3)
 - **Theme support** — light, dark, or follow system
 
 ---
@@ -44,43 +44,49 @@ Get the latest build from [GitHub Releases](../../releases).
 FlacCrunch.exe [paths...] [options]
 
 Options:
-  -silent           No GUI, print progress to console
-  -threads <N>      Worker thread count (default: CPU count - 1)
-  -retries <N>      Max retries per file (default: 3)
-  -logdir <path>    Log output directory
-  -help             Show this help
+  -silent              No GUI — process folders and print results to stdout
+  -threads <N>         Worker thread count (default: CPU count - 1, min: 1)
+  -retries <N>         Max retries per file (default: 3)
+  -logdir <path>       Log output directory (default: platform log folder)
+  -help                Show this help
 
 Examples:
-  FlacCrunch.exe "D:\Music"                         Open GUI with folder pre-loaded
-  FlacCrunch.exe -silent "D:\Music"                 Process silently, console output only
-  FlacCrunch.exe -silent -threads 4 "D:\Music" "E:\More"
+  FlacCrunch.exe "D:\Music"                              Open GUI with folder pre-loaded
+  FlacCrunch.exe -silent "D:\Music"                      Process silently, console output
+  FlacCrunch.exe -silent -threads 4 "D:\Music" "E:\More" Multiple folders, 4 threads
 ```
 
-On Linux/macOS the binary is named `flaccrunch`.
+On Linux/macOS the binary is named `flaccrunch`. Paths can be directories (recursively scanned) or individual `.flac` files.
+
+**Exit codes:** `0` = all files successful, `1` = one or more failures.
 
 ---
 
 ## Processing Pipeline
 
-Each file is processed through five stages in order:
+Each file passes through five stages in order:
 
 | Stage | What happens |
 |-------|-------------|
-| **1. Hashing source** | Reads embedded MD5 from FLAC STREAMINFO; decodes original audio and computes MD5 (PRE hash). Result emitted to UI immediately. |
-| **2. Converting** | Re-encodes at FLAC level 8, exhaustive mode. Live progress % and compression ratio (output bytes / PCM bytes consumed) are emitted every 100 ms. All metadata blocks are re-applied after encode. |
-| **3. Artwork** | Optimizes embedded PNG images (oxipng, lossless) and JPEG images (lossless: strips non-essential APP markers, then rebuilds Huffman tables with optimal prefix codes using the original DQT quantization tables — identical pixel output). Strips PADDING blocks. |
-| **4. Hashing output** | Decodes the fully-assembled output file and computes MD5 (OUT hash). Verified against PRE. Mismatch → temp file deleted, file marked FAIL. |
-| **5. Finalizing** | Atomically replaces the original file; restores filesystem timestamps. |
+| **1. Hashing source** | Reads the embedded MD5 from FLAC STREAMINFO. Decodes the original audio and computes a PRE hash (MD5 of raw PCM). Result emitted to UI immediately. |
+| **2. Converting** | Re-encodes audio at FLAC level 8 with exhaustive model search and exhaustive QLP precision search. Live progress % and compression ratio emitted every ~100 ms. All metadata blocks re-applied from the original after encoding. Non-FLAC prefix bytes (e.g. ID3v2 tags prepended by some tools) are extracted, preserved, and re-attached. |
+| **3. Artwork** | PNG images optimized with oxipng preset 4 (lossless). JPEG images losslessly reoptimized: non-essential APP markers stripped (EXIF, ICC, XMP, COM), then Huffman tables rebuilt with optimal prefix codes using the original DQT quantization tables — equivalent to `jpegtran -optimize`, pixel data is bit-identical. PADDING blocks removed. |
+| **4. Hashing output** | Decodes the fully assembled output file and computes an OUT hash. Verified against PRE. On mismatch: temp file deleted, file marked FAIL. |
+| **5. Finalizing** | Atomically replaces the original file. Restores original filesystem timestamps. |
 
-Files are only replaced when verification passes. Verification result codes:
+Files are only replaced when verification passes. The live progress bar blends completed files with fractional in-flight worker progress so it never jumps backward.
+
+---
+
+## Verification Result Codes
 
 | Code | Meaning |
 |------|---------|
-| `MATCH` | PRE == OUT (original had embedded MD5) |
-| `MATCH\|NEW` | PRE == OUT (original had null embedded MD5 — newly written) |
-| `MATCH\|EMB` | No PRE hash computed; OUT matched embedded MD5 |
-| `FAIL\|MISMATCH` | PRE != OUT — audio changed during re-encode |
-| `FAIL\|NO_SRC` | Could not compute PRE hash |
+| `MATCH` | PRE == OUT; original had an embedded MD5 |
+| `MATCH\|NEW` | PRE == OUT; original had no embedded MD5 (newly written by re-encode) |
+| `MATCH\|EMB` | PRE unavailable; OUT matched the embedded MD5 |
+| `FAIL\|MISMATCH` | PRE ≠ OUT — audio changed during re-encode (first 8 hex chars shown) |
+| `FAIL\|NO_SRC` | PRE hash unavailable and no embedded MD5 to fall back on |
 | `FAIL\|NO_HASH` | Hash computation failed entirely |
 
 ---
@@ -88,33 +94,74 @@ Files are only replaced when verification passes. Verification result codes:
 ## UI Overview
 
 ### Run Status Bar
-Shown while processing and after completion. Contains:
-- Overall progress bar (live-blended: completed files + fractional in-flight worker progress)
-- File count, elapsed time, byte savings breakdown (audio / art / meta)
-- Cancel, New Run, and Export Log buttons
+Shown during and after processing:
+- Live-blended overall progress bar + percentage
+- File counter (`X / Y files`), elapsed time
+- Byte savings breakdown: audio saved, artwork saved, metadata saved
+- **Cancel** button during processing; **New Run** and **Export Log** buttons on completion
 
 ### Worker Grid
 One card per worker thread. Each card shows:
-- Current filename
-- Encoding progress bar + percent (during converting)
-- Live compression ratio inline with the last hash row (e.g. `≈0.433`)
-- Three hash rows: `EMB` (original embedded MD5), `PRE` (pre-encode decoded audio), `OUT` (post-encode decoded audio)
-- Hash values color-coded: **green** = verified match, **red** = mismatch, **yellow** = warning, **dim** = present but unverified
-- After file completes: saved percent shown inline (e.g. `22.1%↓`)
+- Current filename and processing stage
+- Encoding progress bar + live percentage
+- Live compression ratio (output bytes ÷ PCM bytes consumed), e.g. `≈0.433`
+- Three hash rows — `EMB` (original embedded MD5), `PRE` (pre-encode decoded audio), `OUT` (post-encode decoded audio)
+- Hash color coding: **green** = verified match, **red** = mismatch, **yellow** = alternative verification, **dim** = present but unverified
+- Saved percentage shown after file completes, e.g. `22.1%↓`
 
 ### Top Compression
-Top 3 files by total byte savings, sortable table, always shows 3 rows (placeholder dashes until populated).
+Top 3 files by total byte savings (audio + artwork), updated live. Shows filename, bytes saved, and savings percentage. Placeholder rows shown until results arrive.
 
 ### Recent Events Table
-All processed files sorted by most recent. Columns: time, status (OK/FAIL/RETRY), file name, audio saved, art saved, total %, verification. Verification column is color-coded. Expandable to show all files.
+All processed files, newest first. Columns: time, status (OK / FAIL / RETRY), filename, audio saved, artwork saved, total savings %, verification code. Color-coded by verification result. Expandable to show full history.
 
 ### Folder Selector
-- Desktop: drag-and-drop zone + "Add Folder" (recursive scan) + "Add Files" (individual FLACs)
-- Mobile: tap to open native file picker
-- Shows all selected paths with remove buttons
+- **Desktop:** drag-and-drop zone + Add Folder (recursive) + Add Files (individual FLACs)
+- **Android:** native file picker (folder picker unavailable on Android)
+- Shows all selected paths with individual remove buttons
+- Permission errors from scan reported inline
 
 ### Settings
-Thread count, log output folder, max retries per file, UI theme.
+Thread count, log output folder, max retries per file, UI theme (Light / Dark / System).
+
+---
+
+## Scanning
+
+- Recursive scan with symlink following
+- Case-insensitive `.flac` extension matching
+- Deduplication by canonical path
+- Files sorted by size descending before processing (larger files first)
+- Permission errors collected and displayed in the UI without halting the scan
+- Stale `.tmp` files cleaned up before each scan
+
+---
+
+## Logging
+
+Each run creates a timestamped directory under the configured log folder:
+
+```
+logs/
+  run_YYYYMMDD_HHMMSS/
+    run.log        # Per-file results appended as files complete
+    summary.log    # Full EFC summary generated at end of run
+    failed.log     # Failed files only (if any failures occurred)
+```
+
+The EFC summary includes: per-file results, total/success/fail counts, elapsed time, full savings breakdown (audio / artwork raw / artwork net / metadata / padding), success rate, average savings, top 3 compression results, and a SHA-256 checksum of the body for integrity verification.
+
+CLI mode prints progress every 10 files and a full summary on completion.
+
+---
+
+## Android
+
+Content URIs from the native file picker are automatically resolved:
+- **External storage documents** — resolved to real filesystem paths (e.g. `/storage/emulated/0/Music/`)
+- **Media store URIs** — copied to app cache before processing; compressed output written back to the original URI on success
+
+Required manifest permissions: `READ_MEDIA_AUDIO`, `READ_EXTERNAL_STORAGE` (≤ API 32), `WRITE_EXTERNAL_STORAGE` (≤ API 29), `MANAGE_EXTERNAL_STORAGE`.
 
 ---
 
@@ -122,16 +169,16 @@ Thread count, log output folder, max retries per file, UI theme.
 
 ### Prerequisites
 
-- **Rust** 1.70+ stable (`rustup`)
+- **Rust** stable (`rustup`)
 - **Node.js** 22+
-- **Linux only**: `libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`
-- **Android only**: Java 17, Android SDK, Android NDK 27.0.12077973
+- **Linux only:** `libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`
+- **Android only:** Java 17, Android SDK, Android NDK 27.0.12077973
 
 ### Desktop
 
 ```bash
 npm ci
-npm run dev          # Dev server + hot reload (Tauri window on port 1420)
+npm run dev          # Dev server + hot reload
 npm run tauri build  # Production build + installer
 ```
 
@@ -143,59 +190,56 @@ npx tauri android init
 npx tauri android build --apk
 ```
 
-The APK requires these manifest permissions for full functionality: `READ_MEDIA_AUDIO`, `READ_EXTERNAL_STORAGE` (≤API 32), `WRITE_EXTERNAL_STORAGE` (≤API 29), `MANAGE_EXTERNAL_STORAGE`.
-
 ---
 
 ## Project Structure
 
 ```
 flaccrunch/
-├── src/                        # React frontend (TypeScript)
+├── src/                          # React frontend (TypeScript)
 │   ├── components/
-│   │   ├── folders/            # FolderSelector
-│   │   ├── layout/             # AppShell, header
-│   │   ├── processing/         # RunStatusBar, WorkerCard, WorkerGrid,
-│   │   │                       # RecentEventsTable, TopCompression, OverallProgress
-│   │   └── settings/           # SettingsPanel
-│   ├── hooks/                  # useProcessing, useSettings, useWorkerStatus
-│   ├── types/                  # TypeScript interfaces (processing, settings)
-│   └── lib/                    # Tauri IPC wrapper, format utilities
+│   │   ├── common/               # Badge, ProgressBar, ByteDisplay, ElapsedTimer
+│   │   ├── folders/              # FolderSelector, drag-and-drop
+│   │   ├── layout/               # AppShell, header
+│   │   ├── processing/           # RunStatusBar, WorkerCard, WorkerGrid,
+│   │   │                         # RecentEventsTable, TopCompression
+│   │   └── settings/             # SettingsPanel
+│   ├── hooks/                    # useProcessing, useSettings, useWorkerStatus
+│   ├── types/                    # TypeScript interfaces
+│   └── lib/                      # Tauri IPC wrappers, format utilities
 ├── src-tauri/
 │   └── src/
-│       ├── lib.rs              # Tauri plugin setup, IPC command registration
-│       ├── main.rs             # Entry point: CLI detection, GUI launch
-│       ├── cli.rs              # CLI mode (--silent processing)
+│       ├── main.rs               # Entry point: CLI detection, GUI launch
+│       ├── cli.rs                # CLI mode — silent processing, stdout output
 │       ├── pipeline/
-│       │   ├── job.rs          # Per-file pipeline: 5 stages, cancellation, retry
-│       │   ├── worker_pool.rs  # Worker pool, event dispatch, Android write-back
-│       │   ├── queue.rs        # Lock-free job queue with retry support
-│       │   └── stages.rs       # PipelineEvent, PipelineStage, JobResult types
+│       │   ├── job.rs            # Per-file 5-stage pipeline, cancellation, retry
+│       │   ├── worker_pool.rs    # Worker pool, event dispatch, Android write-back
+│       │   ├── queue.rs          # Lock-free job queue with retry support
+│       │   └── stages.rs         # PipelineEvent, PipelineStage, JobResult types
 │       ├── flac/
-│       │   ├── encoder.rs      # libFLAC level-8 encoder, live progress, ratio
-│       │   ├── hasher.rs       # Decoded-audio MD5 via libFLAC decoder
-│       │   └── metadata.rs     # FLAC metadata block copy, STREAMINFO MD5 read
+│       │   ├── encoder.rs        # libFLAC level-8 encoder, live progress, ratio
+│       │   ├── hasher.rs         # Decoded-audio MD5 via libFLAC decoder
+│       │   └── metadata.rs       # Metadata block copy, STREAMINFO MD5 read
 │       ├── artwork/
-│       │   └── optimize.rs     # PNG (oxipng) + JPEG (zune-jpeg/jpeg-encoder) lossless optimization
-│       ├── image/              # PNG/JPEG detect, recompress helpers
+│       │   └── optimize.rs       # PNG (oxipng) + JPEG (lossless Huffman) optimization
+│       ├── image/                 # PNG/JPEG format detection, compression helpers
 │       ├── fs/
-│       │   ├── scanner.rs      # Recursive FLAC scan, permission error collection
-│       │   ├── tempfile.rs     # Atomic temp-file move/remove
-│       │   └── metadata.rs     # Filesystem timestamp snapshot/restore
+│       │   ├── scanner.rs        # Recursive FLAC scan, dedup, permission errors
+│       │   ├── tempfile.rs       # Atomic temp-file move/remove
+│       │   └── metadata.rs       # Filesystem timestamp snapshot/restore
 │       ├── commands/
-│       │   ├── processing.rs   # start/cancel/status IPC commands
-│       │   ├── folders.rs      # File/folder picker, Android content URI resolution
-│       │   ├── settings.rs     # Settings load/save via tauri-plugin-store
-│       │   └── logs.rs         # write_text_file command for export log
+│       │   ├── processing.rs     # start/cancel/status IPC commands
+│       │   ├── folders.rs        # File/folder picker, Android URI resolution
+│       │   ├── settings.rs       # Settings load/save
+│       │   └── logs.rs           # Export log command
 │       ├── state/
-│       │   ├── app_state.rs    # Global Tauri state (active run, settings, URI map)
-│       │   ├── run_state.rs    # Per-run counters, worker states, recent events
-│       │   └── settings.rs     # AppSettings, ProcessingSettings structs
-│       ├── logging/            # run_log, efc_log, failed_log
-│       └── util/               # platform defaults, format helpers
+│       │   ├── app_state.rs      # Global Tauri state
+│       │   ├── run_state.rs      # Per-run counters, worker states, recent events
+│       │   └── settings.rs       # AppSettings, ProcessingSettings structs
+│       └── logging/              # run_log, efc_log (summary), failed_log
 ├── .github/workflows/
-│   ├── ci.yml                  # Push/PR: tsc, vite build, cargo test, cargo build
-│   └── release.yml             # Tag/main push: desktop installers + Android APK
+│   ├── ci.yml                    # Push/PR: tsc, vite build, cargo test, cargo build
+│   └── release.yml               # Tag: desktop installers + Android APK + GitHub Release
 └── package.json
 ```
 
@@ -209,10 +253,10 @@ flaccrunch/
 - `cargo test`
 - `cargo build`
 
-**`release.yml`** runs on every push to `main` and on `v*` tags:
+**`release.yml`** runs on `v*` tag pushes:
 - Builds desktop installers for Windows (x86_64), macOS (aarch64), Linux (x86_64)
-- Builds and signs Android APK for arm64, armv7, x86_64, x86
-- On tag push: creates a GitHub Release and attaches all artifacts
+- Builds and signs Android APK (arm64, armv7, x86_64, x86)
+- Creates a GitHub Release and attaches all artifacts
 
 ---
 
