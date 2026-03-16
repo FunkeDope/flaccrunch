@@ -5,12 +5,18 @@ use tauri::State;
 
 /// Generate an EFC-format log string from the current run.
 ///
-/// The frontend passes its full in-memory event list and elapsed seconds;
+/// The frontend passes its full in-memory event list, timing, and run metadata;
 /// the backend contributes counters and top-compression from the run state.
 #[tauri::command]
 pub async fn get_efc_log(
     events: Vec<FileEvent>,
     elapsed_secs: u64,
+    source_folder: String,
+    start_ms: i64,
+    finish_ms: i64,
+    thread_count: usize,
+    max_retries: u32,
+    run_canceled: bool,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
@@ -27,6 +33,12 @@ pub async fn get_efc_log(
         elapsed_secs,
         top_compression,
         status_lines: vec![],
+        source_folder,
+        start_ms,
+        finish_ms,
+        thread_count,
+        max_retries,
+        run_canceled,
     };
 
     Ok(generate_efc_log(&summary, &events))

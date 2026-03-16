@@ -10,6 +10,7 @@
     "dialog:allow-save",
     "fs:default",
     "notification:default",
-    "store:default"
+    "store:default",
+    "core:window:allow-set-title"
   ]
 }

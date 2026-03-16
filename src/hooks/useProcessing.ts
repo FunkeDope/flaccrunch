@@ -38,6 +38,8 @@ export function useProcessing() {
   const [allEvents, setAllEvents] = useState<FileEvent[]>([]);
   const [topCompression, setTopCompression] = useState<FileEvent[]>([]);
   const [startTime, setStartTime] = useState<number | null>(null);
+  const [, setEndTime] = useState<number | null>(null);
+  const [, setRunSettings] = useState<ProcessingSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [jobHistory, setJobHistory] = useState<JobRecord[]>([]);
 
@@ -249,36 +251,49 @@ export function useProcessing() {
     setAllEvents((events) => {
       setCounters((c) => {
         setStartTime((st) => {
-          const endTime = Date.now();
+          setRunSettings((rs) => {
+            const now = Date.now();
+            setEndTime(now);
 
-          // Save job record
-          const job: JobRecord = {
-            id: `job-${st ?? endTime}`,
-            startTime: st ?? endTime,
-            endTime,
-            folders: currentFolders,
-            counters: c,
-            events,
-            topCompression: [],
-          };
-          setJobHistory((prev) => [...prev, job]);
+            // Save job record
+            const job: JobRecord = {
+              id: `job-${st ?? now}`,
+              startTime: st ?? now,
+              endTime: now,
+              folders: currentFolders,
+              counters: c,
+              events,
+              topCompression: [],
+            };
+            setJobHistory((prev) => [...prev, job]);
 
-          // Auto-prompt to save error log if there are failures
-          if (c.failed > 0) {
-            const elapsedSecs = Math.round((endTime - (st ?? endTime)) / 1000);
-            const ts = new Date(endTime).toISOString().slice(0, 19).replace(/[T:]/g, "-");
-            const filename = `flaccrunch-errors-${ts}.txt`;
-            api.getEfcLog(events, elapsedSecs).then((logContent) => {
-              tauriSaveDialog({
-                title: "Save Error Log",
-                defaultPath: filename,
-                filters: [{ name: "Text files", extensions: ["txt"] }],
-              }).then((path) => {
-                if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
+            // Auto-prompt to save error log if there are failures
+            if (c.failed > 0) {
+              const elapsedSecs = Math.round((now - (st ?? now)) / 1000);
+              const ts = new Date(now).toISOString().slice(0, 19).replace(/[T:]/g, "-");
+              const filename = `flaccrunch-errors-${ts}.txt`;
+              api.getEfcLog(
+                events,
+                elapsedSecs,
+                currentFolders.join(", "),
+                st ?? now,
+                now,
+                rs?.threadCount ?? 1,
+                rs?.maxRetries ?? 3,
+                false,
+              ).then((logContent) => {
+                tauriSaveDialog({
+                  title: "Save Error Log",
+                  defaultPath: filename,
+                  filters: [{ name: "Text files", extensions: ["txt"] }],
+                }).then((path) => {
+                  if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
+                }).catch(() => {});
               }).catch(() => {});
-            }).catch(() => {});
-          }
+            }
 
+            return rs;
+          });
           return st;
         });
         return c;
@@ -291,23 +306,39 @@ export function useProcessing() {
   const exportLog = useCallback(() => {
     setAllEvents((events) => {
       setStartTime((st) => {
-        const elapsedSecs = Math.round((Date.now() - (st ?? Date.now())) / 1000);
-        const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-        const filename = `flaccrunch-log-${ts}.txt`;
-        api.getEfcLog(events, elapsedSecs).then((logContent) => {
-          tauriSaveDialog({
-            title: "Save Log",
-            defaultPath: filename,
-            filters: [{ name: "Text files", extensions: ["txt"] }],
-          }).then((path) => {
-            if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
-          }).catch(() => {});
-        }).catch(() => {});
+        setEndTime((et) => {
+          setRunSettings((rs) => {
+            const now = et ?? Date.now();
+            const elapsedSecs = Math.round((now - (st ?? now)) / 1000);
+            const ts = new Date(now).toISOString().slice(0, 19).replace(/[T:]/g, "-");
+            const filename = `flaccrunch-log-${ts}.txt`;
+            api.getEfcLog(
+              events,
+              elapsedSecs,
+              currentFolders.join(", "),
+              st ?? now,
+              now,
+              rs?.threadCount ?? 1,
+              rs?.maxRetries ?? 3,
+              false,
+            ).then((logContent) => {
+              tauriSaveDialog({
+                title: "Save Log",
+                defaultPath: filename,
+                filters: [{ name: "Text files", extensions: ["txt"] }],
+              }).then((path) => {
+                if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
+              }).catch(() => {});
+            }).catch(() => {});
+            return rs;
+          });
+          return et;
+        });
         return st;
       });
       return events;
     });
-  }, []);
+  }, [currentFolders]);
 
   const addFolder = useCallback(async () => {
     try {
@@ -353,6 +384,8 @@ export function useProcessing() {
         setStatus("processing");
         const now = Date.now();
         setStartTime(now);
+        setEndTime(null);
+        setRunSettings(settings);
         setCounters(defaultCounters);
         setAllEvents([]);
         setTopCompression([]);

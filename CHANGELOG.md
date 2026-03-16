@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.6 — 2026-03-15
+
+### Fixed
+
+- OS window title bar now shows `FlacCrunch v1.0.6` — required `core:window:allow-set-title` Tauri capability was missing
+- Export log and auto-error log now match the original PowerShell EFC format exactly
+- Export log now includes source folder, run start/finish times, worker thread count, and retry limit
+
+---
+
 ## v1.0.5 — 2026-03-15
 
 ### Fixed

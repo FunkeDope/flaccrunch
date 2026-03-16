@@ -105,6 +105,15 @@ pub struct RunSummary {
     pub elapsed_secs: u64,
     pub top_compression: Vec<CompressionResult>,
     pub status_lines: Vec<String>,
+    /// Folder(s) that were processed (joined with ", " if multiple).
+    pub source_folder: String,
+    /// Unix timestamp (ms) when the run started.
+    pub start_ms: i64,
+    /// Unix timestamp (ms) when the run finished.
+    pub finish_ms: i64,
+    pub thread_count: usize,
+    pub max_retries: u32,
+    pub run_canceled: bool,
 }
 
 /// Per-run state managed by the application.

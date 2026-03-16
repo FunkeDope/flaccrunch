@@ -101,10 +101,19 @@ describe("tauri wrappers — command names", () => {
     expect(mockInvoke).toHaveBeenCalledWith("get_default_log_folder");
   });
 
-  it("getEfcLog calls 'get_efc_log' with events and elapsedSecs", async () => {
+  it("getEfcLog calls 'get_efc_log' with all required params", async () => {
     mockInvoke.mockResolvedValue("log text");
-    await getEfcLog([], 42);
-    expect(mockInvoke).toHaveBeenCalledWith("get_efc_log", { events: [], elapsedSecs: 42 });
+    await getEfcLog([], 42, "/music", 1700000000000, 1700000042000, 4, 3, false);
+    expect(mockInvoke).toHaveBeenCalledWith("get_efc_log", {
+      events: [],
+      elapsedSecs: 42,
+      sourceFolder: "/music",
+      startMs: 1700000000000,
+      finishMs: 1700000042000,
+      threadCount: 4,
+      maxRetries: 3,
+      runCanceled: false,
+    });
   });
 
   it("getStartupPaths calls 'get_startup_paths'", async () => {

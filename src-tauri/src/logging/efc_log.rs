@@ -1,113 +1,188 @@
 use crate::state::run_state::{FileEvent, FileStatus, RunSummary};
-use crate::util::format::{format_bytes, format_elapsed, sha256_hex};
-use std::time::Duration;
+use crate::util::format::sha256_hex;
+use chrono::{Local, TimeZone};
 
-/// Generate the EFC-format final summary log text.
+/// Format a value line in EAC style:
+///   `     {label:<18} {value}`
+fn eac_line(label: &str, value: &str) -> String {
+    format!("     {:<18} {}", label, value)
+}
+
+/// Format bytes like PS Format-Bytes (unsigned): `"   01.50 KB"` (8-char right-aligned number).
+fn fmt_bytes(bytes: u64) -> String {
+    let v = bytes as f64;
+    let (val, unit) = if v >= 1_073_741_824.0 {
+        (v / 1_073_741_824.0, "GB")
+    } else if v >= 1_048_576.0 {
+        (v / 1_048_576.0, "MB")
+    } else if v >= 1024.0 {
+        (v / 1024.0, "KB")
+    } else {
+        (v, "B")
+    };
+    format!("{:>8} {}", format!("{:05.2}", val), unit)
+}
+
+/// Format a Unix-ms timestamp as EAC log datetime: `"15. March 2026, 14:30"`.
+fn fmt_eac_datetime(ms: i64) -> String {
+    match Local.timestamp_millis_opt(ms) {
+        chrono::LocalResult::Single(dt) | chrono::LocalResult::Ambiguous(dt, _) => {
+            // %-d = day without leading zero, %B = full month, %-H = hour without leading zero
+            let day = dt.format("%d").to_string();
+            let day = day.trim_start_matches('0');
+            format!("{}. {}", day, dt.format("%B %Y, %-H:%M"))
+        }
+        chrono::LocalResult::None => ms.to_string(),
+    }
+}
+
+/// Generate the EFC-format final summary log text, matching the PowerShell
+/// `New-EfcFinalLogText` output exactly.
 pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
-    let mut lines = vec![
-        "═══════════════════════════════════════════════════════════".to_string(),
-        "  FlacCrunch — Processing Summary".to_string(),
-        "═══════════════════════════════════════════════════════════".to_string(),
-        String::new(),
-    ];
+    let mut lines: Vec<String> = Vec::new();
 
-    // File results
+    // ---- Header ----
+    lines.push("Exact Flac Cruncher".to_string());
+    lines.push(String::new());
+    lines.push(format!(
+        "EFC processing logfile from {}",
+        fmt_eac_datetime(summary.finish_ms)
+    ));
+    lines.push(String::new());
+
+    // Album name: last path component of source_folder (or the whole string)
+    let album_name = summary
+        .source_folder
+        .split(['/', '\\'])
+        .filter(|s| !s.is_empty())
+        .last()
+        .unwrap_or(&summary.source_folder);
+    lines.push(album_name.to_string());
+    lines.push(String::new());
+
+    lines.push(eac_line("Source folder", &summary.source_folder));
+    lines.push(eac_line("Run started", &fmt_eac_datetime(summary.start_ms)));
+    lines.push(eac_line("Run finished", &fmt_eac_datetime(summary.finish_ms)));
+    lines.push(eac_line("Worker threads", &summary.thread_count.to_string()));
+    lines.push(eac_line("Retry limit", &summary.max_retries.to_string()));
+    lines.push(eac_line(
+        "Files discovered",
+        &summary.counters.total_files.to_string(),
+    ));
+    lines.push(String::new());
+
+    // ---- Per-file entries ----
     for event in events {
-        let status = match event.status {
-            FileStatus::OK => "OK  ",
-            FileStatus::RETRY => "RTRY",
-            FileStatus::FAIL => "FAIL",
-        };
-        lines.push(format!(
-            "[{}] {} | {} | {} → {} | {} | {}",
-            event.time,
-            status,
-            event.file,
-            format_bytes(event.before_size as i64, false),
-            format_bytes(event.after_size as i64, false),
-            format_bytes(event.saved_bytes, true),
-            event.verification,
-        ));
+        lines.push("File".to_string());
+        lines.push(String::new());
+        lines.push(format!("     Filename {}", event.file));
+        lines.push(String::new());
+        lines.push(eac_line("Logged at", &event.time));
+        lines.push(eac_line("Attempt", &event.attempt));
+        lines.push(eac_line("Verification", &event.verification));
+
+        match event.status {
+            FileStatus::OK => {
+                lines.push(eac_line("Original size", &fmt_bytes(event.before_size)));
+                lines.push(eac_line("Compressed size", &fmt_bytes(event.after_size)));
+                lines.push(eac_line(
+                    "Net saved",
+                    &format!(
+                        "{} ({:.2}%)",
+                        fmt_bytes(event.saved_bytes.unsigned_abs()),
+                        event.compression_pct
+                    ),
+                ));
+                lines.push(eac_line("Audio delta", "N/A"));
+                lines.push(eac_line(
+                    "Embedded MD5",
+                    event.embedded_md5.as_deref().unwrap_or("N/A"),
+                ));
+                lines.push(eac_line(
+                    "Calculated pre MD5",
+                    event.source_hash.as_deref().unwrap_or("N/A"),
+                ));
+                lines.push(eac_line(
+                    "Calculated post MD5",
+                    event.output_hash.as_deref().unwrap_or("N/A"),
+                ));
+                // Metadata cleanup — only if detail is non-empty and not "none"
+                if !event.detail.is_empty() && event.detail != "none" {
+                    lines.push(eac_line("Metadata cleanup", &event.detail));
+                }
+                lines.push("     Copy OK".to_string());
+            }
+            FileStatus::RETRY => {
+                lines.push("     Copy aborted".to_string());
+                lines.push("     Retry scheduled".to_string());
+                lines.push(eac_line("Reason", &event.detail));
+            }
+            FileStatus::FAIL => {
+                lines.push("     Copy failed".to_string());
+                lines.push(eac_line("Reason", &event.detail));
+            }
+        }
+
+        lines.push(String::new());
     }
 
-    lines.push(String::new());
-    lines.push("───────────────────────────────────────────────────────────".to_string());
-    lines.push(String::new());
-
+    // ---- Status report (matches New-EfcStatusReportLines) ----
     let c = &summary.counters;
-    lines.push(format!("  Processed:    {}", c.processed));
-    lines.push(format!("  Succeeded:    {}", c.successful));
-    lines.push(format!("  Failed:       {}", c.failed));
-    lines.push(format!(
-        "  Pending:      {}",
-        c.total_files - c.processed
-    ));
-    lines.push(format!(
-        "  Elapsed:      {}",
-        format_elapsed(Duration::from_secs(summary.elapsed_secs))
-    ));
-    lines.push(String::new());
-    lines.push(format!(
-        "  Total Saved:      {}",
-        format_bytes(c.total_saved_bytes, true)
-    ));
-    lines.push(format!(
-        "  Metadata Net:     {}",
-        format_bytes(c.total_metadata_saved, true)
-    ));
-    lines.push(format!(
-        "  Padding Trim:     {}",
-        format_bytes(c.total_padding_saved, true)
-    ));
-    lines.push(format!(
-        "  Artwork Net:      {}",
-        format_bytes(c.total_artwork_saved, true)
-    ));
-    lines.push(format!(
-        "  Artwork Raw:      {}",
-        format_bytes(c.total_artwork_raw_saved, true)
-    ));
-    lines.push(format!(
-        "  Artwork Files:    {}",
-        c.artwork_optimized_files
-    ));
-    lines.push(format!(
-        "  Artwork Blocks:   {}",
-        c.artwork_optimized_blocks
-    ));
+    let pending = c.total_files.saturating_sub(c.processed);
 
     if c.successful > 0 {
-        lines.push(String::new());
-        let success_rate = (c.successful as f64 / c.total_files as f64) * 100.0;
-        let avg_saved = c.total_saved_bytes / c.successful as i64;
-        lines.push(format!("  Success Rate: {success_rate:.1}%"));
-        lines.push(format!(
-            "  Avg Saved:    {}",
-            format_bytes(avg_saved, true)
-        ));
+        lines.push(format!(" {} file(s) processed successfully", c.successful));
+    }
+    if c.failed > 0 {
+        lines.push(format!(" {} file(s) failed", c.failed));
+    }
+    if pending > 0 {
+        lines.push(format!(" {} file(s) pending", pending));
+    }
+    if c.successful == 0 && c.failed == 0 && pending == 0 {
+        lines.push(" 0 file(s) processed".to_string());
     }
 
-    // Top compressions
+    lines.push(String::new());
+    if summary.run_canceled && pending > 0 {
+        lines.push("Processing canceled by user".to_string());
+    } else if c.failed > 0 {
+        lines.push("Some files could not be verified".to_string());
+    } else if c.successful > 0 && pending == 0 {
+        lines.push("All files processed successfully".to_string());
+    } else {
+        lines.push("Processing complete".to_string());
+    }
+
+    lines.push(String::new());
+    if c.failed > 0 || (summary.run_canceled && pending > 0) {
+        lines.push("There were errors".to_string());
+    } else {
+        lines.push("No errors occurred".to_string());
+    }
+    lines.push(String::new());
+    lines.push("End of status report".to_string());
+
+    // ---- Top compression ----
     if !summary.top_compression.is_empty() {
         lines.push(String::new());
-        lines.push("  Top Compression:".to_string());
+        lines.push("---- EFC Compression Notes".to_string());
+        lines.push(String::new());
         for (i, tc) in summary.top_compression.iter().enumerate() {
             lines.push(format!(
-                "    {}. {} ({}, {:.2}%)",
+                "  {}. Saved {} ({:.2}%) | {}",
                 i + 1,
-                tc.path,
-                format_bytes(tc.saved_bytes, true),
-                tc.saved_pct
+                fmt_bytes(tc.saved_bytes.unsigned_abs()),
+                tc.saved_pct,
+                tc.path
             ));
         }
     }
 
-    lines.push(String::new());
-    lines.push("═══════════════════════════════════════════════════════════".to_string());
-
-    let body = lines.join("\n");
+    // ---- Checksum footer (matches PS `==== Log checksum {sha256} ====`) ----
+    let body = lines.join("\r\n");
     let checksum = sha256_hex(&body);
-    format!("{body}\n# SHA-256: {checksum}\n")
+    format!("{}\r\n\r\n==== Log checksum {} ====\r\n", body, checksum)
 }
 
 #[cfg(test)]
@@ -128,6 +203,12 @@ mod tests {
             elapsed_secs: 30,
             top_compression: vec![],
             status_lines: vec![],
+            source_folder: "/music/album".to_string(),
+            start_ms: 1_700_000_000_000,
+            finish_ms: 1_700_000_030_000,
+            thread_count: 4,
+            max_retries: 3,
+            run_canceled: false,
         }
     }
 
@@ -155,57 +236,110 @@ mod tests {
     // --- generate_efc_log ---
 
     #[test]
-    fn test_efc_log_contains_flaccrunch_header() {
+    fn test_efc_log_contains_exact_flac_cruncher_header() {
         let summary = make_run_summary(0, 0, 0, 0);
         let output = generate_efc_log(&summary, &[]);
         assert!(
-            output.contains("FlacCrunch"),
-            "output must contain 'FlacCrunch', got: {output}"
+            output.contains("Exact Flac Cruncher"),
+            "output must contain 'Exact Flac Cruncher', got: {output}"
         );
     }
 
     #[test]
-    fn test_efc_log_contains_sha256_checksum() {
+    fn test_efc_log_contains_processing_logfile_line() {
         let summary = make_run_summary(0, 0, 0, 0);
         let output = generate_efc_log(&summary, &[]);
         assert!(
-            output.contains("# SHA-256:"),
-            "output must contain SHA-256 line, got: {output}"
+            output.contains("EFC processing logfile from"),
+            "output must contain 'EFC processing logfile from'"
         );
     }
 
     #[test]
-    fn test_efc_log_no_events_shows_counters() {
+    fn test_efc_log_contains_source_folder() {
+        let summary = make_run_summary(0, 0, 0, 0);
+        let output = generate_efc_log(&summary, &[]);
+        assert!(output.contains("Source folder"), "must include Source folder label");
+        assert!(output.contains("/music/album"), "must include source folder path");
+    }
+
+    #[test]
+    fn test_efc_log_contains_worker_threads_and_retry_limit() {
+        let summary = make_run_summary(1, 1, 1, 0);
+        let output = generate_efc_log(&summary, &[]);
+        assert!(output.contains("Worker threads"), "must include Worker threads");
+        assert!(output.contains("Retry limit"), "must include Retry limit");
+    }
+
+    #[test]
+    fn test_efc_log_contains_files_discovered() {
         let summary = make_run_summary(5, 5, 4, 1);
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("Succeeded:    4"), "must show successful count");
-        assert!(output.contains("Failed:       1"), "must show failed count");
-        assert!(output.contains("Processed:    5"), "must show processed count");
+        assert!(output.contains("Files discovered"), "must include Files discovered label");
+        assert!(output.contains("5"), "must include total file count");
     }
 
     #[test]
-    fn test_efc_log_includes_event_file_path() {
+    fn test_efc_log_ok_event_shows_copy_ok() {
         let summary = make_run_summary(1, 1, 1, 0);
         let events = vec![make_file_event(FileStatus::OK, "/music/song.flac", "")];
         let output = generate_efc_log(&summary, &events);
-        assert!(output.contains("/music/song.flac"), "output must contain the file path");
+        assert!(output.contains("     Copy OK"), "OK event must show '     Copy OK'");
+        assert!(output.contains("Filename /music/song.flac"), "must include Filename line");
+        assert!(output.contains("Original size"), "must include Original size");
+        assert!(output.contains("Compressed size"), "must include Compressed size");
+        assert!(output.contains("Net saved"), "must include Net saved");
+        assert!(output.contains("Embedded MD5"), "must include Embedded MD5");
+        assert!(output.contains("Calculated pre MD5"), "must include Calculated pre MD5");
+        assert!(output.contains("Calculated post MD5"), "must include Calculated post MD5");
     }
 
     #[test]
-    fn test_efc_log_ok_status_label() {
-        let summary = make_run_summary(1, 1, 1, 0);
-        let events = vec![make_file_event(FileStatus::OK, "/music/ok.flac", "")];
-        let output = generate_efc_log(&summary, &events);
-        assert!(output.contains("OK  "), "output must contain OK label");
-    }
-
-    #[test]
-    fn test_efc_log_fail_status_label() {
+    fn test_efc_log_fail_event_shows_copy_failed_and_reason() {
         let summary = make_run_summary(1, 1, 0, 1);
-        let events = vec![make_file_event(FileStatus::FAIL, "/music/fail.flac", "some error")];
+        let events = vec![make_file_event(FileStatus::FAIL, "/music/fail.flac", "decode error")];
         let output = generate_efc_log(&summary, &events);
-        assert!(output.contains("FAIL"), "output must contain FAIL label");
-        assert!(output.contains("/music/fail.flac"), "output must contain file path");
+        assert!(output.contains("     Copy failed"), "FAIL event must show '     Copy failed'");
+        assert!(output.contains("Reason"), "must include Reason label");
+        assert!(output.contains("decode error"), "must include the failure reason text");
+    }
+
+    #[test]
+    fn test_efc_log_retry_event_shows_copy_aborted_and_retry_scheduled() {
+        let summary = make_run_summary(1, 0, 0, 0);
+        let events = vec![make_file_event(FileStatus::RETRY, "/music/retry.flac", "timeout")];
+        let output = generate_efc_log(&summary, &events);
+        assert!(output.contains("     Copy aborted"), "RETRY event must show '     Copy aborted'");
+        assert!(output.contains("     Retry scheduled"), "RETRY event must show '     Retry scheduled'");
+        assert!(output.contains("Reason"), "must include Reason label");
+    }
+
+    #[test]
+    fn test_efc_log_status_report_success() {
+        let summary = make_run_summary(3, 3, 3, 0);
+        let output = generate_efc_log(&summary, &[]);
+        assert!(output.contains("3 file(s) processed successfully"), "must include success count");
+        assert!(output.contains("All files processed successfully"), "must include success summary");
+        assert!(output.contains("No errors occurred"), "must include no-errors line");
+        assert!(output.contains("End of status report"), "must include end line");
+    }
+
+    #[test]
+    fn test_efc_log_status_report_failures() {
+        let summary = make_run_summary(3, 3, 2, 1);
+        let output = generate_efc_log(&summary, &[]);
+        assert!(output.contains("2 file(s) processed successfully"));
+        assert!(output.contains("1 file(s) failed"));
+        assert!(output.contains("Some files could not be verified"));
+        assert!(output.contains("There were errors"));
+    }
+
+    #[test]
+    fn test_efc_log_status_report_canceled() {
+        let mut summary = make_run_summary(5, 3, 3, 0);
+        summary.run_canceled = true;
+        let output = generate_efc_log(&summary, &[]);
+        assert!(output.contains("Processing canceled by user"), "canceled must show cancellation message");
     }
 
     #[test]
@@ -219,15 +353,20 @@ mod tests {
             after_size: 21000,
         }];
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("Top Compression"), "must include top compression section");
+        assert!(output.contains("---- EFC Compression Notes"), "must include compression notes header");
         assert!(output.contains("/best.flac"), "must include best file path");
+        assert!(output.contains("Saved"), "must include Saved label");
     }
 
     #[test]
-    fn test_efc_log_elapsed_appears() {
-        let summary = make_run_summary(1, 1, 1, 0);
+    fn test_efc_log_checksum_footer_format() {
+        let summary = make_run_summary(0, 0, 0, 0);
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("Elapsed:"), "must include elapsed time");
+        assert!(
+            output.contains("==== Log checksum"),
+            "must contain '==== Log checksum'"
+        );
+        assert!(output.contains("===="), "must end checksum line with ====");
     }
 
     #[test]
@@ -242,89 +381,36 @@ mod tests {
         assert_eq!(out1, out2, "output must be deterministic");
     }
 
-    // --- generate_failed_files_log ---
-
     #[test]
-    fn test_failed_log_no_failures_returns_empty_string() {
-        let events = vec![make_file_event(FileStatus::OK, "/ok.flac", "")];
-        let output = generate_failed_files_log(&events);
-        assert!(output.is_empty(), "expected empty string for no failures, got: {output}");
-    }
-
-    #[test]
-    fn test_failed_log_empty_events_returns_empty_string() {
-        let output = generate_failed_files_log(&[]);
-        assert!(output.is_empty());
+    fn test_efc_log_metadata_cleanup_shown_when_detail_nonempty() {
+        let summary = make_run_summary(1, 1, 1, 0);
+        let mut event = make_file_event(FileStatus::OK, "/x.flac", "");
+        event.detail = "MetadataCleanup 5.00 KB net (padding-only)".to_string();
+        let output = generate_efc_log(&summary, &[event]);
+        assert!(output.contains("Metadata cleanup"), "must show Metadata cleanup when detail is set");
     }
 
     #[test]
-    fn test_failed_log_contains_fail_file_path() {
-        let events = vec![make_file_event(FileStatus::FAIL, "/music/broken.flac", "decode error")];
-        let output = generate_failed_files_log(&events);
-        assert!(output.contains("/music/broken.flac"), "output must contain the failed file path");
+    fn test_efc_log_metadata_cleanup_hidden_when_detail_empty() {
+        let summary = make_run_summary(1, 1, 1, 0);
+        let event = make_file_event(FileStatus::OK, "/x.flac", "");
+        let output = generate_efc_log(&summary, &[event]);
+        assert!(!output.contains("Metadata cleanup"), "must not show Metadata cleanup when detail is empty");
     }
 
     #[test]
-    fn test_failed_log_contains_detail() {
-        let events = vec![make_file_event(FileStatus::FAIL, "/bad.flac", "checksum mismatch")];
-        let output = generate_failed_files_log(&events);
-        assert!(output.contains("checksum mismatch"), "output must include detail/error");
+    fn test_efc_log_eac_value_line_label_padding() {
+        let summary = make_run_summary(0, 0, 0, 0);
+        let output = generate_efc_log(&summary, &[]);
+        // Each field line starts with 5 spaces then the label
+        assert!(output.contains("     Source folder"), "label must be indented with 5 spaces");
     }
 
     #[test]
-    fn test_failed_log_skips_ok_events() {
-        let events = vec![
-            make_file_event(FileStatus::OK, "/good.flac", ""),
-            make_file_event(FileStatus::FAIL, "/bad.flac", "error"),
-        ];
-        let output = generate_failed_files_log(&events);
-        assert!(output.contains("/bad.flac"), "must include bad.flac");
-        assert!(!output.contains("/good.flac"), "must not include good.flac");
+    fn test_efc_log_album_name_is_last_folder_component() {
+        let mut summary = make_run_summary(0, 0, 0, 0);
+        summary.source_folder = "C:\\Music\\Beatles\\Abbey Road".to_string();
+        let output = generate_efc_log(&summary, &[]);
+        assert!(output.contains("Abbey Road"), "album name must be last path component");
     }
-
-    #[test]
-    fn test_failed_log_multiple_failures() {
-        let events = vec![
-            make_file_event(FileStatus::FAIL, "/a.flac", "err a"),
-            make_file_event(FileStatus::FAIL, "/b.flac", "err b"),
-        ];
-        let output = generate_failed_files_log(&events);
-        assert!(output.contains("/a.flac"));
-        assert!(output.contains("/b.flac"));
-        assert!(output.contains("err a"));
-        assert!(output.contains("err b"));
-    }
-
-    #[test]
-    fn test_failed_log_has_header() {
-        let events = vec![make_file_event(FileStatus::FAIL, "/x.flac", "oops")];
-        let output = generate_failed_files_log(&events);
-        assert!(output.contains("Failed Files"), "must include a header");
-    }
-}
-
-/// Generate a failed files log.
-pub fn generate_failed_files_log(events: &[FileEvent]) -> String {
-    let failed: Vec<&FileEvent> = events
-        .iter()
-        .filter(|e| e.status == FileStatus::FAIL)
-        .collect();
-
-    if failed.is_empty() {
-        return String::new();
-    }
-
-    let mut lines = Vec::new();
-    lines.push("Failed Files Report".to_string());
-    lines.push("===================".to_string());
-    lines.push(String::new());
-
-    for event in failed {
-        lines.push(format!("File: {}", event.file));
-        lines.push(format!("  Attempt: {}", event.attempt));
-        lines.push(format!("  Detail: {}", event.detail));
-        lines.push(String::new());
-    }
-
-    lines.join("\n")
 }

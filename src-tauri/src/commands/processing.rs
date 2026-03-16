@@ -101,22 +101,37 @@ pub async fn start_processing(
 
     let queue = Arc::new(JobQueue::new(scan_result.files));
     let run_state_clone = Arc::clone(&run_state);
+    let source_folder_str = folders.join(", ");
+    let thread_count = worker_count;
+    let max_retries = settings.max_retries;
+    let start_ms = chrono::Local::now().timestamp_millis();
 
     tokio::spawn(async move {
         run_worker_pool(worker_count, queue, context, Arc::clone(&run_state_clone), app).await;
 
         // Write EFC log to disk if verbose logging is enabled
         if let Some(log_dir) = verbose_log_dir {
+            let finish_ms = chrono::Local::now().timestamp_millis();
             let elapsed = run_state_clone.start_time.elapsed().as_secs();
             let counters = run_state_clone.counters.read().unwrap_or_else(|e| e.into_inner()).clone();
             let top_compression = run_state_clone.top_compression.read().unwrap_or_else(|e| e.into_inner()).clone();
             let all_events: Vec<_> = run_state_clone.all_events.read().unwrap_or_else(|e| e.into_inner()).clone();
+            let run_canceled = {
+                let s = run_state_clone.status.read().unwrap_or_else(|e| e.into_inner());
+                matches!(*s, ProcessingStatus::Cancelling)
+            };
 
             let summary = RunSummary {
                 counters,
                 elapsed_secs: elapsed,
                 top_compression,
                 status_lines: vec![],
+                source_folder: source_folder_str.clone(),
+                start_ms,
+                finish_ms,
+                thread_count,
+                max_retries,
+                run_canceled,
             };
             let log_text = generate_efc_log(&summary, &all_events);
             let log_path = log_dir.join("flaccrunch.log");
