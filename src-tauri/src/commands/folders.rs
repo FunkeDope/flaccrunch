@@ -63,6 +63,24 @@ pub async fn select_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
             for p in paths {
                 resolved.push(resolve_filepath(&app, p)?);
             }
+            // Android: request write access for all newly selected content URIs so
+            // write-back via openOutputStream succeeds after MediaStore.createWriteRequest.
+            #[cfg(target_os = "android")]
+            {
+                use tauri::Manager;
+                if let Some(bridge) = app.try_state::<crate::android_bridge::AndroidBridge>() {
+                    let state = app.state::<AppState>();
+                    let map = state.content_uri_map.read().unwrap_or_else(|e| e.into_inner());
+                    let uris: Vec<String> = resolved
+                        .iter()
+                        .filter_map(|cache_path| map.get(cache_path).cloned())
+                        .collect();
+                    drop(map);
+                    if !uris.is_empty() {
+                        bridge.request_write_access(&uris);
+                    }
+                }
+            }
             Ok(resolved)
         }
         None => Ok(Vec::new()),

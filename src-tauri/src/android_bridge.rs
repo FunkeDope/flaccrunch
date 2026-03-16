@@ -33,6 +33,16 @@ struct WriteCacheFileToUriResponse {
     ok: bool,
 }
 
+#[derive(Serialize)]
+struct RequestWriteAccessPayload {
+    uris: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct RequestWriteAccessResponse {
+    granted: bool,
+}
+
 // ---------------------------------------------------------------------------
 // AndroidBridge — type-erased so callers don't need the Runtime generic
 // ---------------------------------------------------------------------------
@@ -43,6 +53,11 @@ struct WriteCacheFileToUriResponse {
 pub struct AndroidBridge {
     get_display_name: Box<dyn Fn(&str) -> Option<String> + Send + Sync>,
     write_cache_to_uri: Box<dyn Fn(&str, &str) -> Result<(), String> + Send + Sync>,
+    /// Show the Android system "Allow editing?" dialog for the given content URIs.
+    /// Converts DownloadStorageProvider msf: URIs to MediaStore URIs and calls
+    /// MediaStore.createWriteRequest (API 30+).  On older devices returns true
+    /// immediately.  Returns false if the user denies or the request fails.
+    request_write_access: Box<dyn Fn(&[String]) -> bool + Send + Sync>,
 }
 
 impl AndroidBridge {
@@ -57,6 +72,13 @@ impl AndroidBridge {
     /// This is the canonical Android write-back for ACTION_OPEN_DOCUMENT grants.
     pub fn write_cache_to_uri(&self, cache_path: &str, uri: &str) -> Result<(), String> {
         (self.write_cache_to_uri)(cache_path, uri)
+    }
+
+    /// Show the system "Allow FlacCrunch to edit N files?" dialog for the given
+    /// content URIs.  Should be called after file selection and before processing
+    /// so the write grant is ready when write-back runs.
+    pub fn request_write_access(&self, uris: &[String]) -> bool {
+        (self.request_write_access)(uris)
     }
 }
 
@@ -76,9 +98,10 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
                     "AndroidBridgePlugin",
                 )?;
 
-                // Clone the handle so it can be moved into two separate closures.
+                // Clone the handle so it can be moved into separate closures.
                 // tauri 2.x PluginHandle implements Clone.
                 let handle2 = handle.clone();
+                let handle3 = handle.clone();
 
                 let bridge = AndroidBridge {
                     get_display_name: Box::new(move |uri: &str| {
@@ -108,6 +131,15 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
                                     Err("writeCacheFileToUri returned ok=false".to_string())
                                 }
                             })
+                    }),
+                    request_write_access: Box::new(move |uris: &[String]| {
+                        handle3
+                            .run_mobile_plugin::<RequestWriteAccessResponse>(
+                                "requestWriteAccess",
+                                RequestWriteAccessPayload { uris: uris.to_vec() },
+                            )
+                            .map(|r| r.granted)
+                            .unwrap_or(false)
                     }),
                 };
 
