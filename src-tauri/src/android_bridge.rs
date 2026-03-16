@@ -69,6 +69,8 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .setup(|app, api| {
             #[cfg(target_os = "android")]
             {
+                use tauri::Manager;
+
                 let handle = api.register_android_plugin(
                     "com.flaccrunch.bridge",
                     "AndroidBridgePlugin",
