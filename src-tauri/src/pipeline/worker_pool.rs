@@ -179,16 +179,11 @@ async fn worker_loop(
     }
 }
 
-/// Android only: if `cache_path` was copied from a content URI, write the (now-compressed)
-/// cache file back to the original URI using the fs plugin's writable file descriptor.
+/// Android only: write the compressed cache file back to the original location.
 ///
-/// NOTE: The tauri-plugin-dialog uses ACTION_GET_CONTENT which gives READ-ONLY content URIs.
-/// Write-back will fail for those URIs. Full fix requires the dialog plugin to use
-/// ACTION_OPEN_DOCUMENT instead. For now, errors are surfaced so the user sees a FAIL
-/// status rather than a false success.
-///
-/// Files picked via the externalstorage provider (Files app) are resolved to real filesystem
-/// paths and processed in-place — those never reach this function.
+/// With ACTION_OPEN_DOCUMENT (our CI-patched DialogPlugin.kt), content URIs carry
+/// read+write permission, so `app.fs().open(fp, write+truncate)` succeeds.
+/// Real-path originals (rare) are written back with std::fs::write.
 #[cfg(target_os = "android")]
 fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: &str) -> Result<(), String> {
     use std::io::Write;
@@ -201,12 +196,19 @@ fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: 
         let map = state.content_uri_map.read().unwrap_or_else(|e| e.into_inner());
         map.get(cache_path).cloned()
     };
-    // No URI mapping means this file was processed in-place — nothing to write back.
+    // No mapping means the file was never cached (shouldn't happen, but guard anyway).
     let Some(uri_str) = original_uri else { return Ok(()) };
 
     let data = std::fs::read(cache_path)
         .map_err(|e| format!("Failed to read cache file: {e}"))?;
 
+    // Real path (file:// or bare path from dialog): write directly.
+    if !uri_str.starts_with("content://") {
+        return std::fs::write(&uri_str, &data)
+            .map_err(|e| format!("Failed to write back to path '{uri_str}': {e}"));
+    }
+
+    // Content URI: write via ContentResolver with the write grant from ACTION_OPEN_DOCUMENT.
     let url = url::Url::parse(&uri_str)
         .map_err(|e| format!("Invalid content URI '{uri_str}': {e}"))?;
     let fp = FilePath::Url(url);
@@ -214,7 +216,7 @@ fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: 
     opts.write(true);
     opts.truncate(true);
     let mut file = app.fs().open(fp, opts)
-        .map_err(|e| format!("Cannot open content URI for writing (ACTION_GET_CONTENT gives read-only URIs — use the Files app to pick files): {e}"))?;
+        .map_err(|e| format!("Cannot open content URI for writing: {e}"))?;
     file.write_all(&data)
         .map_err(|e| format!("Failed to write back to content URI: {e}"))
 }

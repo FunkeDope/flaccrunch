@@ -71,17 +71,23 @@ pub async fn select_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
 
 /// Convert a dialog FilePath to a usable filesystem path string.
 /// On desktop, FilePath is always a Path variant and works directly.
-/// On Android, FilePath may be a content:// URI that needs to be resolved.
+/// On Android, files are always copied to the app cache so that processing
+/// can read and write freely. The original content URI is stored for write-back
+/// after processing (ACTION_OPEN_DOCUMENT gives read+write access to that URI).
 fn resolve_filepath(
     #[allow(unused_variables)] app: &tauri::AppHandle,
     fp: FilePath,
 ) -> Result<String, String> {
-    // Try direct path conversion first (works on desktop, and for file:// URIs)
+    // Desktop: FilePath is always a real filesystem path — use it directly.
+    #[cfg(not(target_os = "android"))]
     if let Ok(path) = fp.clone().into_path() {
         return Ok(path.display().to_string());
     }
 
-    // Content URI (Android)
+    // Android: always cache-copy regardless of whether the URI resolves to a real
+    // path, because Android 11+ scoped storage prevents writing to arbitrary paths
+    // on external storage without MANAGE_EXTERNAL_STORAGE.  Writing back through
+    // the content URI (granted by ACTION_OPEN_DOCUMENT) is the correct approach.
     #[cfg(target_os = "android")]
     {
         use crate::state::app_state::AppState;
@@ -90,13 +96,6 @@ fn resolve_filepath(
 
         let uri_str = fp.to_string();
 
-        // For external storage document URIs we can resolve to a real path and
-        // work on the file directly (no cache copy, no write-back needed).
-        if let Some(real_path) = resolve_external_storage_uri(&uri_str) {
-            return Ok(real_path);
-        }
-
-        // Fall back: copy to app cache and remember the original URI for write-back.
         let cache_dir = app
             .path()
             .app_cache_dir()
@@ -105,9 +104,22 @@ fn resolve_filepath(
         std::fs::create_dir_all(&flac_cache)
             .map_err(|e| format!("Failed to create cache dir: {e}"))?;
 
-        let filename = extract_filename_from_content_uri(&uri_str);
+        // Derive the display filename.  For content URIs, decode the URI to get
+        // the real name (e.g. "happy birthday.flac" from an externalstorage URI).
+        // For real paths returned by the dialog, take the file_name component.
+        let filename = if let Ok(path) = fp.clone().into_path() {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| extract_filename_from_content_uri(&uri_str))
+        } else {
+            extract_filename_from_content_uri(&uri_str)
+        };
+
         let dest = flac_cache.join(&filename);
 
+        // Read via the fs plugin (handles both real paths and content:// URIs
+        // through Android's ContentResolver).
         let content = app
             .fs()
             .read(fp)
@@ -115,7 +127,8 @@ fn resolve_filepath(
         std::fs::write(&dest, &content)
             .map_err(|e| format!("Failed to write to cache: {e}"))?;
 
-        // Store the mapping for write-back after processing.
+        // Record original identifier → cache path so write-back knows where to
+        // push the compressed result.
         let cache_path = dest.display().to_string();
         let state = app.state::<AppState>();
         let mut map = state.content_uri_map.write().unwrap_or_else(|e| e.into_inner());
@@ -126,30 +139,6 @@ fn resolve_filepath(
 
     #[cfg(not(target_os = "android"))]
     Err(format!("Cannot resolve file path: {}", fp))
-}
-
-/// For `content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.flac`
-/// resolve to the real filesystem path `/storage/emulated/0/Music/track.flac`.
-/// Returns `None` for any other URI authority (media provider, downloads, etc.).
-#[cfg(target_os = "android")]
-fn resolve_external_storage_uri(uri_str: &str) -> Option<String> {
-    if !uri_str.contains("com.android.externalstorage.documents/document/") {
-        return None;
-    }
-    let encoded = uri_str.split("/document/").nth(1)?;
-    let doc_id = percent_decode(encoded); // e.g. "primary:Music/track.flac"
-    let colon = doc_id.find(':')?;
-    let volume = &doc_id[..colon];
-    let rel = &doc_id[colon + 1..];
-    let base = if volume.eq_ignore_ascii_case("primary") {
-        "/storage/emulated/0".to_string()
-    } else {
-        format!("/storage/{}", volume)
-    };
-    // Trust the decoded path — don't check .exists() here because MANAGE_EXTERNAL_STORAGE
-    // may not yet be runtime-granted, causing stat() to fail even for valid paths.
-    // If the path is genuinely wrong, FLAC processing will fail with a clear I/O error.
-    Some(format!("{}/{}", base, rel))
 }
 
 /// Extract a human-readable filename from a content URI by URL-decoding it and

@@ -186,24 +186,52 @@ jobs:
             sed -i 's/compileSdk = [0-9]*/compileSdk = 35/' "$GRADLE_FILE"
           fi
 
-      - name: Patch Android permissions into manifest
+      - name: Patch Android manifest with storage permissions
         run: |
           MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            # Insert permission declarations before <application ...>
-            sed -i 's|<application |<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <application |' "$MANIFEST"
+            # Insert READ permissions before <application> (no MANAGE_EXTERNAL_STORAGE —
+            # that permission cannot be toggled on for sideloaded apps and is unnecessary
+            # when using ACTION_OPEN_DOCUMENT for SAF-based read+write access).
+            sed -i 's|<application |<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n    <application |' "$MANIFEST"
+            # Enable legacy external storage on Android 10 (API 29) to allow direct path access.
+            sed -i 's|<application |<application android:requestLegacyExternalStorage="true" |' "$MANIFEST"
             echo "Patched AndroidManifest.xml:"
             cat "$MANIFEST"
           fi
 
-      - name: Patch MainActivity to request MANAGE_EXTERNAL_STORAGE at runtime
+      - name: Patch MainActivity to request READ_MEDIA_AUDIO at runtime
         run: |
           MAIN_ACTIVITY="src-tauri/gen/android/app/src/main/java/com/flaccrunch/app/MainActivity.kt"
           if [ -f "$MAIN_ACTIVITY" ]; then
             cp src-tauri/android-patches/MainActivity.kt "$MAIN_ACTIVITY"
-            echo "Patched MainActivity.kt with MANAGE_EXTERNAL_STORAGE request"
+            echo "Patched MainActivity.kt"
           else
             echo "WARNING: MainActivity.kt not found at $MAIN_ACTIVITY"
+          fi
+
+      - name: Patch dialog plugin to use ACTION_OPEN_DOCUMENT (grants read+write per file)
+        run: |
+          # ACTION_OPEN_DOCUMENT (vs ACTION_GET_CONTENT) grants both read AND write
+          # URI permissions for the selected files — enabling write-back without any
+          # special storage permissions.
+          DIALOG_PLUGIN=$(find src-tauri/gen/android -name "DialogPlugin.kt" 2>/dev/null | head -1)
+          if [ -n "$DIALOG_PLUGIN" ]; then
+            sed -i 's/Intent\.ACTION_GET_CONTENT/Intent.ACTION_OPEN_DOCUMENT/g' "$DIALOG_PLUGIN"
+            sed -i '/TODO: ACTION_OPEN_DOCUMENT/d' "$DIALOG_PLUGIN"
+            echo "Patched $DIALOG_PLUGIN: ACTION_GET_CONTENT -> ACTION_OPEN_DOCUMENT"
+          else
+            echo "WARNING: DialogPlugin.kt not found — write-back may not work"
+          fi
+
+      - name: Copy Android icons into generated project
+        run: |
+          RES_DIR="src-tauri/gen/android/app/src/main/res"
+          if [ -d "$RES_DIR" ]; then
+            cp -r src-tauri/icons/android/. "$RES_DIR/"
+            echo "Copied Android icons to $RES_DIR"
+          else
+            echo "WARNING: Android res directory not found at $RES_DIR"
           fi
 
       - name: Generate signing keystore
