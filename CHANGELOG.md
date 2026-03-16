@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.2 — 2026-03-15
+
+### Changed
+
+- **Logging overhaul**: The app no longer writes logs to disk automatically on every run
+  - Export Log button now produces an EFC/EAC-style structured log (matches the format previously written by the backend)
+  - On a run with failures, a save-log dialog is still prompted automatically
+  - Scratch files now use the system temp directory instead of the log folder
+- **Settings — Verbose Logging toggle** (default off): when enabled, an EFC log is automatically written to disk after each run to a configurable folder (defaults to the desktop)
+
+### Fixed
+
+- TypeScript type errors in test files that caused CI builds to fail after v1.0.1
+
+---
+
 ## v1.0.0 — 2026-03-15
 
 First production release. Complete rewrite from the original PowerShell script into a native cross-platform desktop + Android application built with Tauri v2 (Rust) and React (TypeScript).
