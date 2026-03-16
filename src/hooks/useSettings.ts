@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import * as api from "../lib/tauri";
 import type { AppSettings } from "../types/settings";
 import type { ProcessingSettings } from "../types/processing";
@@ -15,6 +16,7 @@ export function useSettings() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [cpuCount, setCpuCount] = useState(1);
   const [defaultLogFolder, setDefaultLogFolder] = useState("");
+  const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
     api.getCpuCount().then(setCpuCount).catch(() => {});
@@ -22,6 +24,7 @@ export function useSettings() {
     api.getSettings().then((s) => {
       setSettings({ ...defaultSettings, ...s });
     }).catch(() => {});
+    getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
   const updateSettings = useCallback(
@@ -44,5 +47,5 @@ export function useSettings() {
     verboseLogging: settings.verboseLogging,
   };
 
-  return { settings, cpuCount, defaultLogFolder, processingSettings, updateSettings };
+  return { settings, cpuCount, defaultLogFolder, appVersion, processingSettings, updateSettings };
 }

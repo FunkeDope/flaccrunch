@@ -108,6 +108,14 @@ body {
   white-space: nowrap;
 }
 
+.header-version {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .header-tag {
   font-size: 11px;
   color: var(--text-muted);
@@ -456,6 +464,19 @@ body {
 .drop-zone.disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.drop-zone-mobile {
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-mobile-start {
+  min-width: 200px;
+  min-height: 48px;
+  font-size: 15px;
 }
 
 /* ======================================================

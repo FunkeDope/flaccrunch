@@ -5,11 +5,12 @@ interface SettingsModalProps {
   settings: AppSettings;
   cpuCount: number;
   defaultLogFolder: string;
+  appVersion?: string;
   onUpdate: (partial: Partial<AppSettings>) => void;
   onClose: () => void;
 }
 
-export function SettingsModal({ settings, cpuCount, defaultLogFolder, onUpdate, onClose }: SettingsModalProps) {
+export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion, onUpdate, onClose }: SettingsModalProps) {
   const threadCount = settings.threadCount ?? Math.max(1, cpuCount - 1);
 
   return (
@@ -27,6 +28,11 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, onUpdate, 
           </button>
         </div>
         <div className="modal-body">
+          {appVersion && (
+            <div style={{ textAlign: "center", marginBottom: 12, color: "var(--text-muted)", fontSize: 12 }}>
+              FlacCrunch v{appVersion}
+            </div>
+          )}
           <div className="card">
             <h3>Performance</h3>
             <ThreadSlider

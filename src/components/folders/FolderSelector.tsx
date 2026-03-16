@@ -12,6 +12,7 @@ interface FolderSelectorProps {
   status: RunStatus;
   error: string | null;
   isDragOver?: boolean;
+  isDragOverFiles?: boolean;
 }
 
 export function FolderSelector({
@@ -25,11 +26,13 @@ export function FolderSelector({
   error,
   isDragOver: nativeDragOver,
 }: FolderSelectorProps) {
-  const [localDragOver, setLocalDragOver] = useState(false);
+  const [localFolderDragOver, setLocalFolderDragOver] = useState(false);
+  const [localFileDragOver, setLocalFileDragOver] = useState(false);
   const [mobile, setMobile] = useState(false);
 
-  // Combine native OS drag (from Tauri) and local HTML5 drag state
-  const dragOver = nativeDragOver || localDragOver;
+  // Native OS drag highlights both zones (we can't detect file vs folder until drop)
+  const folderDragOver = nativeDragOver || localFolderDragOver;
+  const fileDragOver = nativeDragOver || localFileDragOver;
 
   useEffect(() => {
     api.isMobile().then(setMobile).catch(() => setMobile(false));
@@ -78,22 +81,28 @@ export function FolderSelector({
       {error && <div className="error-banner">{error}</div>}
 
       {mobile ? (
-        <div className="drop-zone" onClick={onAddFiles}>
+        <div className="drop-zone drop-zone-mobile" onClick={onAddFiles}>
           Tap to select FLAC files
         </div>
       ) : (
         <div className="drop-zone-row">
           <div
-            className={`drop-zone ${dragOver ? "active" : ""}`}
+            className={`drop-zone ${folderDragOver ? "active" : ""}`}
             onClick={onAddFolder}
-            onDragOver={(e) => { e.preventDefault(); setLocalDragOver(true); }}
-            onDragLeave={() => setLocalDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setLocalDragOver(false); }}
+            onDragOver={(e) => { e.preventDefault(); setLocalFolderDragOver(true); }}
+            onDragLeave={() => setLocalFolderDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setLocalFolderDragOver(false); }}
           >
             Drop folders here or click to browse
           </div>
-          <div className="drop-zone" onClick={onAddFiles}>
-            Click to add individual FLAC files
+          <div
+            className={`drop-zone ${fileDragOver ? "active" : ""}`}
+            onClick={onAddFiles}
+            onDragOver={(e) => { e.preventDefault(); setLocalFileDragOver(true); }}
+            onDragLeave={() => setLocalFileDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setLocalFileDragOver(false); }}
+          >
+            Drop files here or click to add individual FLAC files
           </div>
         </div>
       )}
@@ -120,9 +129,9 @@ export function FolderSelector({
         </div>
       )}
 
-      <div className="action-bar" style={mobile ? { justifyContent: "center" } : undefined}>
+      <div className="action-bar" style={mobile ? { justifyContent: "center", marginTop: 20 } : undefined}>
         <button
-          className={`btn btn-primary${mobile ? "" : " btn-full"}`}
+          className={`btn btn-primary${mobile ? " btn-mobile-start" : " btn-full"}`}
           onClick={onStart}
           disabled={!canStart}
         >

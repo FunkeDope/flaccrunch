@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.4 — 2026-03-15
+
+### Changed
+
+- **Binary size**: Added `lto = "thin"` and `codegen-units = 1` to the release profile — enables cross-crate dead code elimination, expected to reduce exe size by ~20-35%
+- **Version display**: App version now shown in the title bar (e.g. `v1.0.4`) and at the top of the Settings modal
+- **Drag zones**: Both drop zones (folder and file) now highlight when dragging from the OS, since file vs. folder type cannot be determined until drop time. File drop zone also now accepts HTML5 drag events
+- **Mobile**: Tap-to-select zone is taller; Start Processing button has more separation from the file list
+
+---
+
 ## v1.0.3 — 2026-03-15
 
 ### Changed

@@ -38,7 +38,7 @@ function App() {
   }, [processing.counters, processing.workers]);
 
   return (
-    <AppShell onSettingsClick={() => setSettingsOpen(true)}>
+    <AppShell onSettingsClick={() => setSettingsOpen(true)} appVersion={settings.appVersion}>
       {isActive && (
         <RunStatusBar
           status={processing.status}
@@ -76,6 +76,7 @@ function App() {
           settings={settings.settings}
           cpuCount={settings.cpuCount}
           defaultLogFolder={settings.defaultLogFolder}
+          appVersion={settings.appVersion}
           onUpdate={settings.updateSettings}
           onClose={() => setSettingsOpen(false)}
         />

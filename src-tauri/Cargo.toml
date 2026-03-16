@@ -1,6 +1,6 @@
 [package]
 name = "flaccrunch"
-version = "1.0.3"
+version = "1.0.4"
 description = "Lossless FLAC recompression with album art optimization"
 authors = ["FlacCrunch Contributors"]
 edition = "2021"
@@ -41,3 +41,7 @@ libflac-sys = { version = "0.3", default-features = false, features = ["build-fl
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
