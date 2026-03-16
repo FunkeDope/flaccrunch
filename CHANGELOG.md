@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.3 — 2026-03-15
+
+### Changed
+
+- **Windows release**: NSIS setup `.exe` dropped — only MSI installer and portable `FlacCrunch.exe` are published
+- **Android APK filenames**: renamed to `FlacCrunch-{version}-arm64.apk` etc. — "unsigned" suffix removed (APKs are signed; the suffix was a Gradle artifact naming convention that no longer applies)
+
+---
+
 ## v1.0.2 — 2026-03-15
 
 ### Changed
