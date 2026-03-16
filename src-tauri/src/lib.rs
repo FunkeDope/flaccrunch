@@ -1,3 +1,4 @@
+pub mod android_bridge;
 pub mod cli;
 pub mod commands;
 pub mod pipeline;
@@ -19,6 +20,7 @@ pub fn run() {
 /// Launch the GUI, optionally pre-loading paths from the command line.
 pub fn run_with_startup_paths(startup_paths: Vec<String>) {
     tauri::Builder::default()
+        .plugin(android_bridge::plugin())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

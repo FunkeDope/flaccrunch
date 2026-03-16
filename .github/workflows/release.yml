@@ -226,6 +226,17 @@ jobs:
             echo "WARNING: DialogPlugin.kt not found in Cargo registry — write-back may not work"
           fi
 
+      - name: Copy AndroidBridgePlugin into generated project
+        run: |
+          # AndroidBridgePlugin.kt exposes getDisplayName via ContentResolver —
+          # the standard Android way to resolve real filenames from SAF URIs.
+          # It must live in the app module source set so the Tauri annotation
+          # processor includes it in the generated plugin registry.
+          BRIDGE_DIR="src-tauri/gen/android/app/src/main/java/com/flaccrunch/bridge"
+          mkdir -p "$BRIDGE_DIR"
+          cp src-tauri/android-patches/AndroidBridgePlugin.kt "$BRIDGE_DIR/"
+          echo "Copied AndroidBridgePlugin.kt to $BRIDGE_DIR"
+
       - name: Copy Android icons into generated project
         run: |
           RES_DIR="src-tauri/gen/android/app/src/main/res"

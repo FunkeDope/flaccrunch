@@ -104,16 +104,24 @@ fn resolve_filepath(
         std::fs::create_dir_all(&flac_cache)
             .map_err(|e| format!("Failed to create cache dir: {e}"))?;
 
-        // Derive the display filename.  For content URIs, decode the URI to get
-        // the real name (e.g. "happy birthday.flac" from an externalstorage URI).
-        // For real paths returned by the dialog, take the file_name component.
-        let filename = if let Ok(path) = fp.clone().into_path() {
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
+        // Derive the display filename.
+        //
+        // Priority order:
+        //   1. ContentResolver.query(DISPLAY_NAME) — the real filename, same
+        //      method every Android file manager uses.  Works for all SAF URIs
+        //      (Downloads, MediaStore, ExternalStorage, etc.).
+        //   2. Real path from FilePath::into_path() (rare on Android 11+).
+        //   3. URI-derived fallback (msf-7247.flac style) — last resort.
+        let filename = {
+            use tauri::Manager;
+            app.try_state::<crate::android_bridge::AndroidBridge>()
+                .and_then(|bridge| bridge.get_display_name(&uri_str))
+                .or_else(|| {
+                    fp.clone().into_path().ok().and_then(|p| {
+                        p.file_name().and_then(|n| n.to_str()).map(|s| s.to_string())
+                    })
+                })
                 .unwrap_or_else(|| extract_filename_from_content_uri(&uri_str))
-        } else {
-            extract_filename_from_content_uri(&uri_str)
         };
 
         let dest = flac_cache.join(&filename);
