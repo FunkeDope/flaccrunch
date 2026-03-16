@@ -212,16 +212,18 @@ jobs:
 
       - name: Patch dialog plugin to use ACTION_OPEN_DOCUMENT (grants read+write per file)
         run: |
-          # ACTION_OPEN_DOCUMENT (vs ACTION_GET_CONTENT) grants both read AND write
-          # URI permissions for the selected files — enabling write-back without any
-          # special storage permissions.
-          DIALOG_PLUGIN=$(find src-tauri/gen/android -name "DialogPlugin.kt" 2>/dev/null | head -1)
+          # tauri-plugin-dialog's DialogPlugin.kt lives in the Cargo registry
+          # (~/.cargo/registry/src/), NOT in the generated Android project.
+          # We replace it with our pre-patched version that uses ACTION_OPEN_DOCUMENT
+          # (vs ACTION_GET_CONTENT) so returned content URIs carry write grants,
+          # enabling write-back without MANAGE_EXTERNAL_STORAGE.
+          # takePersistableUriPermission is also called for session-long write access.
+          DIALOG_PLUGIN=$(find ~/.cargo/registry/src -name "DialogPlugin.kt" -path "*plugin-dialog*" 2>/dev/null | head -1)
           if [ -n "$DIALOG_PLUGIN" ]; then
-            sed -i 's/Intent\.ACTION_GET_CONTENT/Intent.ACTION_OPEN_DOCUMENT/g' "$DIALOG_PLUGIN"
-            sed -i '/TODO: ACTION_OPEN_DOCUMENT/d' "$DIALOG_PLUGIN"
-            echo "Patched $DIALOG_PLUGIN: ACTION_GET_CONTENT -> ACTION_OPEN_DOCUMENT"
+            cp src-tauri/android-patches/DialogPlugin.kt "$DIALOG_PLUGIN"
+            echo "Replaced $DIALOG_PLUGIN with ACTION_OPEN_DOCUMENT + takePersistableUriPermission version"
           else
-            echo "WARNING: DialogPlugin.kt not found — write-back may not work"
+            echo "WARNING: DialogPlugin.kt not found in Cargo registry — write-back may not work"
           fi
 
       - name: Copy Android icons into generated project

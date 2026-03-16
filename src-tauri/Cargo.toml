@@ -1,6 +1,6 @@
 [package]
 name = "flaccrunch"
-version = "1.0.9"
+version = "1.0.10"
 description = "Lossless FLAC recompression with album art optimization"
 authors = ["FlacCrunch Contributors"]
 edition = "2021"
