@@ -15,6 +15,10 @@ export async function isMobile(): Promise<boolean> {
   return invoke<boolean>("is_mobile");
 }
 
+export async function selectOutputFolder(): Promise<string | null> {
+  return invoke<string | null>("select_output_folder");
+}
+
 export async function scanFolders(folders: string[]): Promise<ScanResult> {
   return invoke<ScanResult>("scan_folders", { folders });
 }

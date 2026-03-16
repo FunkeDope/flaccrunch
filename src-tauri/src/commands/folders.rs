@@ -63,27 +63,35 @@ pub async fn select_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
             for p in paths {
                 resolved.push(resolve_filepath(&app, p)?);
             }
-            // Android: request write access for all newly selected content URIs so
-            // write-back via openOutputStream succeeds after MediaStore.createWriteRequest.
-            #[cfg(target_os = "android")]
-            {
-                use tauri::Manager;
-                if let Some(bridge) = app.try_state::<crate::android_bridge::AndroidBridge>() {
-                    let state = app.state::<AppState>();
-                    let map = state.content_uri_map.read().unwrap_or_else(|e| e.into_inner());
-                    let uris: Vec<String> = resolved
-                        .iter()
-                        .filter_map(|cache_path| map.get(cache_path).cloned())
-                        .collect();
-                    drop(map);
-                    if !uris.is_empty() {
-                        bridge.request_write_access(&uris);
-                    }
-                }
-            }
             Ok(resolved)
         }
         None => Ok(Vec::new()),
+    }
+}
+
+/// Open the SAF folder picker (ACTION_OPEN_DOCUMENT_TREE) on Android so the user
+/// can choose where compressed files will be saved. Returns the tree URI string,
+/// or None on desktop / if the user cancels.
+#[tauri::command]
+pub async fn select_output_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        let bridge = app
+            .try_state::<crate::android_bridge::AndroidBridge>()
+            .ok_or_else(|| "AndroidBridge not available".to_string())?;
+        let tree_uri = bridge.select_output_folder();
+        if let Some(ref uri) = tree_uri {
+            let state = app.state::<AppState>();
+            let mut stored = state.output_tree_uri.write().unwrap_or_else(|e| e.into_inner());
+            *stored = Some(uri.clone());
+        }
+        Ok(tree_uri)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(None)
     }
 }
 

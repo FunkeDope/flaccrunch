@@ -1,5 +1,5 @@
-/// Android bridge: query ContentResolver for content URI metadata, and write
-/// cache files back to SAF-granted content URIs.
+/// Android bridge: query ContentResolver for content URI metadata, select an
+/// output folder via ACTION_OPEN_DOCUMENT_TREE, and write files into SAF tree URIs.
 ///
 /// Follows the exact same PluginHandle pattern as tauri-plugin-fs/src/mobile.rs.
 /// On non-Android builds this module compiles but the plugin is a no-op.
@@ -22,25 +22,26 @@ struct GetDisplayNameResponse {
 }
 
 #[derive(Serialize)]
-struct WriteCacheFileToUriPayload {
-    #[serde(rename = "cachePath")]
-    cache_path: String,
-    uri: String,
-}
+struct SelectOutputFolderPayload {}
 
 #[derive(Deserialize)]
-struct WriteCacheFileToUriResponse {
-    ok: bool,
+struct SelectOutputFolderResponse {
+    #[serde(rename = "treeUri")]
+    tree_uri: Option<String>,
 }
 
 #[derive(Serialize)]
-struct RequestWriteAccessPayload {
-    uris: Vec<String>,
+struct WriteFileToFolderPayload {
+    #[serde(rename = "treeUri")]
+    tree_uri: String,
+    #[serde(rename = "cachePath")]
+    cache_path: String,
+    filename: String,
 }
 
 #[derive(Deserialize)]
-struct RequestWriteAccessResponse {
-    granted: bool,
+struct WriteFileToFolderResponse {
+    ok: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -52,12 +53,11 @@ struct RequestWriteAccessResponse {
 /// `try_state::<AndroidBridge>()` returns None there (safe fallback).
 pub struct AndroidBridge {
     get_display_name: Box<dyn Fn(&str) -> Option<String> + Send + Sync>,
-    write_cache_to_uri: Box<dyn Fn(&str, &str) -> Result<(), String> + Send + Sync>,
-    /// Show the Android system "Allow editing?" dialog for the given content URIs.
-    /// Converts DownloadStorageProvider msf: URIs to MediaStore URIs and calls
-    /// MediaStore.createWriteRequest (API 30+).  On older devices returns true
-    /// immediately.  Returns false if the user denies or the request fails.
-    request_write_access: Box<dyn Fn(&[String]) -> bool + Send + Sync>,
+    /// Open the SAF folder picker (ACTION_OPEN_DOCUMENT_TREE) and return
+    /// the selected tree URI, or None if the user cancels.
+    select_output_folder: Box<dyn Fn() -> Option<String> + Send + Sync>,
+    /// Write a local cache file into a SAF tree URI folder via DocumentFile.
+    write_file_to_folder: Box<dyn Fn(&str, &str, &str) -> Result<(), String> + Send + Sync>,
 }
 
 impl AndroidBridge {
@@ -67,18 +67,21 @@ impl AndroidBridge {
         (self.get_display_name)(uri)
     }
 
-    /// Write the contents of `cache_path` (a local filesystem path) to the
-    /// SAF content URI `uri` via `contentResolver.openOutputStream(uri, "wt")`.
-    /// This is the canonical Android write-back for ACTION_OPEN_DOCUMENT grants.
-    pub fn write_cache_to_uri(&self, cache_path: &str, uri: &str) -> Result<(), String> {
-        (self.write_cache_to_uri)(cache_path, uri)
+    /// Open the system folder picker and return the tree URI the user selected.
+    /// Returns None if the user cancelled or the launcher wasn't registered.
+    pub fn select_output_folder(&self) -> Option<String> {
+        (self.select_output_folder)()
     }
 
-    /// Show the system "Allow FlacCrunch to edit N files?" dialog for the given
-    /// content URIs.  Should be called after file selection and before processing
-    /// so the write grant is ready when write-back runs.
-    pub fn request_write_access(&self, uris: &[String]) -> bool {
-        (self.request_write_access)(uris)
+    /// Write the contents of `cache_path` into the folder identified by
+    /// `tree_uri`, creating (or overwriting) a file with the given `filename`.
+    pub fn write_file_to_folder(
+        &self,
+        tree_uri: &str,
+        cache_path: &str,
+        filename: &str,
+    ) -> Result<(), String> {
+        (self.write_file_to_folder)(tree_uri, cache_path, filename)
     }
 }
 
@@ -114,32 +117,33 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
                             .and_then(|r| r.display_name)
                             .filter(|n| !n.is_empty())
                     }),
-                    write_cache_to_uri: Box::new(move |cache_path: &str, uri: &str| {
+                    select_output_folder: Box::new(move || {
                         handle2
-                            .run_mobile_plugin::<WriteCacheFileToUriResponse>(
-                                "writeCacheFileToUri",
-                                WriteCacheFileToUriPayload {
+                            .run_mobile_plugin::<SelectOutputFolderResponse>(
+                                "selectOutputFolder",
+                                SelectOutputFolderPayload {},
+                            )
+                            .ok()
+                            .and_then(|r| r.tree_uri)
+                    }),
+                    write_file_to_folder: Box::new(move |tree_uri: &str, cache_path: &str, filename: &str| {
+                        handle3
+                            .run_mobile_plugin::<WriteFileToFolderResponse>(
+                                "writeFileToFolder",
+                                WriteFileToFolderPayload {
+                                    tree_uri: tree_uri.to_string(),
                                     cache_path: cache_path.to_string(),
-                                    uri: uri.to_string(),
+                                    filename: filename.to_string(),
                                 },
                             )
-                            .map_err(|e| format!("writeCacheFileToUri plugin call failed: {e}"))
+                            .map_err(|e| format!("writeFileToFolder plugin call failed: {e}"))
                             .and_then(|r| {
                                 if r.ok {
                                     Ok(())
                                 } else {
-                                    Err("writeCacheFileToUri returned ok=false".to_string())
+                                    Err("writeFileToFolder returned ok=false".to_string())
                                 }
                             })
-                    }),
-                    request_write_access: Box::new(move |uris: &[String]| {
-                        handle3
-                            .run_mobile_plugin::<RequestWriteAccessResponse>(
-                                "requestWriteAccess",
-                                RequestWriteAccessPayload { uris: uris.to_vec() },
-                            )
-                            .map(|r| r.granted)
-                            .unwrap_or(false)
                     }),
                 };
 

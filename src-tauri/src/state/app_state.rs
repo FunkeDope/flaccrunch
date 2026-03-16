@@ -11,6 +11,8 @@ pub struct AppState {
     pub startup_paths: RwLock<Vec<String>>,
     /// Android only: maps cache file path → original content URI for write-back after processing.
     pub content_uri_map: RwLock<HashMap<String, String>>,
+    /// Android only: SAF tree URI selected by the user for output (ACTION_OPEN_DOCUMENT_TREE).
+    pub output_tree_uri: RwLock<Option<String>>,
 }
 
 impl Default for AppState {
@@ -26,6 +28,7 @@ impl AppState {
             settings: RwLock::new(AppSettings::default()),
             startup_paths: RwLock::new(paths),
             content_uri_map: RwLock::new(HashMap::new()),
+            output_tree_uri: RwLock::new(None),
         }
     }
 }

@@ -36,6 +36,7 @@ pub fn run_with_startup_paths(startup_paths: Vec<String>) {
             commands::processing::get_top_compression,
             commands::folders::select_folders,
             commands::folders::select_files,
+            commands::folders::select_output_folder,
             commands::folders::is_mobile,
             commands::folders::scan_folders,
             commands::folders::validate_folder,
