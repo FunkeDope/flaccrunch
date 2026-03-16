@@ -26,6 +26,7 @@ beforeEach(() => {
     logFolder: null,
     maxRetries: 3,
     recentFolders: [],
+    verboseLogging: false,
   });
   mockSaveSettings.mockResolvedValue(undefined);
 });
@@ -59,6 +60,7 @@ describe("useSettings — processingSettings derivation", () => {
       logFolder: null,
       maxRetries: 3,
       recentFolders: [],
+      verboseLogging: false,
     });
     const { result } = renderHook(() => useSettings());
     await waitFor(() => expect(result.current.settings.threadCount).toBe(4));
@@ -76,6 +78,7 @@ describe("useSettings — processingSettings derivation", () => {
       logFolder: "/custom/logs",
       maxRetries: 3,
       recentFolders: [],
+      verboseLogging: false,
     });
     const { result } = renderHook(() => useSettings());
     await waitFor(() =>
@@ -89,6 +92,7 @@ describe("useSettings — processingSettings derivation", () => {
       logFolder: null,
       maxRetries: 5,
       recentFolders: [],
+      verboseLogging: false,
     });
     const { result } = renderHook(() => useSettings());
     await waitFor(() => expect(result.current.processingSettings.maxRetries).toBe(5));

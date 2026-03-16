@@ -3,4 +3,5 @@ export interface AppSettings {
   logFolder: string | null;
   maxRetries: number;
   recentFolders: string[];
+  verboseLogging: boolean;
 }

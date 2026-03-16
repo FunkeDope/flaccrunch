@@ -53,12 +53,8 @@ export async function getDefaultLogFolder(): Promise<string> {
 }
 
 // Logs
-export async function getRunLog(): Promise<string> {
-  return invoke<string>("get_run_log");
-}
-
-export async function getSummaryLog(): Promise<string> {
-  return invoke<string>("get_summary_log");
+export async function getEfcLog(events: unknown[], elapsedSecs: number): Promise<string> {
+  return invoke<string>("get_efc_log", { events, elapsedSecs });
 }
 
 // Startup paths from CLI args (consumed on first call)

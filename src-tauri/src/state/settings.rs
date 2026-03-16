@@ -12,6 +12,9 @@ pub struct AppSettings {
     pub max_retries: u32,
     /// Recently used folder paths.
     pub recent_folders: Vec<String>,
+    /// Write EFC-format logs to disk after each run.
+    #[serde(default)]
+    pub verbose_logging: bool,
 }
 
 impl Default for AppSettings {
@@ -21,6 +24,7 @@ impl Default for AppSettings {
             max_retries: 3,
             log_folder: None,
             recent_folders: Vec::new(),
+            verbose_logging: false,
         }
     }
 }
@@ -32,6 +36,7 @@ pub struct ProcessingSettings {
     pub thread_count: usize,
     pub log_folder: String,
     pub max_retries: u32,
+    pub verbose_logging: bool,
 }
 
 #[cfg(test)]

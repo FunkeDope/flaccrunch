@@ -75,6 +75,7 @@ function App() {
         <SettingsModal
           settings={settings.settings}
           cpuCount={settings.cpuCount}
+          defaultLogFolder={settings.defaultLogFolder}
           onUpdate={settings.updateSettings}
           onClose={() => setSettingsOpen(false)}
         />

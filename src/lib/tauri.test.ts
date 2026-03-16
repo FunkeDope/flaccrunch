@@ -18,8 +18,7 @@ import {
   saveSettings,
   getCpuCount,
   getDefaultLogFolder,
-  getRunLog,
-  getSummaryLog,
+  getEfcLog,
   getStartupPaths,
 } from "./tauri";
 
@@ -62,7 +61,7 @@ describe("tauri wrappers — command names", () => {
 
   it("startProcessing calls 'start_processing' with folders and settings", async () => {
     mockInvoke.mockResolvedValue("ok");
-    const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3 };
+    const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3, verboseLogging: false };
     await startProcessing(["/music"], settings);
     expect(mockInvoke).toHaveBeenCalledWith("start_processing", {
       folders: ["/music"],
@@ -84,7 +83,7 @@ describe("tauri wrappers — command names", () => {
 
   it("saveSettings calls 'save_settings' with settings argument", async () => {
     mockInvoke.mockResolvedValue(undefined);
-    const settings = { threadCount: null, logFolder: null, maxRetries: 3, recentFolders: [] };
+    const settings = { threadCount: null, logFolder: null, maxRetries: 3, recentFolders: [], verboseLogging: false };
     await saveSettings(settings);
     expect(mockInvoke).toHaveBeenCalledWith("save_settings", { settings });
   });
@@ -102,16 +101,10 @@ describe("tauri wrappers — command names", () => {
     expect(mockInvoke).toHaveBeenCalledWith("get_default_log_folder");
   });
 
-  it("getRunLog calls 'get_run_log'", async () => {
+  it("getEfcLog calls 'get_efc_log' with events and elapsedSecs", async () => {
     mockInvoke.mockResolvedValue("log text");
-    await getRunLog();
-    expect(mockInvoke).toHaveBeenCalledWith("get_run_log");
-  });
-
-  it("getSummaryLog calls 'get_summary_log'", async () => {
-    mockInvoke.mockResolvedValue("summary");
-    await getSummaryLog();
-    expect(mockInvoke).toHaveBeenCalledWith("get_summary_log");
+    await getEfcLog([], 42);
+    expect(mockInvoke).toHaveBeenCalledWith("get_efc_log", { events: [], elapsedSecs: 42 });
   });
 
   it("getStartupPaths calls 'get_startup_paths'", async () => {

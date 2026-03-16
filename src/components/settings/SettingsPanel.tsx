@@ -4,11 +4,12 @@ import type { AppSettings } from "../../types/settings";
 interface SettingsModalProps {
   settings: AppSettings;
   cpuCount: number;
+  defaultLogFolder: string;
   onUpdate: (partial: Partial<AppSettings>) => void;
   onClose: () => void;
 }
 
-export function SettingsModal({ settings, cpuCount, onUpdate, onClose }: SettingsModalProps) {
+export function SettingsModal({ settings, cpuCount, defaultLogFolder, onUpdate, onClose }: SettingsModalProps) {
   const threadCount = settings.threadCount ?? Math.max(1, cpuCount - 1);
 
   return (
@@ -49,6 +50,39 @@ export function SettingsModal({ settings, cpuCount, onUpdate, onClose }: Setting
                 onChange={(e) => onUpdate({ maxRetries: parseInt(e.target.value) })}
               />
             </div>
+          </div>
+          <div className="card">
+            <h3>Logging</h3>
+            <div className="settings-group">
+              <label className="settings-toggle-row">
+                <span>
+                  Verbose Logging
+                  <span className="settings-hint">Write an EFC-format log to disk after each run</span>
+                </span>
+                <button
+                  className={`toggle ${settings.verboseLogging ? "toggle-on" : ""}`}
+                  onClick={() => onUpdate({ verboseLogging: !settings.verboseLogging })}
+                  aria-pressed={settings.verboseLogging}
+                  aria-label="Toggle verbose logging"
+                />
+              </label>
+            </div>
+            {settings.verboseLogging && (
+              <div className="settings-group" style={{ marginTop: 10 }}>
+                <label>
+                  Log Folder
+                  <span className="settings-hint">{settings.logFolder ? "" : `Default: ${defaultLogFolder}`}</span>
+                </label>
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder={defaultLogFolder}
+                  value={settings.logFolder ?? ""}
+                  onChange={(e) => onUpdate({ logFolder: e.target.value || null })}
+                  spellCheck={false}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

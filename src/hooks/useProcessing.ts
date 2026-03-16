@@ -4,7 +4,6 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../lib/tauri";
-import { formatBytes, formatElapsed } from "../lib/format";
 import type {
   RunStatus,
   WorkerStatus,
@@ -30,65 +29,6 @@ const defaultCounters: RunCounters = {
   artworkOptimizedBlocks: 0,
 };
 
-function buildLogText(
-  folders: string[],
-  counters: RunCounters,
-  events: FileEvent[],
-  startTime: number,
-  endTime: number
-): string {
-  const startStr = new Date(startTime).toISOString().replace("T", " ").slice(0, 19);
-  const endStr = new Date(endTime).toISOString().replace("T", " ").slice(0, 19);
-  const duration = formatElapsed(Math.round((endTime - startTime) / 1000));
-
-  const lines: string[] = [
-    "=".repeat(72),
-    "  FlacCrunch Job Log",
-    `  Started : ${startStr}`,
-    `  Finished: ${endStr}  (${duration})`,
-    "=".repeat(72),
-    "",
-    "Folders processed:",
-    ...folders.map((f) => `  ${f}`),
-    "",
-    "Summary:",
-    `  Total files : ${counters.totalFiles}`,
-    `  Successful  : ${counters.successful}`,
-    `  Failed      : ${counters.failed}`,
-    `  Total saved : ${formatBytes(counters.totalSavedBytes)}`,
-    `  Audio saved : ${formatBytes(counters.totalSavedBytes - counters.totalArtworkSaved)}`,
-    `  Art saved   : ${formatBytes(counters.totalArtworkSaved)}`,
-    `  Meta/pad    : ${formatBytes(counters.totalMetadataSaved + counters.totalPaddingSaved)}`,
-    `  Art files   : ${counters.artworkOptimizedFiles}`,
-    "",
-  ];
-
-  if (counters.failed > 0) {
-    lines.push("FAILED FILES:", "-".repeat(72));
-    for (const e of events) {
-      if (e.status === "FAIL") {
-        lines.push(`  [FAIL] ${e.file}`);
-        if (e.detail) lines.push(`         ${e.detail}`);
-        if (e.verification) lines.push(`         ${e.verification}`);
-      }
-    }
-    lines.push("");
-  }
-
-  lines.push("ALL FILES:", "-".repeat(72));
-  for (const e of events) {
-    const saved =
-      e.savedBytes > 0
-        ? `saved ${formatBytes(e.savedBytes)} (${e.compressionPct.toFixed(1)}%)`
-        : "no savings";
-    lines.push(
-      `  [${e.time}] [${e.status}] ${e.file.split(/[/\\]/).pop()} | ${saved} | ${e.verification || e.detail || "ok"}`
-    );
-  }
-  lines.push("");
-
-  return lines.join("\n");
-}
 
 export function useProcessing() {
   const [status, setStatus] = useState<RunStatus>("idle");
@@ -323,17 +263,19 @@ export function useProcessing() {
           };
           setJobHistory((prev) => [...prev, job]);
 
-          // Auto-export error log if there are failures
+          // Auto-prompt to save error log if there are failures
           if (c.failed > 0) {
-            const logContent = buildLogText(currentFolders, c, events, st ?? endTime, endTime);
+            const elapsedSecs = Math.round((endTime - (st ?? endTime)) / 1000);
             const ts = new Date(endTime).toISOString().slice(0, 19).replace(/[T:]/g, "-");
             const filename = `flaccrunch-errors-${ts}.txt`;
-            tauriSaveDialog({
-              title: "Save Error Log",
-              defaultPath: filename,
-              filters: [{ name: "Text files", extensions: ["txt"] }],
-            }).then((path) => {
-              if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
+            api.getEfcLog(events, elapsedSecs).then((logContent) => {
+              tauriSaveDialog({
+                title: "Save Error Log",
+                defaultPath: filename,
+                filters: [{ name: "Text files", extensions: ["txt"] }],
+              }).then((path) => {
+                if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
+              }).catch(() => {});
             }).catch(() => {});
           }
 
@@ -348,13 +290,11 @@ export function useProcessing() {
 
   const exportLog = useCallback(() => {
     setAllEvents((events) => {
-      setCounters((c) => {
-        setStartTime((st) => {
-          const endTime = Date.now();
-          const logContent = buildLogText(currentFolders, c, events, st ?? endTime, endTime);
-          const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-          const filename = `flaccrunch-log-${ts}.txt`;
-          // Use Tauri's native save dialog — never blocked by the WebView download policy
+      setStartTime((st) => {
+        const elapsedSecs = Math.round((Date.now() - (st ?? Date.now())) / 1000);
+        const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        const filename = `flaccrunch-log-${ts}.txt`;
+        api.getEfcLog(events, elapsedSecs).then((logContent) => {
           tauriSaveDialog({
             title: "Save Log",
             defaultPath: filename,
@@ -362,13 +302,12 @@ export function useProcessing() {
           }).then((path) => {
             if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
           }).catch(() => {});
-          return st;
-        });
-        return c;
+        }).catch(() => {});
+        return st;
       });
       return events;
     });
-  }, [currentFolders]);
+  }, []);
 
   const addFolder = useCallback(async () => {
     try {

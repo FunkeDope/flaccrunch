@@ -112,10 +112,14 @@ pub struct RunState {
     pub id: RunId,
     pub status: RwLock<ProcessingStatus>,
     pub workers: RwLock<Vec<WorkerStatus>>,
+    /// Last 25 events — drives the UI recent-events table.
     pub recent_events: RwLock<VecDeque<FileEvent>>,
+    /// All events for the run — used for log generation.
+    pub all_events: RwLock<Vec<FileEvent>>,
     pub top_compression: RwLock<Vec<CompressionResult>>,
     pub counters: RwLock<RunCounters>,
     pub cancel_token: CancellationToken,
+    pub start_time: std::time::Instant,
 }
 
 impl RunState {
@@ -135,15 +139,22 @@ impl RunState {
             status: RwLock::new(ProcessingStatus::Scanning),
             workers: RwLock::new(workers),
             recent_events: RwLock::new(VecDeque::with_capacity(25)),
+            all_events: RwLock::new(Vec::new()),
             top_compression: RwLock::new(Vec::new()),
             counters: RwLock::new(RunCounters::default()),
             cancel_token: CancellationToken::new(),
+            start_time: std::time::Instant::now(),
         }
     }
 
     /// Add a file event and update counters.
     pub fn record_event(&self, event: FileEvent) {
-        // Update recent events (keep last 25)
+        // Keep full history for log generation
+        {
+            let mut all = self.all_events.write().unwrap_or_else(|e| e.into_inner());
+            all.push(event.clone());
+        }
+        // Update recent events (keep last 25 for UI)
         {
             let mut events = self.recent_events.write().unwrap_or_else(|e| e.into_inner());
             events.push_back(event.clone());

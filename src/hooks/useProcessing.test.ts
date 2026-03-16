@@ -189,7 +189,7 @@ describe("useProcessing — resetRun", () => {
 });
 
 describe("useProcessing — startRun", () => {
-  const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3 };
+  const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3, verboseLogging: false };
 
   it("does nothing when no folders selected", async () => {
     const { result } = renderHook(() => useProcessing());

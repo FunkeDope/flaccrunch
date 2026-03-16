@@ -1,11 +1,11 @@
 use crate::fs::scanner::{cleanup_stale_temps, scan_for_flac_files};
-use crate::logging::run_log::RunLog;
+use crate::logging::efc_log::generate_efc_log;
 use crate::pipeline::job::ProcessingContext;
 use crate::pipeline::queue::JobQueue;
 use crate::pipeline::worker_pool::run_worker_pool;
 use crate::state::app_state::AppState;
 use crate::state::run_state::{
-    CompressionResult, FileEvent, ProcessingStatus, RunState, WorkerStatus,
+    CompressionResult, FileEvent, ProcessingStatus, RunState, RunSummary, WorkerStatus,
 };
 use crate::state::settings::ProcessingSettings;
 use crate::util::platform::default_log_folder;
@@ -34,7 +34,7 @@ pub async fn start_processing(
 
     let folder_paths: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
 
-    // Clean up stale temp files (only in directory paths, not individual files)
+    // Clean up stale temp files
     let dir_paths: Vec<PathBuf> = folder_paths.iter().filter(|p| p.is_dir()).cloned().collect();
     cleanup_stale_temps(&dir_paths);
 
@@ -47,35 +47,34 @@ pub async fn start_processing(
     let worker_count = settings.thread_count.min(scan_result.files.len());
     let run_id = uuid::Uuid::new_v4().to_string();
 
-    // Set up logging — non-fatal; on mobile use the app cache directory
-    let log_folder = if settings.log_folder.is_empty() {
-        #[cfg(mobile)]
-        {
-            use tauri::Manager;
-            app.path().app_cache_dir().unwrap_or_else(|_| default_log_folder())
-        }
-        #[cfg(not(mobile))]
-        { default_log_folder() }
-    } else {
-        PathBuf::from(&settings.log_folder)
-    };
-    let run_log_dir = log_folder.join(format!(
-        "run_{}",
-        chrono::Local::now().format("%Y%m%d_%H%M%S")
-    ));
-    let _ = std::fs::create_dir_all(&run_log_dir);
+    // Scratch dir lives in the system temp directory — no persistent log folder needed
+    let scratch_dir = std::env::temp_dir()
+        .join("flaccrunch_scratch")
+        .join(&run_id);
+    let _ = std::fs::create_dir_all(&scratch_dir);
 
-    // Log creation is non-fatal — if the directory isn't writable (e.g. Android), continue without a log file
-    if let Ok(run_log) = RunLog::new(run_log_dir.join("run.log")) {
-        run_log.log(
-            crate::logging::run_log::LogLevel::Info,
-            &format!(
-                "Starting FlacCrunch: {} files, {} workers",
-                scan_result.files.len(),
-                worker_count
-            ),
-        );
-    }
+    // Resolve the verbose-log output folder (only used when verbose_logging is true)
+    let verbose_log_dir: Option<PathBuf> = if settings.verbose_logging {
+        let base = if settings.log_folder.is_empty() {
+            #[cfg(mobile)]
+            {
+                use tauri::Manager;
+                app.path().app_cache_dir().unwrap_or_else(|_| default_log_folder())
+            }
+            #[cfg(not(mobile))]
+            { default_log_folder() }
+        } else {
+            PathBuf::from(&settings.log_folder)
+        };
+        let dir = base.join(format!(
+            "run_{}",
+            chrono::Local::now().format("%Y%m%d_%H%M%S")
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        Some(dir)
+    } else {
+        None
+    };
 
     // Create run state
     let run_state = Arc::new(RunState::new(run_id.clone(), worker_count));
@@ -95,23 +94,36 @@ pub async fn start_processing(
         *active = Some(Arc::clone(&run_state));
     }
 
-    // Create processing context
     let context = Arc::new(ProcessingContext {
         max_retries: settings.max_retries,
-        scratch_dir: run_log_dir.join("scratch"),
+        scratch_dir,
     });
-    let _ = std::fs::create_dir_all(&context.scratch_dir);
 
-    // Create job queue
     let queue = Arc::new(JobQueue::new(scan_result.files));
-
-    // Spawn the worker pool in a background task
     let run_state_clone = Arc::clone(&run_state);
-    tokio::spawn(async move {
-        run_worker_pool(worker_count, queue, context, run_state_clone, app).await;
 
-        // Mark run as complete
-        let mut status = run_state.status.write().unwrap_or_else(|e| e.into_inner());
+    tokio::spawn(async move {
+        run_worker_pool(worker_count, queue, context, Arc::clone(&run_state_clone), app).await;
+
+        // Write EFC log to disk if verbose logging is enabled
+        if let Some(log_dir) = verbose_log_dir {
+            let elapsed = run_state_clone.start_time.elapsed().as_secs();
+            let counters = run_state_clone.counters.read().unwrap_or_else(|e| e.into_inner()).clone();
+            let top_compression = run_state_clone.top_compression.read().unwrap_or_else(|e| e.into_inner()).clone();
+            let all_events: Vec<_> = run_state_clone.all_events.read().unwrap_or_else(|e| e.into_inner()).clone();
+
+            let summary = RunSummary {
+                counters,
+                elapsed_secs: elapsed,
+                top_compression,
+                status_lines: vec![],
+            };
+            let log_text = generate_efc_log(&summary, &all_events);
+            let log_path = log_dir.join("flaccrunch.log");
+            let _ = std::fs::write(&log_path, log_text.as_bytes());
+        }
+
+        let mut status = run_state_clone.status.write().unwrap_or_else(|e| e.into_inner());
         *status = ProcessingStatus::Complete;
     });
 

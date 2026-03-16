@@ -8,6 +8,7 @@ const defaultSettings: AppSettings = {
   logFolder: null,
   maxRetries: 3,
   recentFolders: [],
+  verboseLogging: false,
 };
 
 export function useSettings() {
@@ -40,7 +41,8 @@ export function useSettings() {
     threadCount: settings.threadCount ?? Math.max(1, cpuCount - 1),
     logFolder: settings.logFolder ?? defaultLogFolder,
     maxRetries: settings.maxRetries,
+    verboseLogging: settings.verboseLogging,
   };
 
-  return { settings, cpuCount, processingSettings, updateSettings };
+  return { settings, cpuCount, defaultLogFolder, processingSettings, updateSettings };
 }

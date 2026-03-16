@@ -67,6 +67,7 @@ export interface ProcessingSettings {
   threadCount: number;
   logFolder: string;
   maxRetries: number;
+  verboseLogging: boolean;
 }
 
 export interface JobRecord {

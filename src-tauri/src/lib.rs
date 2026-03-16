@@ -42,9 +42,7 @@ pub fn run_with_startup_paths(startup_paths: Vec<String>) {
             commands::settings::save_settings,
             commands::settings::get_cpu_count,
             commands::settings::get_default_log_folder,
-            commands::logs::get_run_log,
-            commands::logs::get_summary_log,
-            commands::logs::open_log_folder,
+            commands::logs::get_efc_log,
             commands::logs::write_text_file,
         ])
         .run(tauri::generate_context!())
