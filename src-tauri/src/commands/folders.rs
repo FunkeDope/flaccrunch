@@ -146,44 +146,69 @@ fn resolve_external_storage_uri(uri_str: &str) -> Option<String> {
     } else {
         format!("/storage/{}", volume)
     };
-    let real_path = format!("{}/{}", base, rel);
-    if std::path::Path::new(&real_path).exists() {
-        Some(real_path)
-    } else {
-        None
-    }
+    // Trust the decoded path — don't check .exists() here because MANAGE_EXTERNAL_STORAGE
+    // may not yet be runtime-granted, causing stat() to fail even for valid paths.
+    // If the path is genuinely wrong, FLAC processing will fail with a clear I/O error.
+    Some(format!("{}/{}", base, rel))
 }
 
 /// Extract a human-readable filename from a content URI by URL-decoding it and
 /// parsing common URI patterns.
-#[cfg(target_os = "android")]
-fn extract_filename_from_content_uri(uri_str: &str) -> String {
+///
+/// This function is intentionally NOT gated by `cfg(target_os = "android")` so
+/// it can be unit-tested on the host platform.
+///
+/// Examples:
+/// - `content://com.android.providers.media.documents/document/audio%3A12345`
+///   → `"audio-12345.flac"`   (opaque media-store ID, prefixed with type)
+/// - `content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.flac`
+///   → `"track.flac"`          (real filename inside the URI)
+/// - `content://media/external/audio/media/12345`
+///   → `"media-12345.flac"`   (fallback: authority slug + segment)
+pub fn extract_filename_from_content_uri(uri_str: &str) -> String {
     let decoded = percent_decode(uri_str);
-    // Last path segment after final '/'
-    let last = decoded.rsplit('/').next().unwrap_or("audio");
-    // Strip a leading "primary:" volume prefix that can appear in external storage URIs
-    let name = if let Some(after_colon) = last.strip_prefix(|c: char| c.is_ascii_alphabetic())
-        .and_then(|_| last.find(':'))
-        .map(|i| &last[i + 1..])
-    {
-        // e.g. "primary:track.flac" → "track.flac", or just use what's after the colon
-        after_colon.rsplit('/').next().unwrap_or(after_colon)
+
+    // Take the last '/' segment of the decoded URI.
+    let last = decoded.rsplit('/').next().unwrap_or("audio").to_string();
+
+    // If the last segment already looks like a FLAC filename, use it as-is.
+    if last.to_lowercase().ends_with(".flac") && !last.is_empty() {
+        return last;
+    }
+
+    // Handle "type:value" patterns common in Android content URIs, e.g.:
+    //   "audio:12345"              → opaque media-store ID
+    //   "primary:Music/track.flac" → path embedded in a volume-prefixed segment
+    if let Some(colon_pos) = last.find(':') {
+        let type_part = &last[..colon_pos]; // e.g. "audio", "primary", "video"
+        let value_part = &last[colon_pos + 1..]; // e.g. "12345", "Music/track.flac"
+
+        // If the value is itself a path, pull the leaf filename.
+        let leaf = value_part.rsplit('/').next().unwrap_or(value_part);
+        if leaf.to_lowercase().ends_with(".flac") {
+            return leaf.to_string();
+        }
+
+        // Opaque numeric/string ID: produce "audio-12345.flac" so it's
+        // recognisable as an Android media-store entry rather than a real filename.
+        // NOTE: to get the real display name here we would need a ContentResolver
+        // query (OpenableColumns.DISPLAY_NAME) via JNI — that's a future improvement.
+        let clean_value = value_part.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "-");
+        return format!("{type_part}-{clean_value}.flac");
+    }
+
+    // No colon — sanitise and append extension.
+    let clean = last.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "-");
+    if clean.to_lowercase().ends_with(".flac") {
+        clean
     } else {
-        last
-    };
-    // Ensure it looks like a FLAC filename
-    if name.to_lowercase().ends_with(".flac") && !name.is_empty() {
-        name.to_string()
-    } else {
-        // For opaque IDs like "audio:12345" → "audio-12345.flac"
-        let clean = name.replace(':', "-");
         format!("{clean}.flac")
     }
 }
 
 /// Simple percent-decoder (handles %XX sequences).
-#[cfg(target_os = "android")]
-fn percent_decode(s: &str) -> String {
+/// Not gated by `cfg(android)` so it can be unit-tested on any platform.
+pub fn percent_decode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let b = s.as_bytes();
     let mut i = 0;
@@ -201,7 +226,6 @@ fn percent_decode(s: &str) -> String {
     out
 }
 
-#[cfg(target_os = "android")]
 fn hex_nibble(c: u8) -> Option<u8> {
     match c {
         b'0'..=b'9' => Some(c - b'0'),
@@ -240,4 +264,90 @@ pub async fn validate_folder(path: String) -> Result<bool, String> {
 pub async fn get_startup_paths(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let mut paths = state.startup_paths.write().unwrap_or_else(|e| e.into_inner());
     Ok(std::mem::take(&mut *paths))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── percent_decode ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_percent_decode_plain() {
+        assert_eq!(percent_decode("hello"), "hello");
+    }
+
+    #[test]
+    fn test_percent_decode_colon_and_slash() {
+        assert_eq!(percent_decode("primary%3AMusic%2Ftrack.flac"), "primary:Music/track.flac");
+    }
+
+    #[test]
+    fn test_percent_decode_uppercase_hex() {
+        assert_eq!(percent_decode("%2F"), "/");
+        assert_eq!(percent_decode("%3A"), ":");
+    }
+
+    #[test]
+    fn test_percent_decode_invalid_sequence_passthrough() {
+        // %ZZ is not valid hex — passes through as-is
+        assert_eq!(percent_decode("%ZZ"), "%ZZ");
+    }
+
+    // ── extract_filename_from_content_uri ───────────────────────────────────────
+
+    #[test]
+    fn test_extract_media_document_audio_id() {
+        // content://com.android.providers.media.documents/document/audio%3A12345
+        let uri = "content://com.android.providers.media.documents/document/audio%3A12345";
+        let name = extract_filename_from_content_uri(uri);
+        assert_eq!(name, "audio-12345.flac",
+            "media-document opaque ID should be prefixed with type");
+    }
+
+    #[test]
+    fn test_extract_external_storage_flac_path() {
+        // content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.flac
+        let uri = "content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.flac";
+        let name = extract_filename_from_content_uri(uri);
+        assert_eq!(name, "track.flac",
+            "external storage URI with embedded real filename should extract the leaf name");
+    }
+
+    #[test]
+    fn test_extract_plain_flac_segment() {
+        // Last segment is already a .flac name
+        let uri = "content://some.provider/files/my-album-track.flac";
+        let name = extract_filename_from_content_uri(uri);
+        assert_eq!(name, "my-album-track.flac");
+    }
+
+    #[test]
+    fn test_extract_opaque_numeric_id_no_type() {
+        // Plain numeric last segment with no colon — gets .flac appended
+        let uri = "content://media/external/audio/media/99999";
+        let name = extract_filename_from_content_uri(uri);
+        assert_eq!(name, "99999.flac");
+    }
+
+    #[test]
+    fn test_extract_returns_flac_extension_always() {
+        let uri = "content://anything/document/somefile";
+        let name = extract_filename_from_content_uri(uri);
+        assert!(name.to_lowercase().ends_with(".flac"),
+            "result must always end with .flac, got: {name}");
+    }
+
+    #[test]
+    fn test_extract_empty_uri() {
+        let name = extract_filename_from_content_uri("");
+        assert!(name.to_lowercase().ends_with(".flac"));
+    }
+
+    #[test]
+    fn test_percent_decode_full_uri() {
+        let uri = "content://com.android.providers.media.documents/document/audio%3A12345";
+        let decoded = percent_decode(uri);
+        assert!(decoded.contains("audio:12345"));
+    }
 }

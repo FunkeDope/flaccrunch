@@ -196,6 +196,16 @@ jobs:
             cat "$MANIFEST"
           fi
 
+      - name: Patch MainActivity to request MANAGE_EXTERNAL_STORAGE at runtime
+        run: |
+          MAIN_ACTIVITY="src-tauri/gen/android/app/src/main/java/com/flaccrunch/app/MainActivity.kt"
+          if [ -f "$MAIN_ACTIVITY" ]; then
+            cp src-tauri/android-patches/MainActivity.kt "$MAIN_ACTIVITY"
+            echo "Patched MainActivity.kt with MANAGE_EXTERNAL_STORAGE request"
+          else
+            echo "WARNING: MainActivity.kt not found at $MAIN_ACTIVITY"
+          fi
+
       - name: Generate signing keystore
         run: |
           keytool -genkey -v \

@@ -78,6 +78,21 @@ pub async fn run_worker_pool(
                 event
             }
             PipelineEvent::FileCompleted { worker_id, event: file_event, .. } => {
+                // Android: write the compressed cache file back to the original content URI
+                // BEFORE recording/emitting so that write-back failures are reflected in the
+                // event status shown to the user (not silently swallowed).
+                #[cfg(target_os = "android")]
+                let file_event = {
+                    let mut ev = file_event.clone();
+                    if ev.status == crate::state::run_state::FileStatus::OK {
+                        if let Err(e) = android_write_back(&app_handle, &ev.file) {
+                            ev.status = crate::state::run_state::FileStatus::FAIL;
+                            ev.detail = format!("Write-back failed: {e}");
+                        }
+                    }
+                    ev
+                };
+
                 // Record the event in run state (updates counters)
                 run_state.record_event(*file_event.clone());
                 // Read updated counters and re-emit with snapshot
@@ -89,12 +104,6 @@ pub async fn run_worker_pool(
                 };
                 // Emit enriched event instead of original
                 let _ = app_handle.emit("pipeline-event", &enriched);
-
-                // Android: write the compressed cache file back to the original content URI.
-                #[cfg(target_os = "android")]
-                if file_event.status == crate::state::run_state::FileStatus::OK {
-                    android_write_back(&app_handle, &file_event.file);
-                }
 
                 continue;
             }
@@ -172,11 +181,16 @@ async fn worker_loop(
 
 /// Android only: if `cache_path` was copied from a content URI, write the (now-compressed)
 /// cache file back to the original URI using the fs plugin's writable file descriptor.
-/// This requires the URI to have been opened with write permission (ACTION_OPEN_DOCUMENT)
-/// or the app to hold MANAGE_EXTERNAL_STORAGE.  Failures are silently ignored so that
-/// the processing result is not affected.
+///
+/// NOTE: The tauri-plugin-dialog uses ACTION_GET_CONTENT which gives READ-ONLY content URIs.
+/// Write-back will fail for those URIs. Full fix requires the dialog plugin to use
+/// ACTION_OPEN_DOCUMENT instead. For now, errors are surfaced so the user sees a FAIL
+/// status rather than a false success.
+///
+/// Files picked via the externalstorage provider (Files app) are resolved to real filesystem
+/// paths and processed in-place — those never reach this function.
 #[cfg(target_os = "android")]
-fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: &str) {
+fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: &str) -> Result<(), String> {
     use std::io::Write;
     use tauri::Manager;
     use tauri_plugin_dialog::FilePath;
@@ -187,22 +201,22 @@ fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: 
         let map = state.content_uri_map.read().unwrap_or_else(|e| e.into_inner());
         map.get(cache_path).cloned()
     };
-    let Some(uri_str) = original_uri else { return };
+    // No URI mapping means this file was processed in-place — nothing to write back.
+    let Some(uri_str) = original_uri else { return Ok(()) };
 
-    let data = match std::fs::read(cache_path) {
-        Ok(d) => d,
-        Err(_) => return,
-    };
+    let data = std::fs::read(cache_path)
+        .map_err(|e| format!("Failed to read cache file: {e}"))?;
 
-    if let Ok(url) = url::Url::parse(&uri_str) {
-        let fp = FilePath::Url(url);
-        let mut opts = OpenOptions::new();
-        opts.write(true);
-        opts.truncate(true);
-        if let Ok(mut file) = app.fs().open(fp, opts) {
-            let _ = file.write_all(&data);
-        }
-    }
+    let url = url::Url::parse(&uri_str)
+        .map_err(|e| format!("Invalid content URI '{uri_str}': {e}"))?;
+    let fp = FilePath::Url(url);
+    let mut opts = OpenOptions::new();
+    opts.write(true);
+    opts.truncate(true);
+    let mut file = app.fs().open(fp, opts)
+        .map_err(|e| format!("Cannot open content URI for writing (ACTION_GET_CONTENT gives read-only URIs — use the Files app to pick files): {e}"))?;
+    file.write_all(&data)
+        .map_err(|e| format!("Failed to write back to content URI: {e}"))
 }
 
 fn make_file_event(

@@ -46,8 +46,29 @@ pub async fn get_efc_log(
 
 /// Write text content to an arbitrary path (bypasses WebView FS scope restrictions).
 /// Used by the frontend to save export logs to user-chosen paths via the native save dialog.
+/// On Android, save-dialog paths are content:// URIs that require the fs plugin's
+/// ContentResolver bridge rather than std::fs::write.
 #[tauri::command]
-pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+pub async fn write_text_file(#[allow(unused_variables)] app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    if path.starts_with("content://") {
+        use std::io::Write;
+        use tauri::Manager;
+        use tauri_plugin_dialog::FilePath;
+        use tauri_plugin_fs::{FsExt, OpenOptions};
+
+        let url = url::Url::parse(&path)
+            .map_err(|e| format!("Invalid content URI: {e}"))?;
+        let fp = FilePath::Url(url);
+        let mut opts = OpenOptions::new();
+        opts.write(true);
+        opts.truncate(true);
+        let mut file = app.fs().open(fp, opts)
+            .map_err(|e| format!("Failed to open log file for writing: {e}"))?;
+        return file.write_all(content.as_bytes())
+            .map_err(|e| format!("Failed to write log file: {e}"));
+    }
+
     std::fs::write(&path, content.as_bytes())
         .map_err(|e| format!("Failed to write file: {e}"))
 }

@@ -115,7 +115,7 @@ export function FolderSelector({
           <ul className="folder-list">
             {folders.map((folder) => (
               <li key={folder} className="folder-item">
-                <span className="path">{folder}</span>
+                <span className="path" title={folder}>{mobile ? (folder.split('/').pop() || folder) : folder}</span>
                 <button
                   className="remove-btn"
                   onClick={() => onRemoveFolder(folder)}
