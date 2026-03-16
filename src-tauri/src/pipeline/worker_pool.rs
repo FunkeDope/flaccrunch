@@ -81,13 +81,35 @@ pub async fn run_worker_pool(
                 // Android: write the compressed cache file back to the original content URI
                 // BEFORE recording/emitting so that write-back failures are reflected in the
                 // event status shown to the user (not silently swallowed).
+                //
+                // Strategy (Solution C — hybrid):
+                //   1. Try writing back via Kotlin bridge (contentResolver.openOutputStream),
+                //      the canonical Android SAF write API.
+                //   2. If that fails, copy to app-private fc-output/ directory so the
+                //      processed file is never lost — status stays OK with a detail note.
+                //   3. If both fail, mark FAIL with the combined error message.
                 #[cfg(target_os = "android")]
                 let file_event = {
                     let mut ev = file_event.clone();
                     if ev.status == crate::state::run_state::FileStatus::OK {
-                        if let Err(e) = android_write_back(&app_handle, &ev.file) {
-                            ev.status = crate::state::run_state::FileStatus::FAIL;
-                            ev.detail = format!("Write-back failed: {e}");
+                        match android_write_back(&app_handle, &ev.file) {
+                            Ok(()) => { /* in-place replacement succeeded */ }
+                            Err(primary_err) => {
+                                match android_save_to_fc_output(&app_handle, &ev.file) {
+                                    Ok(out_path) => {
+                                        // Keep status OK — file is accessible in fc-output.
+                                        ev.detail = format!(
+                                            "Saved to fc-output (write-back failed: {primary_err}): {out_path}"
+                                        );
+                                    }
+                                    Err(fallback_err) => {
+                                        ev.status = crate::state::run_state::FileStatus::FAIL;
+                                        ev.detail = format!(
+                                            "Write-back failed: {primary_err}; fc-output fallback also failed: {fallback_err}"
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                     ev
@@ -179,17 +201,19 @@ async fn worker_loop(
     }
 }
 
-/// Android only: write the compressed cache file back to the original location.
+/// Android only: write the compressed cache file back to the original content URI.
 ///
-/// With ACTION_OPEN_DOCUMENT (our CI-patched DialogPlugin.kt), content URIs carry
-/// read+write permission, so `app.fs().open(fp, write+truncate)` succeeds.
-/// Real-path originals (rare) are written back with std::fs::write.
+/// Delegates to the Kotlin AndroidBridgePlugin.writeCacheFileToUri command, which
+/// calls contentResolver.openOutputStream(uri, "wt") — the canonical Android API
+/// for overwriting a file granted via ACTION_OPEN_DOCUMENT.  This replaces the
+/// previous tauri_plugin_fs approach, which did not reliably support write mode
+/// for content:// URIs.
+///
+/// Real-path originals (file:// or bare path, rare on modern Android) are still
+/// written via std::fs::write.
 #[cfg(target_os = "android")]
 fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: &str) -> Result<(), String> {
-    use std::io::Write;
     use tauri::Manager;
-    use tauri_plugin_dialog::FilePath;
-    use tauri_plugin_fs::{FsExt, OpenOptions};
 
     let state = app.state::<crate::state::app_state::AppState>();
     let original_uri = {
@@ -199,26 +223,54 @@ fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: 
     // No mapping means the file was never cached (shouldn't happen, but guard anyway).
     let Some(uri_str) = original_uri else { return Ok(()) };
 
-    let data = std::fs::read(cache_path)
-        .map_err(|e| format!("Failed to read cache file: {e}"))?;
-
-    // Real path (file:// or bare path from dialog): write directly.
+    // Real filesystem path (file:// or bare path): write directly.
     if !uri_str.starts_with("content://") {
+        let data = std::fs::read(cache_path)
+            .map_err(|e| format!("Failed to read cache file: {e}"))?;
         return std::fs::write(&uri_str, &data)
             .map_err(|e| format!("Failed to write back to path '{uri_str}': {e}"));
     }
 
-    // Content URI: write via ContentResolver with the write grant from ACTION_OPEN_DOCUMENT.
-    let url = url::Url::parse(&uri_str)
-        .map_err(|e| format!("Invalid content URI '{uri_str}': {e}"))?;
-    let fp = FilePath::Url(url);
-    let mut opts = OpenOptions::new();
-    opts.write(true);
-    opts.truncate(true);
-    let mut file = app.fs().open(fp, opts)
-        .map_err(|e| format!("Cannot open content URI for writing: {e}"))?;
-    file.write_all(&data)
-        .map_err(|e| format!("Failed to write back to content URI: {e}"))
+    // Content URI: delegate to Kotlin via AndroidBridge.
+    // contentResolver.openOutputStream(uri, "wt") handles all SAF providers correctly,
+    // including MediaStore on Android 11+ where tauri_plugin_fs write mode fails.
+    app.try_state::<crate::android_bridge::AndroidBridge>()
+        .ok_or_else(|| "AndroidBridge not registered — cannot write to content URI".to_string())?
+        .write_cache_to_uri(cache_path, &uri_str)
+}
+
+/// Android only: copy the compressed cache file to the app-private fc-output directory.
+///
+/// Used as a fallback when write-back to the original content URI fails.  The app
+/// always has write access to its own data directory — no permissions required.
+/// Files land at: <app_local_data_dir>/fc-output/<filename>
+/// Visible in the Android Files app under: Android/data/com.flaccrunch.app/files/fc-output/
+#[cfg(target_os = "android")]
+fn android_save_to_fc_output<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: &str) -> Result<String, String> {
+    use tauri::Manager;
+
+    let output_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("Failed to get app local data dir: {e}"))?
+        .join("fc-output");
+
+    std::fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Failed to create fc-output dir: {e}"))?;
+
+    // The cache file was already named with the real display name by resolve_filepath,
+    // so we can use it directly as the output filename.
+    let filename = std::path::Path::new(cache_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("Cannot derive filename from cache path: {cache_path}"))?;
+
+    let dest = output_dir.join(filename);
+
+    std::fs::copy(cache_path, &dest)
+        .map_err(|e| format!("Failed to copy to fc-output: {e}"))?;
+
+    Ok(dest.display().to_string())
 }
 
 fn make_file_event(

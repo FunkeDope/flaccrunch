@@ -23,6 +23,7 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.io.FileInputStream
 
 @TauriPlugin
 class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
@@ -63,6 +64,48 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
 
         val result = JSObject()
         result.put("displayName", displayName)
+        invoke.resolve(result)
+    }
+
+    /**
+     * Write the contents of a local cache file to a SAF content URI.
+     *
+     * Uses contentResolver.openOutputStream(uri, "wt") — the canonical Android
+     * API for overwriting a file granted via ACTION_OPEN_DOCUMENT.  The "wt"
+     * mode (write + truncate) is required; "w" alone leaves stale bytes when
+     * the new content is shorter than the original on many providers.
+     *
+     * Invoke args: { cachePath: String, uri: String }
+     * Response:    { ok: Boolean }
+     */
+    @Command
+    fun writeCacheFileToUri(invoke: Invoke) {
+        val cachePath = invoke.getString("cachePath") ?: run {
+            invoke.reject("Missing cachePath parameter")
+            return
+        }
+        val uriStr = invoke.getString("uri") ?: run {
+            invoke.reject("Missing uri parameter")
+            return
+        }
+
+        try {
+            val uri = Uri.parse(uriStr)
+            activity.contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
+                FileInputStream(cachePath).use { inputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            } ?: run {
+                invoke.reject("contentResolver.openOutputStream returned null for URI: $uriStr")
+                return
+            }
+        } catch (e: Exception) {
+            invoke.reject("Write failed: ${e.message}")
+            return
+        }
+
+        val result = JSObject()
+        result.put("ok", true)
         invoke.resolve(result)
     }
 }
