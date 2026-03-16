@@ -13,6 +13,11 @@ describe("Badge", () => {
     expect(screen.getByText("FAIL")).toBeInTheDocument();
   });
 
+  it("renders WARN text", () => {
+    render(<Badge status="WARN" />);
+    expect(screen.getByText("WARN")).toBeInTheDocument();
+  });
+
   it("renders RETRY text", () => {
     render(<Badge status="RETRY" />);
     expect(screen.getByText("RETRY")).toBeInTheDocument();
@@ -21,6 +26,11 @@ describe("Badge", () => {
   it("applies status-ok class for OK", () => {
     render(<Badge status="OK" />);
     expect(screen.getByText("OK")).toHaveClass("status-ok");
+  });
+
+  it("applies status-warn class for WARN", () => {
+    render(<Badge status="WARN" />);
+    expect(screen.getByText("WARN")).toHaveClass("status-warn");
   });
 
   it("applies status-fail class for FAIL", () => {

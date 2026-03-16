@@ -97,7 +97,10 @@ pub async fn run_worker_pool(
                             Err(primary_err) => {
                                 match android_save_to_fc_output(&app_handle, &ev.file) {
                                     Ok(out_path) => {
-                                        // Keep status OK — file is accessible in fc-output.
+                                        // Compression succeeded but write-back to original URI failed.
+                                        // File is accessible in fc-output; use WARN so the UI and log
+                                        // clearly distinguish this from a fully-in-place OK result.
+                                        ev.status = crate::state::run_state::FileStatus::WARN;
                                         ev.detail = format!(
                                             "Saved to fc-output (write-back failed: {primary_err}): {out_path}"
                                         );

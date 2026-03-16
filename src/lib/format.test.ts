@@ -87,6 +87,7 @@ describe("getStageLabel", () => {
 
 describe("getStatusColor", () => {
   it("returns 'status-ok' for OK", () => expect(getStatusColor("OK")).toBe("status-ok"));
+  it("returns 'status-warn' for WARN", () => expect(getStatusColor("WARN")).toBe("status-warn"));
   it("returns 'status-fail' for FAIL", () => expect(getStatusColor("FAIL")).toBe("status-fail"));
   it("returns 'status-retry' for RETRY", () => expect(getStatusColor("RETRY")).toBe("status-retry"));
   it("returns empty string for unknown status", () => {

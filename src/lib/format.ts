@@ -49,6 +49,7 @@ export function getStageLabel(stage: string): string {
 export function getStatusColor(status: string): string {
   switch (status) {
     case "OK": return "status-ok";
+    case "WARN": return "status-warn";
     case "FAIL": return "status-fail";
     case "RETRY": return "status-retry";
     default: return "";

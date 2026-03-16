@@ -1,7 +1,7 @@
 import { getStatusColor } from "../../lib/format";
 
 interface BadgeProps {
-  status: "OK" | "RETRY" | "FAIL";
+  status: "OK" | "WARN" | "RETRY" | "FAIL";
 }
 
 export function Badge({ status }: BadgeProps) {

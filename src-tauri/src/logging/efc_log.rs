@@ -82,7 +82,7 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
         lines.push(eac_line("Verification", &event.verification));
 
         match event.status {
-            FileStatus::OK => {
+            FileStatus::OK | FileStatus::WARN => {
                 lines.push(eac_line("Original size", &fmt_bytes(event.before_size)));
                 lines.push(eac_line("Compressed size", &fmt_bytes(event.after_size)));
                 lines.push(eac_line(
@@ -106,11 +106,17 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
                     "Calculated post MD5",
                     event.output_hash.as_deref().unwrap_or("N/A"),
                 ));
-                // Metadata cleanup — only if detail is non-empty and not "none"
-                if !event.detail.is_empty() && event.detail != "none" {
-                    lines.push(eac_line("Metadata cleanup", &event.detail));
+                if event.status == FileStatus::WARN {
+                    // Write-back to the original URI failed; file saved to fc-output.
+                    lines.push(eac_line("Write-back", &event.detail));
+                    lines.push("     Copy OK (saved to fc-output — original unchanged)".to_string());
+                } else {
+                    // Metadata cleanup — only if detail is non-empty and not "none"
+                    if !event.detail.is_empty() && event.detail != "none" {
+                        lines.push(eac_line("Metadata cleanup", &event.detail));
+                    }
+                    lines.push("     Copy OK".to_string());
                 }
-                lines.push("     Copy OK".to_string());
             }
             FileStatus::RETRY => {
                 lines.push("     Copy aborted".to_string());
@@ -148,6 +154,11 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
         lines.push("Processing canceled by user".to_string());
     } else if c.failed > 0 {
         lines.push("Some files could not be verified".to_string());
+    } else if c.warned > 0 && c.failed == 0 && pending == 0 {
+        lines.push(format!(
+            "All files compressed; {} file(s) saved to fc-output (write-back to original failed)",
+            c.warned
+        ));
     } else if c.successful > 0 && pending == 0 {
         lines.push("All files processed successfully".to_string());
     } else {
@@ -157,6 +168,8 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
     lines.push(String::new());
     if c.failed > 0 || (summary.run_canceled && pending > 0) {
         lines.push("There were errors".to_string());
+    } else if c.warned > 0 {
+        lines.push("Write-back to original location failed — compressed files are in fc-output".to_string());
     } else {
         lines.push("No errors occurred".to_string());
     }

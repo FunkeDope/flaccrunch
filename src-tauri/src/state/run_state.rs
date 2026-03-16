@@ -63,6 +63,9 @@ pub struct FileEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FileStatus {
     OK,
+    /// Compression succeeded but write-back to the original location failed;
+    /// the compressed file was saved to the app's fc-output directory instead.
+    WARN,
     RETRY,
     FAIL,
 }
@@ -95,6 +98,9 @@ pub struct RunCounters {
     pub total_artwork_raw_saved: i64,
     pub artwork_optimized_files: usize,
     pub artwork_optimized_blocks: usize,
+    /// Files that compressed OK but write-back to the original URI failed;
+    /// saved to app fc-output directory instead.
+    pub warned: usize,
 }
 
 /// Summary of a completed processing run.
@@ -177,8 +183,11 @@ impl RunState {
             let mut counters = self.counters.write().unwrap_or_else(|e| e.into_inner());
             counters.processed += 1;
             match event.status {
-                FileStatus::OK => {
+                FileStatus::OK | FileStatus::WARN => {
                     counters.successful += 1;
+                    if event.status == FileStatus::WARN {
+                        counters.warned += 1;
+                    }
                     counters.total_original_bytes += event.before_size;
                     counters.total_new_bytes += event.after_size;
                     counters.total_saved_bytes += event.saved_bytes;
@@ -200,7 +209,7 @@ impl RunState {
         }
 
         // Update top compression
-        if event.status == FileStatus::OK && event.saved_bytes > 0 {
+        if (event.status == FileStatus::OK || event.status == FileStatus::WARN) && event.saved_bytes > 0 {
             let mut top = self.top_compression.write().unwrap_or_else(|e| e.into_inner());
             top.push(CompressionResult {
                 path: event.file,
@@ -497,12 +506,27 @@ mod tests {
 
     #[test]
     fn test_file_status_serde_roundtrip() {
-        let statuses = [FileStatus::OK, FileStatus::FAIL, FileStatus::RETRY];
+        let statuses = [FileStatus::OK, FileStatus::WARN, FileStatus::FAIL, FileStatus::RETRY];
         for status in &statuses {
             let json = serde_json::to_string(status).expect("serialize");
             let back: FileStatus = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(status, &back);
         }
+    }
+
+    #[test]
+    fn test_record_warn_event_counts_as_successful_and_increments_warned() {
+        let rs = RunState::new("run-warn".to_string(), 1);
+        let mut event = make_ok_event("/music/a.flac", 1000, 900, 100, 10.0);
+        event.status = FileStatus::WARN;
+        event.detail = "Saved to fc-output (write-back failed: permission): /data/fc-output/a.flac".to_string();
+        rs.record_event(event);
+        let c = rs.counters.read().unwrap();
+        assert_eq!(c.processed, 1);
+        assert_eq!(c.successful, 1);
+        assert_eq!(c.failed, 0);
+        assert_eq!(c.warned, 1);
+        assert_eq!(c.total_saved_bytes, 100);
     }
 
     #[test]

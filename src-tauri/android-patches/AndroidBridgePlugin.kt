@@ -18,6 +18,7 @@ package com.flaccrunch.bridge
 
 import android.app.Activity
 import android.net.Uri
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -26,6 +27,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.FileInputStream
+import java.io.FileOutputStream
 
 // ---------------------------------------------------------------------------
 // Arg types — @InvokeArg with lateinit var gives non-null String after parseArgs,
@@ -87,10 +89,16 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
     /**
      * Write the contents of a local cache file to a SAF content URI.
      *
-     * Uses contentResolver.openOutputStream(uri, "wt") — the canonical Android
-     * API for overwriting a file granted via ACTION_OPEN_DOCUMENT.  The "wt"
-     * mode (write + truncate) is required; "w" alone leaves stale bytes when
-     * the new content is shorter than the original on many providers.
+     * Primary path: contentResolver.openOutputStream(uri, "wt") — the canonical
+     * Android API for overwriting a file granted via ACTION_OPEN_DOCUMENT.
+     * The "wt" mode (write + truncate) is required; "w" alone leaves stale bytes
+     * when the new content is shorter than the original on many providers.
+     *
+     * Fallback path (Android ≤ 10 with requestLegacyExternalStorage="true"):
+     * When the primary write fails (e.g. DownloadStorageProvider denies writes to
+     * msf: URIs even with ACTION_OPEN_DOCUMENT grants), we resolve the real file
+     * path via MediaColumns.DATA and write directly.  On Android 11+ with scoped
+     * storage this fallback returns false and the Rust layer uses fc-output instead.
      *
      * Invoke args: { cachePath: String, uri: String }
      * Response:    { ok: Boolean }
@@ -102,23 +110,61 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
         // lateinit var), so FileInputStream(args.cachePath) resolves unambiguously
         // to FileInputStream(String!) without any nullable overload confusion.
 
+        val uri = Uri.parse(args.uri)
         try {
-            val uri = Uri.parse(args.uri)
             activity.contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
                 FileInputStream(args.cachePath).use { inputStream ->
                     inputStream.copyTo(outputStream)
                 }
             } ?: run {
-                invoke.reject("contentResolver.openOutputStream returned null for URI: ${args.uri}")
-                return
+                // openOutputStream returned null — try the DATA path fallback.
+                if (!tryWriteViaRealPath(args.cachePath, uri)) {
+                    invoke.reject("contentResolver.openOutputStream returned null for URI: ${args.uri}")
+                    return
+                }
             }
         } catch (e: Exception) {
-            invoke.reject("Write failed: ${e.message}")
-            return
+            // Primary write failed (e.g. DownloadStorageProvider requires MANAGE_DOCUMENTS
+            // for msf: URIs even when ACTION_OPEN_DOCUMENT grants are in place).
+            // Fall back to MediaColumns.DATA direct write (works on Android ≤ 10).
+            if (!tryWriteViaRealPath(args.cachePath, uri)) {
+                invoke.reject("Write failed: ${e.message}")
+                return
+            }
         }
 
         val result = JSObject()
         result.put("ok", true)
         invoke.resolve(result)
+    }
+
+    /**
+     * Fallback write path: resolve the real filesystem path from the content URI via
+     * MediaStore.MediaColumns.DATA and write directly with FileOutputStream.
+     *
+     * Works on Android ≤ 10 (legacy external storage) and some Android 10 devices
+     * with requestLegacyExternalStorage="true".  On Android 11+ with scoped storage
+     * enforcement, DATA is typically null or the path is not writable without
+     * MANAGE_EXTERNAL_STORAGE, so this returns false gracefully.
+     */
+    private fun tryWriteViaRealPath(cachePath: String, contentUri: Uri): Boolean {
+        return try {
+            val projection = arrayOf(MediaStore.MediaColumns.DATA)
+            val realPath = activity.contentResolver.query(
+                contentUri, projection, null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val col = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                    if (col >= 0) cursor.getString(col) else null
+                } else null
+            }
+            if (realPath.isNullOrEmpty()) return false
+            FileOutputStream(realPath).use { out ->
+                FileInputStream(cachePath).use { it.copyTo(out) }
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

@@ -590,6 +590,8 @@ body {
 }
 
 .worker-card {
+  min-width: 0;
+  overflow: hidden;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -926,6 +928,7 @@ body {
 .saved-zero  { color: var(--text-muted); }
 
 .status-ok   { color: var(--success); font-weight: 700; }
+.status-warn { color: var(--warning); font-weight: 700; }
 .status-fail { color: var(--error); font-weight: 700; }
 .status-retry { color: var(--warning); font-weight: 700; }
 

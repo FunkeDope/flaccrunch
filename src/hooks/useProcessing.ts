@@ -27,6 +27,7 @@ const defaultCounters: RunCounters = {
   totalArtworkRawSaved: 0,
   artworkOptimizedFiles: 0,
   artworkOptimizedBlocks: 0,
+  warned: 0,
 };
 
 
@@ -194,12 +195,12 @@ export function useProcessing() {
                 lastOutputHash: fileEvent.outputHash,
                 lastEmbeddedMd5: fileEvent.embeddedMd5,
                 lastVerification: fileEvent.verification,
-                lastCompressionPct: fileEvent.status === "OK" ? fileEvent.compressionPct : undefined,
+                lastCompressionPct: (fileEvent.status === "OK" || fileEvent.status === "WARN") ? fileEvent.compressionPct : undefined,
               };
               return updated;
             });
 
-            if (fileEvent.status === "OK" && fileEvent.savedBytes > 0) {
+            if ((fileEvent.status === "OK" || fileEvent.status === "WARN") && fileEvent.savedBytes > 0) {
               setTopCompression((prev) => {
                 const updated = [...prev, fileEvent];
                 updated.sort((a, b) => b.savedBytes - a.savedBytes);

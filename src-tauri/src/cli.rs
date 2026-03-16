@@ -229,8 +229,11 @@ fn print_file_event(fe: &FileEvent, counters: &mut RunCounters) {
         .unwrap_or_else(|| fe.file.clone());
 
     match fe.status {
-        FileStatus::OK => {
+        FileStatus::OK | FileStatus::WARN => {
             counters.successful += 1;
+            if fe.status == FileStatus::WARN {
+                counters.warned += 1;
+            }
             counters.total_saved_bytes += fe.saved_bytes;
             counters.total_artwork_saved += fe.artwork_saved_bytes;
             let savings = if fe.saved_bytes > 0 {
@@ -242,10 +245,14 @@ fn print_file_event(fe: &FileEvent, counters: &mut RunCounters) {
             } else {
                 "no savings             ".to_string()
             };
+            let tag = if fe.status == FileStatus::WARN { "WARN" } else { " OK " };
             println!(
-                "[{}]  OK  {:<50} {}  {}",
-                fe.time, name, savings, fe.verification
+                "[{}] {}  {:<50} {}  {}",
+                fe.time, tag, name, savings, fe.verification
             );
+            if fe.status == FileStatus::WARN && !fe.detail.is_empty() {
+                println!("       ^ {}", fe.detail);
+            }
         }
         FileStatus::FAIL => {
             counters.failed += 1;

@@ -28,11 +28,12 @@ export interface RunCounters {
   totalArtworkRawSaved: number;
   artworkOptimizedFiles: number;
   artworkOptimizedBlocks: number;
+  warned: number;
 }
 
 export interface FileEvent {
   time: string;
-  status: "OK" | "RETRY" | "FAIL";
+  status: "OK" | "WARN" | "RETRY" | "FAIL";
   file: string;
   attempt: string;
   verification: string;

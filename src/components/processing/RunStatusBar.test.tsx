@@ -17,6 +17,7 @@ const defaultCounters: RunCounters = {
   totalArtworkRawSaved: 0,
   artworkOptimizedFiles: 0,
   artworkOptimizedBlocks: 0,
+  warned: 0,
 };
 
 function renderBar(overrides: {
