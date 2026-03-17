@@ -86,6 +86,7 @@ fn set_file_times(path: &Path, snapshot: &FileMetadataSnapshot) -> io::Result<()
         .map(|a| SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(a))
         .unwrap_or(mtime_system);
 
+    #[allow(unused_mut)]
     let mut times = FileTimes::new()
         .set_accessed(atime_system)
         .set_modified(mtime_system);

@@ -86,6 +86,7 @@ fn write_bytes_to_path(
 ) -> Result<(), String> {
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
+        use std::io::Write;
         use tauri::Manager;
         use tauri_plugin_dialog::FilePath;
         use tauri_plugin_fs::{FsExt, OpenOptions};
