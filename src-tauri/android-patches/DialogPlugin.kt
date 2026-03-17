@@ -65,10 +65,16 @@ class DialogPlugin(private val activity: Activity): Plugin(activity) {
       val args = invoke.parseArgs(FilePickerOptions::class.java)
       val parsedTypes = parseFiltersOption(args.filters)
 
-      // ACTION_OPEN_DOCUMENT grants both read AND write URI permissions, enabling
-      // write-back to the original file after processing.
+      // ACTION_OPEN_DOCUMENT is the correct SAF flow for in-place editing.
+      // Explicitly request read/write + persistable grants so the selected
+      // document URI can be opened again later for overwrite.
       val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
       intent.addCategory(Intent.CATEGORY_OPENABLE)
+      intent.addFlags(
+        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+      )
 
       if (args.pickerMode == "image") {
         intent.type = "image/*"
@@ -102,20 +108,26 @@ class DialogPlugin(private val activity: Activity): Plugin(activity) {
           // Persist read + write URI permissions so write-back works for the
           // full processing session (not just the initial activity foreground).
           result.data?.let { intent ->
-            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            val flags = intent.flags and (
+              Intent.FLAG_GRANT_READ_URI_PERMISSION or
+              Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
             if (intent.clipData != null) {
               for (i in 0 until intent.clipData!!.itemCount) {
                 try {
-                  activity.contentResolver.takePersistableUriPermission(
-                    intent.clipData!!.getItemAt(i).uri, flags
-                  )
+                  if (flags != 0) {
+                    activity.contentResolver.takePersistableUriPermission(
+                      intent.clipData!!.getItemAt(i).uri, flags
+                    )
+                  }
                 } catch (e: Exception) { /* not all providers support persistable grants */ }
               }
             } else {
               intent.data?.let { uri ->
                 try {
-                  activity.contentResolver.takePersistableUriPermission(uri, flags)
+                  if (flags != 0) {
+                    activity.contentResolver.takePersistableUriPermission(uri, flags)
+                  }
                 } catch (e: Exception) { /* ignore */ }
               }
             }

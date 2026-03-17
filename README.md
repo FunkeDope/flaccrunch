@@ -189,6 +189,8 @@ npx tauri android init
 npx tauri android build --apk
 ```
 
+`build.rs` now auto-applies the Android SAF patches during Android builds so local builds use the same writable file-picker behavior as CI/release builds.
+
 ---
 
 ## Project Structure
