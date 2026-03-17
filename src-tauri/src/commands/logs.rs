@@ -21,8 +21,16 @@ pub async fn get_efc_log(
 ) -> Result<String, String> {
     let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     let (counters, top_compression) = if let Some(ref run) = *active {
-        let c = run.counters.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let t = run.top_compression.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let c = run
+            .counters
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let t = run
+            .top_compression
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         (c, t)
     } else {
         return Err("No active run".to_string());
@@ -49,26 +57,52 @@ pub async fn get_efc_log(
 /// On Android, save-dialog paths are content:// URIs that require the fs plugin's
 /// ContentResolver bridge rather than std::fs::write.
 #[tauri::command]
-pub async fn write_text_file(#[allow(unused_variables)] app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
+pub async fn write_text_file(
+    #[allow(unused_variables)] app: tauri::AppHandle,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    write_bytes_to_path(&app, &path, content.as_bytes())
+}
+
+/// Copy a local file to an arbitrary destination path selected by the user.
+/// Used for Android storage diagnostics so we can validate binary save behavior
+/// independently from FLAC overwrite-in-place logic.
+#[tauri::command]
+pub async fn copy_file_to_path(
+    app: tauri::AppHandle,
+    source_path: String,
+    destination_path: String,
+) -> Result<(), String> {
+    let bytes = std::fs::read(&source_path)
+        .map_err(|e| format!("Failed to read source file '{source_path}': {e}"))?;
+    write_bytes_to_path(&app, &destination_path, &bytes)
+}
+
+fn write_bytes_to_path(
+    #[allow(unused_variables)] app: &tauri::AppHandle,
+    path: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
-        use std::io::Write;
         use tauri::Manager;
         use tauri_plugin_dialog::FilePath;
         use tauri_plugin_fs::{FsExt, OpenOptions};
 
-        let url = url::Url::parse(&path)
-            .map_err(|e| format!("Invalid content URI: {e}"))?;
+        let url = url::Url::parse(path).map_err(|e| format!("Invalid content URI: {e}"))?;
         let fp = FilePath::Url(url);
         let mut opts = OpenOptions::new();
         opts.write(true);
         opts.truncate(true);
-        let mut file = app.fs().open(fp, opts)
-            .map_err(|e| format!("Failed to open log file for writing: {e}"))?;
-        return file.write_all(content.as_bytes())
-            .map_err(|e| format!("Failed to write log file: {e}"));
+        let mut file = app
+            .fs()
+            .open(fp, opts)
+            .map_err(|e| format!("Failed to open destination for writing: {e}"))?;
+        return file
+            .write_all(bytes)
+            .map_err(|e| format!("Failed to write destination file: {e}"));
     }
 
-    std::fs::write(&path, content.as_bytes())
-        .map_err(|e| format!("Failed to write file: {e}"))
+    std::fs::write(path, bytes).map_err(|e| format!("Failed to write file: {e}"))
 }

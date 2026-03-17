@@ -64,6 +64,7 @@ function App() {
         onAddFiles={processing.addFiles}
         onRemoveFolder={processing.removeFolder}
         onStart={() => processing.startRun(settings.processingSettings)}
+        onTestStorage={processing.testStorage}
         canStart={processing.folders.length > 0 && processing.status === "idle"}
         status={processing.status}
         error={processing.error}

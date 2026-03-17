@@ -21,6 +21,7 @@ import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.FileInputStream
@@ -41,6 +42,12 @@ internal class WriteFileToFolderArgs {
     lateinit var filename: String
 }
 
+@InvokeArg
+internal class WriteFileToUriArgs {
+    lateinit var uri: String
+    lateinit var cachePath: String
+}
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -48,8 +55,15 @@ internal class WriteFileToFolderArgs {
 @TauriPlugin
 class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
 
+    // Stores the pending Invoke while the file picker is on screen.
+    private var pendingFileInvoke: Invoke? = null
+
     // Stores the pending Invoke while the folder picker is on screen.
     private var pendingFolderInvoke: Invoke? = null
+
+    // Registered in load() so file picking uses the Activity Result API and we
+    // can persist URI permissions before returning to Rust.
+    private var filePickerLauncher: ActivityResultLauncher<Intent>? = null
 
     // Registered in load() to satisfy the "before onStart" requirement of the
     // Activity Result API.  Nullable so devices/paths that never use it don't fail.
@@ -62,6 +76,37 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
     override fun load(webView: android.webkit.WebView) {
         super.load(webView)
         try {
+            filePickerLauncher = (activity as ComponentActivity)
+                .registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                    val invoke = pendingFileInvoke ?: return@registerForActivityResult
+                    pendingFileInvoke = null
+
+                    val jsResult = JSObject()
+                    val files = mutableListOf<String>()
+                    if (result.resultCode == Activity.RESULT_OK) {
+                        result.data?.let { intent ->
+                            val flags = intent.flags and (
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                )
+                            if (intent.clipData != null) {
+                                for (i in 0 until intent.clipData!!.itemCount) {
+                                    val uri = intent.clipData!!.getItemAt(i).uri
+                                    persistUriPermission(uri, flags)
+                                    files.add(uri.toString())
+                                }
+                            } else {
+                                intent.data?.let { uri ->
+                                    persistUriPermission(uri, flags)
+                                    files.add(uri.toString())
+                                }
+                            }
+                        }
+                    }
+                    jsResult.put("files", JSArray.from(files.toTypedArray()))
+                    invoke.resolve(jsResult)
+                }
+
             folderPickerLauncher = (activity as ComponentActivity)
                 .registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                     val invoke = pendingFolderInvoke ?: return@registerForActivityResult
@@ -72,11 +117,11 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
                         val treeUri = result.data?.data
                         if (treeUri != null) {
                             // Persist read+write grants so the URI survives across sessions.
-                            try {
-                                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                                activity.contentResolver.takePersistableUriPermission(treeUri, flags)
-                            } catch (_: Exception) { /* not all providers support persistable grants */ }
+                            persistUriPermission(
+                                treeUri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            )
                             jsResult.put("treeUri", treeUri.toString())
                         } else {
                             jsResult.put("treeUri", null)
@@ -89,6 +134,16 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
         } catch (_: Exception) {
             // If registration fails (e.g. wrong Activity type), selectOutputFolder
             // will return treeUri=null and Rust will abort the run.
+        }
+    }
+
+    private fun persistUriPermission(uri: Uri, flags: Int) {
+        if (flags == 0) return
+        try {
+            activity.contentResolver.takePersistableUriPermission(uri, flags)
+        } catch (_: Exception) {
+            // Some providers do not support persistable grants. The transient
+            // grant returned by the picker still covers the active session.
         }
     }
 
@@ -117,6 +172,38 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     // -----------------------------------------------------------------------
+    // selectInputFiles — open the SAF file picker
+    // -----------------------------------------------------------------------
+
+    @Command
+    fun selectInputFiles(invoke: Invoke) {
+        val launcher = filePickerLauncher
+        if (launcher == null) {
+            val result = JSObject()
+            result.put("files", JSArray.from(emptyArray<String>()))
+            invoke.resolve(result)
+            return
+        }
+
+        pendingFileInvoke = invoke
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("audio/flac", "audio/x-flac", "application/x-flac")
+            )
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        launcher.launch(intent)
+    }
+
+    // -----------------------------------------------------------------------
     // selectOutputFolder — open the SAF folder picker
     // -----------------------------------------------------------------------
 
@@ -136,8 +223,39 @@ class AndroidBridgePlugin(private val activity: Activity) : Plugin(activity) {
         }
 
         pendingFolderInvoke = invoke
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
+        }
         launcher.launch(intent)
+    }
+
+    // -----------------------------------------------------------------------
+    // writeFileToUri — overwrite an existing SAF document URI
+    // -----------------------------------------------------------------------
+
+    @Synchronized
+    @Command
+    fun writeFileToUri(invoke: Invoke) {
+        val args = invoke.parseArgs(WriteFileToUriArgs::class.java)
+
+        try {
+            val uri = Uri.parse(args.uri)
+            activity.contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                FileInputStream(args.cachePath).use { inp ->
+                    inp.copyTo(out)
+                }
+            } ?: throw Exception("openOutputStream returned null for: ${args.uri}")
+
+            val result = JSObject()
+            result.put("ok", true)
+            invoke.resolve(result)
+        } catch (e: Exception) {
+            invoke.reject("writeFileToUri failed: ${e.message}")
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -83,3 +83,7 @@ export async function getEfcLog(
 export async function getStartupPaths(): Promise<string[]> {
   return invoke<string[]>("get_startup_paths");
 }
+
+export async function copyFileToPath(sourcePath: string, destinationPath: string): Promise<void> {
+  return invoke<void>("copy_file_to_path", { sourcePath, destinationPath });
+}

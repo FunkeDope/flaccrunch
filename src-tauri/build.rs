@@ -4,7 +4,6 @@ use std::{
 };
 
 fn main() {
-    println!("cargo:rerun-if-changed=android-patches/DialogPlugin.kt");
     println!("cargo:rerun-if-changed=android-patches/MainActivity.kt");
     println!("cargo:rerun-if-changed=android-patches/AndroidBridgePlugin.kt");
 
@@ -21,49 +20,8 @@ fn prepare_android_build() -> Result<(), String> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?);
     let patches_dir = manifest_dir.join("android-patches");
 
-    patch_dialog_plugin(&patches_dir.join("DialogPlugin.kt"))?;
     patch_generated_android_project(&manifest_dir, &patches_dir)?;
 
-    Ok(())
-}
-
-fn patch_dialog_plugin(source: &Path) -> Result<(), String> {
-    let Some(registry_src) = cargo_registry_src_dir() else {
-        return Ok(());
-    };
-
-    let entries = fs::read_dir(&registry_src)
-        .map_err(|e| format!("Failed to read Cargo registry source dir {registry_src:?}: {e}"))?;
-
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !name.starts_with("tauri-plugin-dialog-") {
-            continue;
-        }
-
-        let target = path
-            .join("android")
-            .join("src")
-            .join("main")
-            .join("java")
-            .join("DialogPlugin.kt");
-        if target.exists() {
-            copy_if_different(source, &target)?;
-            println!(
-                "cargo:warning=Patched Android dialog plugin at {}",
-                target.display()
-            );
-            return Ok(());
-        }
-    }
-
-    println!(
-        "cargo:warning=Could not find tauri-plugin-dialog Android source under {}",
-        registry_src.display()
-    );
     Ok(())
 }
 
@@ -157,35 +115,4 @@ fn copy_if_different(source: &Path, target: &Path) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn cargo_registry_src_dir() -> Option<PathBuf> {
-    if let Ok(cargo_home) = env::var("CARGO_HOME") {
-        let path = PathBuf::from(cargo_home).join("registry").join("src");
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    if let Ok(user_profile) = env::var("USERPROFILE") {
-        let path = PathBuf::from(user_profile)
-            .join(".cargo")
-            .join("registry")
-            .join("src");
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    if let Ok(home) = env::var("HOME") {
-        let path = PathBuf::from(home)
-            .join(".cargo")
-            .join("registry")
-            .join("src");
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    None
 }

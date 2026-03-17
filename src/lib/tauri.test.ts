@@ -20,6 +20,7 @@ import {
   getDefaultLogFolder,
   getEfcLog,
   getStartupPaths,
+  copyFileToPath,
 } from "./tauri";
 
 const mockInvoke = vi.mocked(invoke);
@@ -120,6 +121,15 @@ describe("tauri wrappers — command names", () => {
     mockInvoke.mockResolvedValue([]);
     await getStartupPaths();
     expect(mockInvoke).toHaveBeenCalledWith("get_startup_paths");
+  });
+
+  it("copyFileToPath calls 'copy_file_to_path' with both paths", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    await copyFileToPath("/tmp/source.flac", "content://example/destination");
+    expect(mockInvoke).toHaveBeenCalledWith("copy_file_to_path", {
+      sourcePath: "/tmp/source.flac",
+      destinationPath: "content://example/destination",
+    });
   });
 });
 

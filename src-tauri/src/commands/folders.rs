@@ -13,11 +13,9 @@ pub async fn select_folders(app: tauri::AppHandle) -> Result<Vec<String>, String
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    app.dialog()
-        .file()
-        .pick_folders(move |folders| {
-            let _ = tx.send(folders);
-        });
+    app.dialog().file().pick_folders(move |folders| {
+        let _ = tx.send(folders);
+    });
 
     let result = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
 
@@ -44,28 +42,51 @@ pub async fn select_folders(_app: tauri::AppHandle) -> Result<Vec<String>, Strin
 /// Works on all platforms. On Android, resolves content URIs by copying to cache.
 #[tauri::command]
 pub async fn select_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    use tauri_plugin_dialog::DialogExt;
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
 
-    let (tx, rx) = tokio::sync::oneshot::channel();
+        let bridge = app
+            .try_state::<crate::android_bridge::AndroidBridge>()
+            .ok_or_else(|| "AndroidBridge not available".to_string())?;
 
-    app.dialog()
-        .file()
-        .add_filter("FLAC Audio", &["flac", "FLAC"])
-        .pick_files(move |files| {
-            let _ = tx.send(files);
-        });
+        let uris = bridge.select_input_files();
+        let mut resolved = Vec::new();
 
-    let result = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
-
-    match result {
-        Some(paths) => {
-            let mut resolved = Vec::new();
-            for p in paths {
-                resolved.push(resolve_filepath(&app, p)?);
-            }
-            Ok(resolved)
+        for uri in uris {
+            let url = url::Url::parse(&uri)
+                .map_err(|e| format!("Invalid Android document URI '{uri}': {e}"))?;
+            resolved.push(resolve_filepath(&app, FilePath::Url(url))?);
         }
-        None => Ok(Vec::new()),
+
+        return Ok(resolved);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri_plugin_dialog::DialogExt;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        app.dialog()
+            .file()
+            .add_filter("FLAC Audio", &["flac", "FLAC"])
+            .pick_files(move |files| {
+                let _ = tx.send(files);
+            });
+
+        let result = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
+
+        match result {
+            Some(paths) => {
+                let mut resolved = Vec::new();
+                for p in paths {
+                    resolved.push(resolve_filepath(&app, p)?);
+                }
+                Ok(resolved)
+            }
+            None => Ok(Vec::new()),
+        }
     }
 }
 
@@ -83,7 +104,10 @@ pub async fn select_output_folder(app: tauri::AppHandle) -> Result<Option<String
         let tree_uri = bridge.select_output_folder();
         if let Some(ref uri) = tree_uri {
             let state = app.state::<AppState>();
-            let mut stored = state.output_tree_uri.write().unwrap_or_else(|e| e.into_inner());
+            let mut stored = state
+                .output_tree_uri
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
             *stored = Some(uri.clone());
         }
         Ok(tree_uri)
@@ -144,7 +168,9 @@ fn resolve_filepath(
                 .and_then(|bridge| bridge.get_display_name(&uri_str))
                 .or_else(|| {
                     fp.clone().into_path().ok().and_then(|p| {
-                        p.file_name().and_then(|n| n.to_str()).map(|s| s.to_string())
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|s| s.to_string())
                     })
                 })
                 .unwrap_or_else(|| extract_filename_from_content_uri(&uri_str))
@@ -158,14 +184,16 @@ fn resolve_filepath(
             .fs()
             .read(fp)
             .map_err(|e| format!("Failed to read file: {e}"))?;
-        std::fs::write(&dest, &content)
-            .map_err(|e| format!("Failed to write to cache: {e}"))?;
+        std::fs::write(&dest, &content).map_err(|e| format!("Failed to write to cache: {e}"))?;
 
         // Record original identifier → cache path so write-back knows where to
         // push the compressed result.
         let cache_path = dest.display().to_string();
         let state = app.state::<AppState>();
-        let mut map = state.content_uri_map.write().unwrap_or_else(|e| e.into_inner());
+        let mut map = state
+            .content_uri_map
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         map.insert(cache_path.clone(), uri_str);
 
         return Ok(cache_path);
@@ -216,12 +244,16 @@ pub fn extract_filename_from_content_uri(uri_str: &str) -> String {
         // recognisable as an Android media-store entry rather than a real filename.
         // NOTE: to get the real display name here we would need a ContentResolver
         // query (OpenableColumns.DISPLAY_NAME) via JNI — that's a future improvement.
-        let clean_value = value_part.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "-");
+        let clean_value =
+            value_part.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "-");
         return format!("{type_part}-{clean_value}.flac");
     }
 
     // No colon — sanitise and append extension.
-    let clean = last.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "-");
+    let clean = last.replace(
+        |c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_',
+        "-",
+    );
     if clean.to_lowercase().ends_with(".flac") {
         clean
     } else {
@@ -285,7 +317,10 @@ pub async fn validate_folder(path: String) -> Result<bool, String> {
 /// can pre-populate the folder list. Consumed (cleared) after first call.
 #[tauri::command]
 pub async fn get_startup_paths(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let mut paths = state.startup_paths.write().unwrap_or_else(|e| e.into_inner());
+    let mut paths = state
+        .startup_paths
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
     Ok(std::mem::take(&mut *paths))
 }
 
@@ -302,7 +337,10 @@ mod tests {
 
     #[test]
     fn test_percent_decode_colon_and_slash() {
-        assert_eq!(percent_decode("primary%3AMusic%2Ftrack.flac"), "primary:Music/track.flac");
+        assert_eq!(
+            percent_decode("primary%3AMusic%2Ftrack.flac"),
+            "primary:Music/track.flac"
+        );
     }
 
     #[test]
@@ -324,17 +362,22 @@ mod tests {
         // content://com.android.providers.media.documents/document/audio%3A12345
         let uri = "content://com.android.providers.media.documents/document/audio%3A12345";
         let name = extract_filename_from_content_uri(uri);
-        assert_eq!(name, "audio-12345.flac",
-            "media-document opaque ID should be prefixed with type");
+        assert_eq!(
+            name, "audio-12345.flac",
+            "media-document opaque ID should be prefixed with type"
+        );
     }
 
     #[test]
     fn test_extract_external_storage_flac_path() {
         // content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.flac
-        let uri = "content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.flac";
+        let uri =
+            "content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.flac";
         let name = extract_filename_from_content_uri(uri);
-        assert_eq!(name, "track.flac",
-            "external storage URI with embedded real filename should extract the leaf name");
+        assert_eq!(
+            name, "track.flac",
+            "external storage URI with embedded real filename should extract the leaf name"
+        );
     }
 
     #[test]
@@ -357,8 +400,10 @@ mod tests {
     fn test_extract_returns_flac_extension_always() {
         let uri = "content://anything/document/somefile";
         let name = extract_filename_from_content_uri(uri);
-        assert!(name.to_lowercase().ends_with(".flac"),
-            "result must always end with .flac, got: {name}");
+        assert!(
+            name.to_lowercase().ends_with(".flac"),
+            "result must always end with .flac, got: {name}"
+        );
     }
 
     #[test]

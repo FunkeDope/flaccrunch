@@ -8,6 +8,7 @@ interface FolderSelectorProps {
   onAddFiles: () => void;
   onRemoveFolder: (folder: string) => void;
   onStart: () => void;
+  onTestStorage: () => void;
   canStart: boolean;
   status: RunStatus;
   error: string | null;
@@ -21,6 +22,7 @@ export function FolderSelector({
   onAddFiles,
   onRemoveFolder,
   onStart,
+  onTestStorage,
   canStart,
   status,
   error,
@@ -130,6 +132,15 @@ export function FolderSelector({
       )}
 
       <div className="action-bar" style={mobile ? { justifyContent: "center", marginTop: 20 } : undefined}>
+        {mobile && (
+          <button
+            className="btn btn-secondary"
+            onClick={onTestStorage}
+            style={{ marginRight: 12 }}
+          >
+            Test Storage
+          </button>
+        )}
         <button
           className={`btn btn-primary${mobile ? " btn-mobile-start" : " btn-full"}`}
           onClick={onStart}

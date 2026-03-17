@@ -435,6 +435,31 @@ export function useProcessing() {
     setError(null);
   }, []);
 
+  const testStorage = useCallback(async () => {
+    try {
+      setError(null);
+      const selected = await api.selectFiles();
+      const source = selected[0];
+      if (!source) return;
+
+      const sourceName = source.split("/").pop() || "storage-test.bin";
+      const testName = sourceName.includes(".")
+        ? sourceName.replace(/(\.[^.]+)$/u, "-storage-test$1")
+        : `${sourceName}-storage-test`;
+
+      const destination = await tauriSaveDialog({
+        title: "Storage Test — Save Copy",
+        defaultPath: testName,
+      });
+
+      if (!destination) return;
+
+      await api.copyFileToPath(source, destination);
+    } catch (e) {
+      setError(`Storage test failed: ${String(e)}`);
+    }
+  }, []);
+
   return {
     status,
     folders,
@@ -453,5 +478,6 @@ export function useProcessing() {
     cancelRun,
     resetRun,
     exportLog,
+    testStorage,
   };
 }

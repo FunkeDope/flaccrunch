@@ -1,12 +1,12 @@
 pub mod android_bridge;
+pub mod artwork;
 pub mod cli;
 pub mod commands;
-pub mod pipeline;
 pub mod flac;
-pub mod image;
-pub mod artwork;
 pub mod fs;
+pub mod image;
 pub mod logging;
+pub mod pipeline;
 pub mod state;
 pub mod util;
 
@@ -47,6 +47,7 @@ pub fn run_with_startup_paths(startup_paths: Vec<String>) {
             commands::settings::get_default_log_folder,
             commands::logs::get_efc_log,
             commands::logs::write_text_file,
+            commands::logs::copy_file_to_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlacCrunch");

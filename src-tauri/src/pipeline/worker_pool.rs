@@ -229,12 +229,12 @@ fn android_write_back<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cache_path: &str,
 ) -> Result<(), String> {
-    use std::io::Write;
     use tauri::Manager;
-    use tauri_plugin_dialog::FilePath;
-    use tauri_plugin_fs::{FsExt, OpenOptions};
 
     let state = app.state::<crate::state::app_state::AppState>();
+    let bridge = app
+        .try_state::<crate::android_bridge::AndroidBridge>()
+        .ok_or_else(|| "AndroidBridge not available".to_string())?;
 
     // Look up the original content URI for this cached file.
     let original_uri = {
@@ -250,24 +250,9 @@ fn android_write_back<R: tauri::Runtime>(
         ));
     };
 
-    let url = url::Url::parse(&original_uri)
-        .map_err(|e| format!("Invalid original content URI '{original_uri}': {e}"))?;
-    let fp = FilePath::Url(url);
-    let mut opts = OpenOptions::new();
-    opts.write(true);
-    opts.truncate(true);
-
-    let mut destination = app
-        .fs()
-        .open(fp, opts)
+    bridge
+        .write_file_to_uri(&original_uri, cache_path)
         .map_err(|e| format!("Failed to open original document for writing: {e}"))?;
-
-    let bytes = std::fs::read(cache_path)
-        .map_err(|e| format!("Failed to read cached FLAC for write-back: {e}"))?;
-
-    destination
-        .write_all(&bytes)
-        .map_err(|e| format!("Failed to write FLAC back to original document: {e}"))?;
 
     {
         let mut map = state
