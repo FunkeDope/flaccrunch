@@ -47,7 +47,13 @@ pub async fn run_worker_pool(
                     crate::pipeline::stages::PipelineStage::Hashing(_) => WorkerState::Hashing,
                     _ => WorkerState::Converting,
                 };
-                run_state.update_worker(*worker_id, initial_state, Some(file.clone()), 0, String::new());
+                run_state.update_worker(
+                    *worker_id,
+                    initial_state,
+                    Some(file.clone()),
+                    0,
+                    String::new(),
+                );
                 event
             }
             PipelineEvent::WorkerProgress {
@@ -59,7 +65,13 @@ pub async fn run_worker_pool(
                 if let Some(w) = workers.get(*worker_id) {
                     let file = w.file.clone();
                     drop(workers);
-                    run_state.update_worker(*worker_id, WorkerState::Converting, file, *percent, ratio.clone());
+                    run_state.update_worker(
+                        *worker_id,
+                        WorkerState::Converting,
+                        file,
+                        *percent,
+                        ratio.clone(),
+                    );
                 }
                 event
             }
@@ -77,23 +89,27 @@ pub async fn run_worker_pool(
                 run_state.update_worker(*worker_id, new_state, file, 0, String::new());
                 event
             }
-            PipelineEvent::FileCompleted { worker_id, event: file_event, .. } => {
-                // Android: write the compressed cache file to the user-selected output
-                // folder (SAF tree URI) BEFORE recording/emitting so that write failures
-                // are reflected in the event status shown to the user.
+            PipelineEvent::FileCompleted {
+                worker_id,
+                event: file_event,
+                ..
+            } => {
+                // Android: write the compressed cache file back to the original
+                // user-selected document URI BEFORE recording/emitting so that
+                // write failures are reflected in the event status shown to the user.
                 #[cfg(target_os = "android")]
                 let file_event = {
                     let mut ev = file_event.clone();
                     if ev.status == crate::state::run_state::FileStatus::OK {
                         match android_write_back(&app_handle, &ev.file) {
                             Ok(()) => {
-                                // Successfully written to output folder.
+                                // Successfully written back to the original document URI.
                                 // Clean up the cached input file to prevent app size bloat.
                                 let _ = std::fs::remove_file(&ev.file);
                             }
                             Err(err) => {
                                 ev.status = crate::state::run_state::FileStatus::FAIL;
-                                ev.detail = format!("Write to output folder failed: {err}");
+                                ev.detail = format!("Write back to original file failed: {err}");
                             }
                         }
                     }
@@ -103,7 +119,11 @@ pub async fn run_worker_pool(
                 // Record the event in run state (updates counters)
                 run_state.record_event(*file_event.clone());
                 // Read updated counters and re-emit with snapshot
-                let counters = run_state.counters.read().unwrap_or_else(|e| e.into_inner()).clone();
+                let counters = run_state
+                    .counters
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
                 let enriched = PipelineEvent::FileCompleted {
                     worker_id: *worker_id,
                     event: file_event.clone(),
@@ -144,6 +164,12 @@ pub async fn run_worker_pool(
             let flac_cache = cache_dir.join("flac_input");
             let _ = std::fs::remove_dir_all(&flac_cache);
         }
+        let state = app_handle.state::<crate::state::app_state::AppState>();
+        state
+            .content_uri_map
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     // Emit RunComplete to frontend
@@ -192,49 +218,69 @@ async fn worker_loop(
         }
 
         // Mark worker idle
-        let _ = event_tx
-            .send(PipelineEvent::WorkerIdle { worker_id })
-            .await;
+        let _ = event_tx.send(PipelineEvent::WorkerIdle { worker_id }).await;
     }
 }
 
-/// Android only: write the compressed cache file to the user-selected output folder.
-///
-/// Uses the SAF tree URI from ACTION_OPEN_DOCUMENT_TREE (stored in AppState by
-/// select_output_folder).  The Kotlin AndroidBridgePlugin.writeFileToFolder command
-/// uses DocumentFile.createFile to place the file in the selected folder — this works
-/// reliably on all Android versions regardless of storage provider.
+/// Android only: write the compressed cache file back to the original document URI
+/// that the user selected via ACTION_OPEN_DOCUMENT.
 #[cfg(target_os = "android")]
-fn android_write_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_path: &str) -> Result<(), String> {
+fn android_write_back<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cache_path: &str,
+) -> Result<(), String> {
+    use std::io::Write;
     use tauri::Manager;
+    use tauri_plugin_dialog::FilePath;
+    use tauri_plugin_fs::{FsExt, OpenOptions};
 
     let state = app.state::<crate::state::app_state::AppState>();
 
-    // Get the output tree URI selected by the user before processing started.
-    let tree_uri = {
-        let uri = state.output_tree_uri.read().unwrap_or_else(|e| e.into_inner());
-        uri.clone()
+    // Look up the original content URI for this cached file.
+    let original_uri = {
+        let map = state
+            .content_uri_map
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        map.get(cache_path).cloned()
     };
-    let Some(tree_uri) = tree_uri else {
-        return Err("No output folder selected".to_string());
+    let Some(original_uri) = original_uri else {
+        return Err(format!(
+            "No original document URI recorded for cached file: {cache_path}"
+        ));
     };
 
-    // Extract the display filename from the cache path (set by resolve_filepath).
-    let filename = std::path::Path::new(cache_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| format!("Cannot derive filename from cache path: {cache_path}"))?
-        .to_string();
+    let url = url::Url::parse(&original_uri)
+        .map_err(|e| format!("Invalid original content URI '{original_uri}': {e}"))?;
+    let fp = FilePath::Url(url);
+    let mut opts = OpenOptions::new();
+    opts.write(true);
+    opts.truncate(true);
 
-    // Write via AndroidBridge → Kotlin DocumentFile API.
-    app.try_state::<crate::android_bridge::AndroidBridge>()
-        .ok_or_else(|| "AndroidBridge not registered".to_string())?
-        .write_file_to_folder(&tree_uri, cache_path, &filename)
+    let mut destination = app
+        .fs()
+        .open(fp, opts)
+        .map_err(|e| format!("Failed to open original document for writing: {e}"))?;
+
+    let bytes = std::fs::read(cache_path)
+        .map_err(|e| format!("Failed to read cached FLAC for write-back: {e}"))?;
+
+    destination
+        .write_all(&bytes)
+        .map_err(|e| format!("Failed to write FLAC back to original document: {e}"))?;
+
+    {
+        let mut map = state
+            .content_uri_map
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        map.remove(cache_path);
+    }
+
+    Ok(())
 }
 
-fn make_file_event(
-    result: &crate::pipeline::stages::JobResult,
-) -> FileEvent {
+fn make_file_event(result: &crate::pipeline::stages::JobResult) -> FileEvent {
     FileEvent {
         time: chrono::Local::now().format("%H:%M:%S").to_string(),
         status: result.status.clone(),
@@ -249,8 +295,20 @@ fn make_file_event(
         source_hash: result.source_hash.clone(),
         output_hash: result.output_hash.clone(),
         embedded_md5: result.embedded_md5.clone(),
-        artwork_saved_bytes: result.artwork_result.as_ref().map(|a| a.saved_bytes).unwrap_or(0),
-        artwork_raw_saved_bytes: result.artwork_result.as_ref().map(|a| a.raw_saved_bytes).unwrap_or(0),
-        artwork_blocks_optimized: result.artwork_result.as_ref().map(|a| a.blocks_optimized).unwrap_or(0),
+        artwork_saved_bytes: result
+            .artwork_result
+            .as_ref()
+            .map(|a| a.saved_bytes)
+            .unwrap_or(0),
+        artwork_raw_saved_bytes: result
+            .artwork_result
+            .as_ref()
+            .map(|a| a.raw_saved_bytes)
+            .unwrap_or(0),
+        artwork_blocks_optimized: result
+            .artwork_result
+            .as_ref()
+            .map(|a| a.blocks_optimized)
+            .unwrap_or(0),
     }
 }

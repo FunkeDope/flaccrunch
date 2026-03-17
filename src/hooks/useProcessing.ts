@@ -381,17 +381,6 @@ export function useProcessing() {
           return;
         }
 
-        // Android: prompt the user to choose an output folder before processing.
-        // On desktop this is a no-op (returns null) and files are replaced in-place.
-        const mobile = await api.isMobile();
-        if (mobile) {
-          const outputFolder = await api.selectOutputFolder();
-          if (!outputFolder) {
-            // User cancelled the folder picker — abort the run.
-            return;
-          }
-        }
-
         setCurrentFolders(folders);
         setStatus("processing");
         const now = Date.now();

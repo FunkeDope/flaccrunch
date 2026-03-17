@@ -63,8 +63,8 @@ pub struct FileEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FileStatus {
     OK,
-    /// Compression succeeded but write-back to the original location failed;
-    /// the compressed file was saved to the app's fc-output directory instead.
+    /// Compression succeeded but post-processing write-back to the final
+    /// destination was incomplete; the original file was left unchanged.
     WARN,
     RETRY,
     FAIL,
@@ -98,8 +98,8 @@ pub struct RunCounters {
     pub total_artwork_raw_saved: i64,
     pub artwork_optimized_files: usize,
     pub artwork_optimized_blocks: usize,
-    /// Files that compressed OK but write-back to the original URI failed;
-    /// saved to app fc-output directory instead.
+    /// Files that compressed OK but write-back to the intended destination
+    /// was incomplete, leaving the original file unchanged.
     pub warned: usize,
 }
 
@@ -171,7 +171,10 @@ impl RunState {
         }
         // Update recent events (keep last 25 for UI)
         {
-            let mut events = self.recent_events.write().unwrap_or_else(|e| e.into_inner());
+            let mut events = self
+                .recent_events
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
             events.push_back(event.clone());
             while events.len() > 25 {
                 events.pop_front();
@@ -195,7 +198,8 @@ impl RunState {
                     counters.total_artwork_raw_saved += event.artwork_raw_saved_bytes;
                     if event.artwork_blocks_optimized > 0 {
                         counters.artwork_optimized_files += 1;
-                        counters.artwork_optimized_blocks += event.artwork_blocks_optimized as usize;
+                        counters.artwork_optimized_blocks +=
+                            event.artwork_blocks_optimized as usize;
                     }
                 }
                 FileStatus::FAIL => {
@@ -209,8 +213,13 @@ impl RunState {
         }
 
         // Update top compression
-        if (event.status == FileStatus::OK || event.status == FileStatus::WARN) && event.saved_bytes > 0 {
-            let mut top = self.top_compression.write().unwrap_or_else(|e| e.into_inner());
+        if (event.status == FileStatus::OK || event.status == FileStatus::WARN)
+            && event.saved_bytes > 0
+        {
+            let mut top = self
+                .top_compression
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
             top.push(CompressionResult {
                 path: event.file,
                 saved_bytes: event.saved_bytes,
@@ -224,7 +233,14 @@ impl RunState {
     }
 
     /// Update a specific worker's status.
-    pub fn update_worker(&self, worker_id: usize, state: WorkerState, file: Option<String>, percent: u8, ratio: String) {
+    pub fn update_worker(
+        &self,
+        worker_id: usize,
+        state: WorkerState,
+        file: Option<String>,
+        percent: u8,
+        ratio: String,
+    ) {
         let mut workers = self.workers.write().unwrap_or_else(|e| e.into_inner());
         if let Some(worker) = workers.get_mut(worker_id) {
             worker.state = state;
@@ -239,7 +255,13 @@ impl RunState {
 mod tests {
     use super::*;
 
-    fn make_ok_event(file: &str, before: u64, after: u64, saved: i64, compression_pct: f64) -> FileEvent {
+    fn make_ok_event(
+        file: &str,
+        before: u64,
+        after: u64,
+        saved: i64,
+        compression_pct: f64,
+    ) -> FileEvent {
         FileEvent {
             time: "12:00:00".to_string(),
             status: FileStatus::OK,
@@ -476,7 +498,13 @@ mod tests {
     #[test]
     fn test_update_worker_changes_state() {
         let rs = RunState::new("run-10".to_string(), 2);
-        rs.update_worker(1, WorkerState::Converting, Some("/music/x.flac".to_string()), 50, "0.80".to_string());
+        rs.update_worker(
+            1,
+            WorkerState::Converting,
+            Some("/music/x.flac".to_string()),
+            50,
+            "0.80".to_string(),
+        );
         let workers = rs.workers.read().unwrap();
         let w = &workers[1];
         assert_eq!(w.state, WorkerState::Converting);
@@ -506,7 +534,12 @@ mod tests {
 
     #[test]
     fn test_file_status_serde_roundtrip() {
-        let statuses = [FileStatus::OK, FileStatus::WARN, FileStatus::FAIL, FileStatus::RETRY];
+        let statuses = [
+            FileStatus::OK,
+            FileStatus::WARN,
+            FileStatus::FAIL,
+            FileStatus::RETRY,
+        ];
         for status in &statuses {
             let json = serde_json::to_string(status).expect("serialize");
             let back: FileStatus = serde_json::from_str(&json).expect("deserialize");
@@ -519,7 +552,7 @@ mod tests {
         let rs = RunState::new("run-warn".to_string(), 1);
         let mut event = make_ok_event("/music/a.flac", 1000, 900, 100, 10.0);
         event.status = FileStatus::WARN;
-        event.detail = "Saved to fc-output (write-back failed: permission): /data/fc-output/a.flac".to_string();
+        event.detail = "Original file unchanged (write-back failed: permission denied)".to_string();
         rs.record_event(event);
         let c = rs.counters.read().unwrap();
         assert_eq!(c.processed, 1);

@@ -62,8 +62,14 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
 
     lines.push(eac_line("Source folder", &summary.source_folder));
     lines.push(eac_line("Run started", &fmt_eac_datetime(summary.start_ms)));
-    lines.push(eac_line("Run finished", &fmt_eac_datetime(summary.finish_ms)));
-    lines.push(eac_line("Worker threads", &summary.thread_count.to_string()));
+    lines.push(eac_line(
+        "Run finished",
+        &fmt_eac_datetime(summary.finish_ms),
+    ));
+    lines.push(eac_line(
+        "Worker threads",
+        &summary.thread_count.to_string(),
+    ));
     lines.push(eac_line("Retry limit", &summary.max_retries.to_string()));
     lines.push(eac_line(
         "Files discovered",
@@ -107,9 +113,8 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
                     event.output_hash.as_deref().unwrap_or("N/A"),
                 ));
                 if event.status == FileStatus::WARN {
-                    // Write-back to the original URI failed; file saved to fc-output.
                     lines.push(eac_line("Write-back", &event.detail));
-                    lines.push("     Copy OK (saved to fc-output — original unchanged)".to_string());
+                    lines.push("     Copy warning (original file unchanged)".to_string());
                 } else {
                     // Metadata cleanup — only if detail is non-empty and not "none"
                     if !event.detail.is_empty() && event.detail != "none" {
@@ -156,7 +161,7 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
         lines.push("Some files could not be verified".to_string());
     } else if c.warned > 0 && c.failed == 0 && pending == 0 {
         lines.push(format!(
-            "All files compressed; {} file(s) saved to fc-output (write-back to original failed)",
+            "All files compressed; {} file(s) could not be written back",
             c.warned
         ));
     } else if c.successful > 0 && pending == 0 {
@@ -169,7 +174,10 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
     if c.failed > 0 || (summary.run_canceled && pending > 0) {
         lines.push("There were errors".to_string());
     } else if c.warned > 0 {
-        lines.push("Write-back to original location failed — compressed files are in fc-output".to_string());
+        lines.push(
+            "Some compressed files could not be written back to their original location"
+                .to_string(),
+        );
     } else {
         lines.push("No errors occurred".to_string());
     }
@@ -203,7 +211,12 @@ mod tests {
     use super::*;
     use crate::state::run_state::{CompressionResult, RunCounters};
 
-    fn make_run_summary(total: usize, processed: usize, successful: usize, failed: usize) -> RunSummary {
+    fn make_run_summary(
+        total: usize,
+        processed: usize,
+        successful: usize,
+        failed: usize,
+    ) -> RunSummary {
         let counters = RunCounters {
             total_files: total,
             processed,
@@ -272,15 +285,46 @@ mod tests {
     fn test_efc_log_contains_source_folder() {
         let summary = make_run_summary(0, 0, 0, 0);
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("Source folder"), "must include Source folder label");
-        assert!(output.contains("/music/album"), "must include source folder path");
+        assert!(
+            output.contains("Source folder"),
+            "must include Source folder label"
+        );
+        assert!(
+            output.contains("/music/album"),
+            "must include source folder path"
+        );
+    }
+
+    #[test]
+    fn test_efc_log_warn_does_not_reference_fc_output() {
+        let mut summary = make_run_summary(1, 1, 1, 0);
+        summary.counters.warned = 1;
+        let event = make_file_event(
+            FileStatus::WARN,
+            "/music/album/track.flac",
+            "Original file unchanged (write-back failed: permission denied)",
+        );
+
+        let output = generate_efc_log(&summary, &[event]);
+
+        assert!(
+            !output.contains("fc-output"),
+            "WARN log output should not reference the old fc-output fallback"
+        );
+        assert!(
+            output.contains("Original file unchanged"),
+            "WARN log output should explain that the original file was left unchanged"
+        );
     }
 
     #[test]
     fn test_efc_log_contains_worker_threads_and_retry_limit() {
         let summary = make_run_summary(1, 1, 1, 0);
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("Worker threads"), "must include Worker threads");
+        assert!(
+            output.contains("Worker threads"),
+            "must include Worker threads"
+        );
         assert!(output.contains("Retry limit"), "must include Retry limit");
     }
 
@@ -288,7 +332,10 @@ mod tests {
     fn test_efc_log_contains_files_discovered() {
         let summary = make_run_summary(5, 5, 4, 1);
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("Files discovered"), "must include Files discovered label");
+        assert!(
+            output.contains("Files discovered"),
+            "must include Files discovered label"
+        );
         assert!(output.contains("5"), "must include total file count");
     }
 
@@ -297,33 +344,71 @@ mod tests {
         let summary = make_run_summary(1, 1, 1, 0);
         let events = vec![make_file_event(FileStatus::OK, "/music/song.flac", "")];
         let output = generate_efc_log(&summary, &events);
-        assert!(output.contains("     Copy OK"), "OK event must show '     Copy OK'");
-        assert!(output.contains("Filename /music/song.flac"), "must include Filename line");
-        assert!(output.contains("Original size"), "must include Original size");
-        assert!(output.contains("Compressed size"), "must include Compressed size");
+        assert!(
+            output.contains("     Copy OK"),
+            "OK event must show '     Copy OK'"
+        );
+        assert!(
+            output.contains("Filename /music/song.flac"),
+            "must include Filename line"
+        );
+        assert!(
+            output.contains("Original size"),
+            "must include Original size"
+        );
+        assert!(
+            output.contains("Compressed size"),
+            "must include Compressed size"
+        );
         assert!(output.contains("Net saved"), "must include Net saved");
         assert!(output.contains("Embedded MD5"), "must include Embedded MD5");
-        assert!(output.contains("Calculated pre MD5"), "must include Calculated pre MD5");
-        assert!(output.contains("Calculated post MD5"), "must include Calculated post MD5");
+        assert!(
+            output.contains("Calculated pre MD5"),
+            "must include Calculated pre MD5"
+        );
+        assert!(
+            output.contains("Calculated post MD5"),
+            "must include Calculated post MD5"
+        );
     }
 
     #[test]
     fn test_efc_log_fail_event_shows_copy_failed_and_reason() {
         let summary = make_run_summary(1, 1, 0, 1);
-        let events = vec![make_file_event(FileStatus::FAIL, "/music/fail.flac", "decode error")];
+        let events = vec![make_file_event(
+            FileStatus::FAIL,
+            "/music/fail.flac",
+            "decode error",
+        )];
         let output = generate_efc_log(&summary, &events);
-        assert!(output.contains("     Copy failed"), "FAIL event must show '     Copy failed'");
+        assert!(
+            output.contains("     Copy failed"),
+            "FAIL event must show '     Copy failed'"
+        );
         assert!(output.contains("Reason"), "must include Reason label");
-        assert!(output.contains("decode error"), "must include the failure reason text");
+        assert!(
+            output.contains("decode error"),
+            "must include the failure reason text"
+        );
     }
 
     #[test]
     fn test_efc_log_retry_event_shows_copy_aborted_and_retry_scheduled() {
         let summary = make_run_summary(1, 0, 0, 0);
-        let events = vec![make_file_event(FileStatus::RETRY, "/music/retry.flac", "timeout")];
+        let events = vec![make_file_event(
+            FileStatus::RETRY,
+            "/music/retry.flac",
+            "timeout",
+        )];
         let output = generate_efc_log(&summary, &events);
-        assert!(output.contains("     Copy aborted"), "RETRY event must show '     Copy aborted'");
-        assert!(output.contains("     Retry scheduled"), "RETRY event must show '     Retry scheduled'");
+        assert!(
+            output.contains("     Copy aborted"),
+            "RETRY event must show '     Copy aborted'"
+        );
+        assert!(
+            output.contains("     Retry scheduled"),
+            "RETRY event must show '     Retry scheduled'"
+        );
         assert!(output.contains("Reason"), "must include Reason label");
     }
 
@@ -331,10 +416,22 @@ mod tests {
     fn test_efc_log_status_report_success() {
         let summary = make_run_summary(3, 3, 3, 0);
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("3 file(s) processed successfully"), "must include success count");
-        assert!(output.contains("All files processed successfully"), "must include success summary");
-        assert!(output.contains("No errors occurred"), "must include no-errors line");
-        assert!(output.contains("End of status report"), "must include end line");
+        assert!(
+            output.contains("3 file(s) processed successfully"),
+            "must include success count"
+        );
+        assert!(
+            output.contains("All files processed successfully"),
+            "must include success summary"
+        );
+        assert!(
+            output.contains("No errors occurred"),
+            "must include no-errors line"
+        );
+        assert!(
+            output.contains("End of status report"),
+            "must include end line"
+        );
     }
 
     #[test]
@@ -352,7 +449,10 @@ mod tests {
         let mut summary = make_run_summary(5, 3, 3, 0);
         summary.run_canceled = true;
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("Processing canceled by user"), "canceled must show cancellation message");
+        assert!(
+            output.contains("Processing canceled by user"),
+            "canceled must show cancellation message"
+        );
     }
 
     #[test]
@@ -366,7 +466,10 @@ mod tests {
             after_size: 21000,
         }];
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("---- EFC Compression Notes"), "must include compression notes header");
+        assert!(
+            output.contains("---- EFC Compression Notes"),
+            "must include compression notes header"
+        );
         assert!(output.contains("/best.flac"), "must include best file path");
         assert!(output.contains("Saved"), "must include Saved label");
     }
@@ -400,7 +503,10 @@ mod tests {
         let mut event = make_file_event(FileStatus::OK, "/x.flac", "");
         event.detail = "MetadataCleanup 5.00 KB net (padding-only)".to_string();
         let output = generate_efc_log(&summary, &[event]);
-        assert!(output.contains("Metadata cleanup"), "must show Metadata cleanup when detail is set");
+        assert!(
+            output.contains("Metadata cleanup"),
+            "must show Metadata cleanup when detail is set"
+        );
     }
 
     #[test]
@@ -408,7 +514,10 @@ mod tests {
         let summary = make_run_summary(1, 1, 1, 0);
         let event = make_file_event(FileStatus::OK, "/x.flac", "");
         let output = generate_efc_log(&summary, &[event]);
-        assert!(!output.contains("Metadata cleanup"), "must not show Metadata cleanup when detail is empty");
+        assert!(
+            !output.contains("Metadata cleanup"),
+            "must not show Metadata cleanup when detail is empty"
+        );
     }
 
     #[test]
@@ -416,7 +525,10 @@ mod tests {
         let summary = make_run_summary(0, 0, 0, 0);
         let output = generate_efc_log(&summary, &[]);
         // Each field line starts with 5 spaces then the label
-        assert!(output.contains("     Source folder"), "label must be indented with 5 spaces");
+        assert!(
+            output.contains("     Source folder"),
+            "label must be indented with 5 spaces"
+        );
     }
 
     #[test]
@@ -424,6 +536,9 @@ mod tests {
         let mut summary = make_run_summary(0, 0, 0, 0);
         summary.source_folder = "C:\\Music\\Beatles\\Abbey Road".to_string();
         let output = generate_efc_log(&summary, &[]);
-        assert!(output.contains("Abbey Road"), "album name must be last path component");
+        assert!(
+            output.contains("Abbey Road"),
+            "album name must be last path component"
+        );
     }
 }
