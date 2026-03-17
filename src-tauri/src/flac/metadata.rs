@@ -17,9 +17,7 @@ pub struct PictureBlock {
 }
 
 /// Get the embedded MD5 hash from a FLAC file's STREAMINFO using native libFLAC.
-pub async fn get_md5sum(
-    flac_path: &Path,
-) -> Result<Option<String>, String> {
+pub async fn get_md5sum(flac_path: &Path) -> Result<Option<String>, String> {
     let flac_path = flac_path.to_path_buf();
     tokio::task::spawn_blocking(move || get_md5sum_native(&flac_path))
         .await
@@ -29,8 +27,8 @@ pub async fn get_md5sum(
 fn get_md5sum_native(flac_path: &Path) -> Result<Option<String>, String> {
     use libflac_sys::*;
 
-    let path_cstr = CString::new(flac_path.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid path")?;
+    let path_cstr =
+        CString::new(flac_path.to_string_lossy().as_bytes()).map_err(|_| "Invalid path")?;
 
     unsafe {
         // IMPORTANT: Must allocate a full FLAC__StreamMetadata, not just StreamInfo.
@@ -51,9 +49,7 @@ fn get_md5sum_native(flac_path: &Path) -> Result<Option<String>, String> {
 }
 
 /// List all PICTURE blocks in a FLAC file using native libFLAC metadata API.
-pub async fn list_picture_blocks(
-    flac_path: &Path,
-) -> Result<Vec<PictureBlock>, String> {
+pub async fn list_picture_blocks(flac_path: &Path) -> Result<Vec<PictureBlock>, String> {
     let flac_path = flac_path.to_path_buf();
     tokio::task::spawn_blocking(move || list_picture_blocks_native(&flac_path))
         .await
@@ -63,8 +59,8 @@ pub async fn list_picture_blocks(
 fn list_picture_blocks_native(flac_path: &Path) -> Result<Vec<PictureBlock>, String> {
     use libflac_sys::*;
 
-    let path_cstr = CString::new(flac_path.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid path")?;
+    let path_cstr =
+        CString::new(flac_path.to_string_lossy().as_bytes()).map_err(|_| "Invalid path")?;
 
     let mut blocks = Vec::new();
 
@@ -95,13 +91,16 @@ fn list_picture_blocks_native(flac_path: &Path) -> Result<Vec<PictureBlock>, Str
                 let mime = if pic.mime_type.is_null() {
                     String::new()
                 } else {
-                    std::ffi::CStr::from_ptr(pic.mime_type).to_string_lossy().into_owned()
+                    std::ffi::CStr::from_ptr(pic.mime_type)
+                        .to_string_lossy()
+                        .into_owned()
                 };
                 let desc = if pic.description.is_null() {
                     String::new()
                 } else {
                     // description is FLAC__byte* (u8*), treat as UTF-8
-                    let desc_cstr = std::ffi::CStr::from_ptr(pic.description as *const std::os::raw::c_char);
+                    let desc_cstr =
+                        std::ffi::CStr::from_ptr(pic.description as *const std::os::raw::c_char);
                     desc_cstr.to_string_lossy().into_owned()
                 };
 
@@ -139,16 +138,22 @@ pub async fn export_picture(
 ) -> Result<(), String> {
     let flac_path = flac_path.to_path_buf();
     let output_path = output_path.to_path_buf();
-    tokio::task::spawn_blocking(move || export_picture_native(&flac_path, block_number, &output_path))
-        .await
-        .map_err(|e| format!("Export picture task panicked: {e}"))?
+    tokio::task::spawn_blocking(move || {
+        export_picture_native(&flac_path, block_number, &output_path)
+    })
+    .await
+    .map_err(|e| format!("Export picture task panicked: {e}"))?
 }
 
-fn export_picture_native(flac_path: &Path, target_block: u32, output_path: &Path) -> Result<(), String> {
+fn export_picture_native(
+    flac_path: &Path,
+    target_block: u32,
+    output_path: &Path,
+) -> Result<(), String> {
     use libflac_sys::*;
 
-    let path_cstr = CString::new(flac_path.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid path")?;
+    let path_cstr =
+        CString::new(flac_path.to_string_lossy().as_bytes()).map_err(|_| "Invalid path")?;
 
     unsafe {
         let chain = FLAC__metadata_chain_new();
@@ -173,7 +178,10 @@ fn export_picture_native(flac_path: &Path, target_block: u32, output_path: &Path
         let mut found = false;
         loop {
             let block = FLAC__metadata_iterator_get_block(iter);
-            if block_idx == target_block && !block.is_null() && (*block).type_ == FLAC__METADATA_TYPE_PICTURE {
+            if block_idx == target_block
+                && !block.is_null()
+                && (*block).type_ == FLAC__METADATA_TYPE_PICTURE
+            {
                 let pic = &(*block).data.picture;
                 if !pic.data.is_null() && pic.data_length > 0 {
                     let data = std::slice::from_raw_parts(pic.data, pic.data_length as usize);
@@ -201,10 +209,7 @@ fn export_picture_native(flac_path: &Path, target_block: u32, output_path: &Path
 }
 
 /// Remove a specific metadata block from a FLAC file using native libFLAC.
-pub async fn remove_block(
-    flac_path: &Path,
-    block_number: u32,
-) -> Result<(), String> {
+pub async fn remove_block(flac_path: &Path, block_number: u32) -> Result<(), String> {
     let flac_path = flac_path.to_path_buf();
     tokio::task::spawn_blocking(move || remove_block_native(&flac_path, block_number))
         .await
@@ -214,8 +219,8 @@ pub async fn remove_block(
 fn remove_block_native(flac_path: &Path, target_block: u32) -> Result<(), String> {
     use libflac_sys::*;
 
-    let path_cstr = CString::new(flac_path.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid path")?;
+    let path_cstr =
+        CString::new(flac_path.to_string_lossy().as_bytes()).map_err(|_| "Invalid path")?;
 
     unsafe {
         let chain = FLAC__metadata_chain_new();
@@ -252,7 +257,8 @@ fn remove_block_native(flac_path: &Path, target_block: u32) -> Result<(), String
 
         // Write changes back
         FLAC__metadata_chain_sort_padding(chain);
-        if FLAC__metadata_chain_write(chain, 1, 0) == 0 { // use_padding=1, preserve_file_stats=0
+        if FLAC__metadata_chain_write(chain, 1, 0) == 0 {
+            // use_padding=1, preserve_file_stats=0
             FLAC__metadata_chain_delete(chain);
             return Err("Failed to write metadata chain".to_string());
         }
@@ -265,10 +271,7 @@ fn remove_block_native(flac_path: &Path, target_block: u32) -> Result<(), String
 
 /// Import a picture into a FLAC file using a spec string.
 /// Spec format: "TYPE|MIME|DESCRIPTION|WIDTHxHEIGHTxDEPTH/COLORS|FILE"
-pub async fn import_picture(
-    flac_path: &Path,
-    spec: &str,
-) -> Result<(), String> {
+pub async fn import_picture(flac_path: &Path, spec: &str) -> Result<(), String> {
     let flac_path = flac_path.to_path_buf();
     let spec = spec.to_string();
     tokio::task::spawn_blocking(move || import_picture_native(&flac_path, &spec))
@@ -294,8 +297,8 @@ fn import_picture_native(flac_path: &Path, spec: &str) -> Result<(), String> {
     let image_data = std::fs::read(image_file)
         .map_err(|e| format!("Failed to read image file '{}': {}", image_file, e))?;
 
-    let path_cstr = CString::new(flac_path.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid path")?;
+    let path_cstr =
+        CString::new(flac_path.to_string_lossy().as_bytes()).map_err(|_| "Invalid path")?;
     let mime_cstr = CString::new(mime).map_err(|_| "Invalid MIME type")?;
     let desc_cstr = CString::new(description).map_err(|_| "Invalid description")?;
 
@@ -390,9 +393,7 @@ fn parse_dimensions(dim_str: &str) -> (u32, u32, u32, u32) {
 }
 
 /// Remove all PADDING blocks from a FLAC file using native libFLAC.
-pub async fn remove_padding(
-    flac_path: &Path,
-) -> Result<(), String> {
+pub async fn remove_padding(flac_path: &Path) -> Result<(), String> {
     let flac_path = flac_path.to_path_buf();
     tokio::task::spawn_blocking(move || remove_padding_native(&flac_path))
         .await
@@ -402,8 +403,8 @@ pub async fn remove_padding(
 fn remove_padding_native(flac_path: &Path) -> Result<(), String> {
     use libflac_sys::*;
 
-    let path_cstr = CString::new(flac_path.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid path")?;
+    let path_cstr =
+        CString::new(flac_path.to_string_lossy().as_bytes()).map_err(|_| "Invalid path")?;
 
     unsafe {
         let chain = FLAC__metadata_chain_new();
@@ -444,7 +445,8 @@ fn remove_padding_native(flac_path: &Path) -> Result<(), String> {
 
         FLAC__metadata_iterator_delete(iter);
 
-        if removed_any && FLAC__metadata_chain_write(chain, 0, 0) == 0 { // no padding
+        if removed_any && FLAC__metadata_chain_write(chain, 0, 0) == 0 {
+            // no padding
             FLAC__metadata_chain_delete(chain);
             return Err("Failed to write metadata chain after padding removal".to_string());
         }
@@ -471,10 +473,10 @@ pub async fn copy_metadata_blocks(src: &Path, dst: &Path) -> Result<(), String> 
 fn copy_metadata_blocks_native(src: &Path, dst: &Path) -> Result<(), String> {
     use libflac_sys::*;
 
-    let src_cstr = CString::new(src.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid src path")?;
-    let dst_cstr = CString::new(dst.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid dst path")?;
+    let src_cstr =
+        CString::new(src.to_string_lossy().as_bytes()).map_err(|_| "Invalid src path")?;
+    let dst_cstr =
+        CString::new(dst.to_string_lossy().as_bytes()).map_err(|_| "Invalid dst path")?;
 
     let types_to_copy: &[u32] = &[
         FLAC__METADATA_TYPE_VORBIS_COMMENT,
@@ -524,19 +526,25 @@ fn copy_metadata_blocks_native(src: &Path, dst: &Path) -> Result<(), String> {
         // Open destination chain and append the cloned blocks
         let dst_chain = FLAC__metadata_chain_new();
         if dst_chain.is_null() {
-            for b in &cloned { FLAC__metadata_object_delete(*b); }
+            for b in &cloned {
+                FLAC__metadata_object_delete(*b);
+            }
             return Err("Failed to create dst metadata chain".to_string());
         }
         if FLAC__metadata_chain_read(dst_chain, dst_cstr.as_ptr()) == 0 {
             FLAC__metadata_chain_delete(dst_chain);
-            for b in &cloned { FLAC__metadata_object_delete(*b); }
+            for b in &cloned {
+                FLAC__metadata_object_delete(*b);
+            }
             return Err("Failed to read destination FLAC metadata".to_string());
         }
 
         let dst_iter = FLAC__metadata_iterator_new();
         if dst_iter.is_null() {
             FLAC__metadata_chain_delete(dst_chain);
-            for b in &cloned { FLAC__metadata_object_delete(*b); }
+            for b in &cloned {
+                FLAC__metadata_object_delete(*b);
+            }
             return Err("Failed to create dst iterator".to_string());
         }
         FLAC__metadata_iterator_init(dst_iter, dst_chain);
@@ -590,7 +598,8 @@ pub fn prepend_bytes_to_file(path: &Path, prefix: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let body = std::fs::read(path).map_err(|e| format!("read for prepend: {e}"))?;
     let mut f = std::fs::File::create(path).map_err(|e| format!("create for prepend: {e}"))?;
-    f.write_all(prefix).map_err(|e| format!("write prefix: {e}"))?;
+    f.write_all(prefix)
+        .map_err(|e| format!("write prefix: {e}"))?;
     f.write_all(&body).map_err(|e| format!("write body: {e}"))?;
     Ok(())
 }
@@ -757,7 +766,10 @@ METADATA block #3
             data_length: 0,
         };
         let spec = build_picture_spec(&block, &PathBuf::from("/tmp/cover.png"));
-        assert_eq!(spec.unwrap(), "3|image/png|Cover|500x500x24/0|/tmp/cover.png");
+        assert_eq!(
+            spec.unwrap(),
+            "3|image/png|Cover|500x500x24/0|/tmp/cover.png"
+        );
     }
 
     #[test]

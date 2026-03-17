@@ -105,8 +105,17 @@ mod tests {
             verbose_logging: false,
         };
         let json = serde_json::to_string(&s).expect("serialize");
-        assert!(json.contains("threadCount"), "expected 'threadCount' in JSON: {json}");
-        assert!(json.contains("maxRetries"), "expected 'maxRetries' in JSON: {json}");
-        assert!(json.contains("recentFolders"), "expected 'recentFolders' in JSON: {json}");
+        assert!(
+            json.contains("threadCount"),
+            "expected 'threadCount' in JSON: {json}"
+        );
+        assert!(
+            json.contains("maxRetries"),
+            "expected 'maxRetries' in JSON: {json}"
+        );
+        assert!(
+            json.contains("recentFolders"),
+            "expected 'recentFolders' in JSON: {json}"
+        );
     }
 }

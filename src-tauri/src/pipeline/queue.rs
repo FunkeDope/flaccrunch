@@ -31,7 +31,10 @@ impl JobQueue {
 
     /// Dequeue the next item for processing. Returns None if queue is empty.
     pub fn dequeue(&self) -> Option<QueueItem> {
-        self.items.lock().unwrap_or_else(|e| e.into_inner()).pop_front()
+        self.items
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop_front()
     }
 
     /// Re-add an item for retry with incremented attempt count.
@@ -50,7 +53,10 @@ impl JobQueue {
 
     /// Check if the queue is empty.
     pub fn is_empty(&self) -> bool {
-        self.items.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+        self.items
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Total number of files initially queued.

@@ -26,16 +26,39 @@ fn strip_jpeg_metadata(data: &[u8]) -> Option<Vec<u8>> {
         }
         let marker = data[pos + 1];
         match marker {
-            0xD8 => { out.push(0xFF); out.push(0xD8); pos += 2; continue; }
-            0xD9 => { out.push(0xFF); out.push(0xD9); break; }
-            0xD0..=0xD7 => { out.push(0xFF); out.push(marker); pos += 2; continue; }
+            0xD8 => {
+                out.push(0xFF);
+                out.push(0xD8);
+                pos += 2;
+                continue;
+            }
+            0xD9 => {
+                out.push(0xFF);
+                out.push(0xD9);
+                break;
+            }
+            0xD0..=0xD7 => {
+                out.push(0xFF);
+                out.push(marker);
+                pos += 2;
+                continue;
+            }
             _ => {}
         }
-        if pos + 4 > data.len() { out.extend_from_slice(&data[pos..]); break; }
+        if pos + 4 > data.len() {
+            out.extend_from_slice(&data[pos..]);
+            break;
+        }
         let seg_len = ((data[pos + 2] as usize) << 8) | (data[pos + 3] as usize);
         let seg_end = pos + 2 + seg_len;
-        if seg_end > data.len() { out.extend_from_slice(&data[pos..]); break; }
-        if marker == 0xDA { out.extend_from_slice(&data[pos..]); break; } // SOS → copy rest
+        if seg_end > data.len() {
+            out.extend_from_slice(&data[pos..]);
+            break;
+        }
+        if marker == 0xDA {
+            out.extend_from_slice(&data[pos..]);
+            break;
+        } // SOS → copy rest
         let keep = match marker {
             0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF // SOF
             | 0xC4 | 0xDB | 0xDC | 0xDD | 0xDE | 0xDF               // DHT, DQT, misc
@@ -44,10 +67,16 @@ fn strip_jpeg_metadata(data: &[u8]) -> Option<Vec<u8>> {
             0xE1..=0xEF | 0xFE => false, // APP1-15 + COM — strip
             _ => true,
         };
-        if keep { out.extend_from_slice(&data[pos..seg_end]); }
+        if keep {
+            out.extend_from_slice(&data[pos..seg_end]);
+        }
         pos = seg_end;
     }
-    if out.len() < data.len() { Some(out) } else { None }
+    if out.len() < data.len() {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 // ─── Pass 2: Huffman reoptimization ──────────────────────────────────────────
@@ -59,14 +88,25 @@ fn extract_dqt_tables(data: &[u8]) -> Option<([u16; 64], Option<[u16; 64]>)> {
     let mut chroma: Option<[u16; 64]> = None;
     let mut pos = 2usize;
     while pos + 3 < data.len() {
-        if data[pos] != 0xFF { break; }
+        if data[pos] != 0xFF {
+            break;
+        }
         let marker = data[pos + 1];
-        if matches!(marker, 0xD0..=0xD9) { pos += 2; continue; }
-        if pos + 4 > data.len() { break; }
+        if matches!(marker, 0xD0..=0xD9) {
+            pos += 2;
+            continue;
+        }
+        if pos + 4 > data.len() {
+            break;
+        }
         let seg_len = ((data[pos + 2] as usize) << 8) | (data[pos + 3] as usize);
         let seg_end = pos + 2 + seg_len;
-        if seg_end > data.len() { break; }
-        if marker == 0xDA { break; }
+        if seg_end > data.len() {
+            break;
+        }
+        if marker == 0xDA {
+            break;
+        }
 
         if marker == 0xDB {
             let mut q = pos + 4;
@@ -80,7 +120,11 @@ fn extract_dqt_tables(data: &[u8]) -> Option<([u16; 64], Option<[u16; 64]>)> {
                     for (i, &b) in data[q..q + 64].iter().enumerate() {
                         table[i] = b as u16;
                     }
-                    match table_id { 0 => luma = Some(table), 1 => chroma = Some(table), _ => {} }
+                    match table_id {
+                        0 => luma = Some(table),
+                        1 => chroma = Some(table),
+                        _ => {}
+                    }
                     q += 64;
                 } else {
                     q += 128; // 16-bit precision: 2 bytes each
@@ -96,14 +140,25 @@ fn extract_dqt_tables(data: &[u8]) -> Option<([u16; 64], Option<[u16; 64]>)> {
 fn detect_sampling(data: &[u8]) -> jpeg_encoder::SamplingFactor {
     let mut pos = 2usize;
     while pos + 3 < data.len() {
-        if data[pos] != 0xFF { break; }
+        if data[pos] != 0xFF {
+            break;
+        }
         let marker = data[pos + 1];
-        if matches!(marker, 0xD0..=0xD9) { pos += 2; continue; }
-        if pos + 4 > data.len() { break; }
+        if matches!(marker, 0xD0..=0xD9) {
+            pos += 2;
+            continue;
+        }
+        if pos + 4 > data.len() {
+            break;
+        }
         let seg_len = ((data[pos + 2] as usize) << 8) | (data[pos + 3] as usize);
         let seg_end = pos + 2 + seg_len;
-        if seg_end > data.len() { break; }
-        if marker == 0xDA { break; }
+        if seg_end > data.len() {
+            break;
+        }
+        if marker == 0xDA {
+            break;
+        }
 
         if matches!(marker, 0xC0..=0xC2) {
             // base + 5 = nComponents, base + 6 = first component id,
@@ -112,15 +167,15 @@ fn detect_sampling(data: &[u8]) -> jpeg_encoder::SamplingFactor {
             if base + 9 < data.len() {
                 let n_comp = data[base + 5] as usize;
                 if n_comp >= 3 && base + 6 + n_comp * 3 <= data.len() {
-                    let y_sf  = data[base + 7]; // Y  component
+                    let y_sf = data[base + 7]; // Y  component
                     let cb_sf = data[base + 10]; // Cb component
                     let y_h = (y_sf >> 4) & 0xF;
-                    let y_v  = y_sf & 0xF;
+                    let y_v = y_sf & 0xF;
                     let cb_h = (cb_sf >> 4) & 0xF;
                     return match (y_h, y_v, cb_h) {
                         (1, 1, 1) => jpeg_encoder::SamplingFactor::R_4_4_4,
                         (2, 1, 1) => jpeg_encoder::SamplingFactor::R_4_2_2,
-                        _         => jpeg_encoder::SamplingFactor::R_4_2_0,
+                        _ => jpeg_encoder::SamplingFactor::R_4_2_0,
                     };
                 }
             }
@@ -140,7 +195,9 @@ fn detect_sampling(data: &[u8]) -> jpeg_encoder::SamplingFactor {
 ///
 /// Returns `Some(bytes)` only if the result is smaller.
 fn optimize_jpeg_huffman(data: &[u8]) -> Option<Vec<u8>> {
-    if data.len() < 4 || data[0] != 0xFF || data[1] != 0xD8 { return None; }
+    if data.len() < 4 || data[0] != 0xFF || data[1] != 0xD8 {
+        return None;
+    }
 
     let (luma_table, chroma_table) = extract_dqt_tables(data)?;
     let sampling = detect_sampling(data);
@@ -155,7 +212,7 @@ fn optimize_jpeg_huffman(data: &[u8]) -> Option<Vec<u8>> {
     let height = info.height;
     let pixels = decoder.decode().ok()?;
 
-    use jpeg_encoder::{Encoder, ColorType, QuantizationTableType};
+    use jpeg_encoder::{ColorType, Encoder, QuantizationTableType};
 
     let chroma_qt = chroma_table.unwrap_or(luma_table);
     let mut out: Vec<u8> = Vec::with_capacity(data.len());
@@ -166,9 +223,15 @@ fn optimize_jpeg_huffman(data: &[u8]) -> Option<Vec<u8>> {
         QuantizationTableType::Custom(Box::new(luma_table)),
         QuantizationTableType::Custom(Box::new(chroma_qt)),
     );
-    encoder.encode(&pixels, width, height, ColorType::Rgb).ok()?;
+    encoder
+        .encode(&pixels, width, height, ColorType::Rgb)
+        .ok()?;
 
-    if out.len() < data.len() { Some(out) } else { None }
+    if out.len() < data.len() {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -193,8 +256,7 @@ pub async fn optimize_jpeg_file(
     input_path: &std::path::Path,
     output_path: &std::path::Path,
 ) -> Result<JpegOptimizeResult, String> {
-    let data = std::fs::read(input_path)
-        .map_err(|e| format!("Failed to read JPEG: {e}"))?;
+    let data = std::fs::read(input_path).map_err(|e| format!("Failed to read JPEG: {e}"))?;
     let original_size = data.len() as u64;
     match optimize_jpeg(&data) {
         Some(optimized) => {
@@ -223,12 +285,10 @@ mod tests {
 
     fn make_jpeg_with_exif() -> Vec<u8> {
         vec![
-            0xFF, 0xD8,
-            0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x00,
-            0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-            0xFF, 0xE1, 0x00, 0x08, b'E', b'x', b'i', b'f', 0x00, 0x00,
-            0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00,
-            0xAB, 0xCD, 0xFF, 0xD9,
+            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x00,
+            0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xE1, 0x00, 0x08, b'E', b'x', b'i', b'f',
+            0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0xAB, 0xCD,
+            0xFF, 0xD9,
         ]
     }
 
@@ -237,8 +297,14 @@ mod tests {
         let jpeg = make_jpeg_with_exif();
         let result = strip_jpeg_metadata(&jpeg).expect("should strip EXIF");
         assert!(result.len() < jpeg.len());
-        assert!(result.windows(2).any(|w| w == [0xFF, 0xE0]), "APP0 must remain");
-        assert!(!result.windows(2).any(|w| w == [0xFF, 0xE1]), "APP1 must be gone");
+        assert!(
+            result.windows(2).any(|w| w == [0xFF, 0xE0]),
+            "APP0 must remain"
+        );
+        assert!(
+            !result.windows(2).any(|w| w == [0xFF, 0xE1]),
+            "APP1 must be gone"
+        );
     }
 
     #[test]
@@ -251,14 +317,16 @@ mod tests {
     /// the test FLAC file.  Run with `cargo test -- --nocapture` to see sizes.
     #[test]
     fn test_artwork_compression_on_test_flac() {
-        use std::path::Path;
-        use std::ffi::CString;
-        use libflac_sys::*;
         use crate::image::detect::{detect_image_format, ImageFormat};
+        use libflac_sys::*;
+        use std::ffi::CString;
+        use std::path::Path;
 
         let flac_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap()
-            .join("Tests").join("un-optimized.flac");
+            .parent()
+            .unwrap()
+            .join("Tests")
+            .join("un-optimized.flac");
 
         if !flac_path.exists() {
             eprintln!("Test FLAC not found at {:?} — skipping", flac_path);
@@ -271,8 +339,11 @@ mod tests {
         unsafe {
             let chain = FLAC__metadata_chain_new();
             assert!(!chain.is_null());
-            assert_ne!(FLAC__metadata_chain_read(chain, path_cstr.as_ptr()), 0,
-                "Failed to read test FLAC");
+            assert_ne!(
+                FLAC__metadata_chain_read(chain, path_cstr.as_ptr()),
+                0,
+                "Failed to read test FLAC"
+            );
 
             let iter = FLAC__metadata_iterator_new();
             FLAC__metadata_iterator_init(iter, chain);
@@ -284,8 +355,13 @@ mod tests {
                     if !pic.data.is_null() && pic.data_length > 0 {
                         let data = std::slice::from_raw_parts(pic.data, pic.data_length as usize);
                         let fmt = detect_image_format(data);
-                        let mime = if pic.mime_type.is_null() { String::new() }
-                            else { std::ffi::CStr::from_ptr(pic.mime_type).to_string_lossy().into_owned() };
+                        let mime = if pic.mime_type.is_null() {
+                            String::new()
+                        } else {
+                            std::ffi::CStr::from_ptr(pic.mime_type)
+                                .to_string_lossy()
+                                .into_owned()
+                        };
 
                         let orig = data.len();
                         let (optimized_len, method) = match fmt {
@@ -299,24 +375,43 @@ mod tests {
                                 let opts = oxipng::Options::from_preset(4);
                                 let _ = oxipng::optimize(
                                     &oxipng::InFile::Path(tmp.clone()),
-                                    &oxipng::OutFile::Path { path: Some(tmp.clone()), preserve_attrs: false },
+                                    &oxipng::OutFile::Path {
+                                        path: Some(tmp.clone()),
+                                        preserve_attrs: false,
+                                    },
                                     &opts,
                                 );
-                                let opt_len = std::fs::metadata(&tmp).map(|m| m.len() as usize).unwrap_or(orig);
+                                let opt_len = std::fs::metadata(&tmp)
+                                    .map(|m| m.len() as usize)
+                                    .unwrap_or(orig);
                                 (opt_len, "PNG")
                             }
                             None => (orig, "unknown"),
                         };
 
                         let saved = orig.saturating_sub(optimized_len);
-                        println!("[{}] mime={} original={} optimized={} saved={} ({:.1}%)",
-                            method, mime, orig, optimized_len, saved,
-                            if orig > 0 { saved as f64 / orig as f64 * 100.0 } else { 0.0 });
+                        println!(
+                            "[{}] mime={} original={} optimized={} saved={} ({:.1}%)",
+                            method,
+                            mime,
+                            orig,
+                            optimized_len,
+                            saved,
+                            if orig > 0 {
+                                saved as f64 / orig as f64 * 100.0
+                            } else {
+                                0.0
+                            }
+                        );
 
-                        if saved > 0 { any_savings = true; }
+                        if saved > 0 {
+                            any_savings = true;
+                        }
                     }
                 }
-                if FLAC__metadata_iterator_next(iter) == 0 { break; }
+                if FLAC__metadata_iterator_next(iter) == 0 {
+                    break;
+                }
             }
             FLAC__metadata_iterator_delete(iter);
             FLAC__metadata_chain_delete(chain);

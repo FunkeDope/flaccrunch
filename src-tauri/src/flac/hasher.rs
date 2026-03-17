@@ -6,9 +6,7 @@ use std::path::Path;
 /// Uses native libFLAC decoder instead of spawning `flac -d -c`.
 /// The hash is computed over raw PCM samples in little-endian signed format,
 /// matching the output of `flac -d -c -s --force-raw-format --endian=little --sign=signed`.
-pub async fn hash_decoded_audio(
-    file_path: &Path,
-) -> Result<String, String> {
+pub async fn hash_decoded_audio(file_path: &Path) -> Result<String, String> {
     let file_path = file_path.to_path_buf();
 
     tokio::task::spawn_blocking(move || hash_decoded_audio_native(&file_path))
@@ -92,7 +90,10 @@ fn hash_decoded_audio_native(file_path: &Path) -> Result<String, String> {
         client_data: *mut c_void,
     ) {
         let state = unsafe { &mut *(client_data as *mut HasherState) };
-        state.error = Some(format!("FLAC decode error during hashing: status {}", status));
+        state.error = Some(format!(
+            "FLAC decode error during hashing: status {}",
+            status
+        ));
     }
 
     let mut state = HasherState {
@@ -101,8 +102,8 @@ fn hash_decoded_audio_native(file_path: &Path) -> Result<String, String> {
         error: None,
     };
 
-    let path_cstr = CString::new(file_path.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid file path")?;
+    let path_cstr =
+        CString::new(file_path.to_string_lossy().as_bytes()).map_err(|_| "Invalid file path")?;
 
     unsafe {
         let decoder = FLAC__stream_decoder_new();
@@ -121,7 +122,10 @@ fn hash_decoded_audio_native(file_path: &Path) -> Result<String, String> {
 
         if init_status != FLAC__STREAM_DECODER_INIT_STATUS_OK {
             FLAC__stream_decoder_delete(decoder);
-            return Err(format!("Failed to init FLAC decoder for hashing: status {}", init_status));
+            return Err(format!(
+                "Failed to init FLAC decoder for hashing: status {}",
+                init_status
+            ));
         }
 
         let ok = FLAC__stream_decoder_process_until_end_of_stream(decoder);
@@ -129,7 +133,9 @@ fn hash_decoded_audio_native(file_path: &Path) -> Result<String, String> {
         FLAC__stream_decoder_delete(decoder);
 
         if ok == 0 {
-            return Err(state.error.unwrap_or_else(|| "FLAC decoding failed during hashing".to_string()));
+            return Err(state
+                .error
+                .unwrap_or_else(|| "FLAC decoding failed during hashing".to_string()));
         }
         if let Some(err) = state.error {
             return Err(err);
@@ -164,13 +170,20 @@ mod tests {
         let result = rt.block_on(hash_decoded_audio(&flac_path));
 
         let hash = result.expect("hash_decoded_audio should succeed on test FLAC");
-        assert_eq!(hash.len(), 32, "MD5 hex string must be 32 characters, got: {hash}");
+        assert_eq!(
+            hash.len(),
+            32,
+            "MD5 hex string must be 32 characters, got: {hash}"
+        );
         assert!(
             hash.chars().all(|c| c.is_ascii_hexdigit()),
             "MD5 must be lowercase hex digits, got: {hash}"
         );
         // The actual audio is not silence, so hash must not be the MD5 of empty bytes
-        assert_ne!(hash, MD5_EMPTY, "real audio hash must not be MD5 of empty bytes");
+        assert_ne!(
+            hash, MD5_EMPTY,
+            "real audio hash must not be MD5 of empty bytes"
+        );
     }
 
     #[test]
@@ -187,8 +200,12 @@ mod tests {
         }
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
-        let h1 = rt.block_on(hash_decoded_audio(&flac_path)).expect("first hash");
-        let h2 = rt.block_on(hash_decoded_audio(&flac_path)).expect("second hash");
+        let h1 = rt
+            .block_on(hash_decoded_audio(&flac_path))
+            .expect("first hash");
+        let h2 = rt
+            .block_on(hash_decoded_audio(&flac_path))
+            .expect("second hash");
         assert_eq!(h1, h2, "hash must be deterministic");
     }
 

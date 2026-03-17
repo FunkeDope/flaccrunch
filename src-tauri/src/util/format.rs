@@ -20,10 +20,7 @@ pub fn format_bytes(bytes: i64, signed: bool) -> String {
     } else if abs < 1024 * 1024 * 1024 {
         format!("{sign}{:.2} MB", abs as f64 / (1024.0 * 1024.0))
     } else {
-        format!(
-            "{sign}{:.2} GB",
-            abs as f64 / (1024.0 * 1024.0 * 1024.0)
-        )
+        format!("{sign}{:.2} GB", abs as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
 
@@ -175,7 +172,10 @@ mod tests {
     #[test]
     fn test_format_hash_for_display_normal() {
         let h = Some("abcdef1234567890abcdef1234567890".to_string());
-        assert_eq!(format_hash_for_display(&h), "abcdef1234567890abcdef1234567890");
+        assert_eq!(
+            format_hash_for_display(&h),
+            "abcdef1234567890abcdef1234567890"
+        );
     }
 
     #[test]

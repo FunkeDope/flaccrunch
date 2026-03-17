@@ -4,7 +4,10 @@ use std::{fs, io, thread, time::Duration};
 /// Test whether the given directory is writable by creating and immediately
 /// deleting a probe file. Mirrors PowerShell's `Test-DirectoryWriteAccess`.
 pub fn test_directory_write_access(dir: &Path) -> bool {
-    let probe = dir.join(format!(".efc-write-test-{}.tmp", uuid::Uuid::new_v4().simple()));
+    let probe = dir.join(format!(
+        ".efc-write-test-{}.tmp",
+        uuid::Uuid::new_v4().simple()
+    ));
     match fs::write(&probe, b"") {
         Ok(_) => {
             let _ = fs::remove_file(&probe);
@@ -55,9 +58,9 @@ pub fn safe_move(from: &Path, to: &Path) -> io::Result<()> {
             let _ = fs::remove_file(from);
             Ok(())
         }
-        Err(_) => Err(last_err.unwrap_or_else(|| {
-            io::Error::other("Failed to move file after retries")
-        })),
+        Err(_) => {
+            Err(last_err.unwrap_or_else(|| io::Error::other("Failed to move file after retries")))
+        }
     }
 }
 
@@ -75,10 +78,7 @@ mod tests {
     #[test]
     fn test_art_temp_path() {
         let path = Path::new("/music/track.flac");
-        assert_eq!(
-            art_temp_path(path),
-            PathBuf::from("/music/track.arttmp")
-        );
+        assert_eq!(art_temp_path(path), PathBuf::from("/music/track.arttmp"));
     }
 
     #[test]

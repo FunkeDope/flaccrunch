@@ -14,10 +14,6 @@ permissions:
 
 jobs:
   build-desktop:
-    # The macOS DMG bundling step is flaky on branch CI and is unrelated to
-    # Android APK production. Keep Linux/Windows smoke builds on main, and
-    # reserve the macOS packaging job for tagged releases.
-    if: ${{ startsWith(github.ref, 'refs/tags/') || matrix.os != 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -67,6 +63,8 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
+        # Skip flaky macOS DMG bundling on branch CI; only build macOS on tagged releases
+        if: startsWith(github.ref, 'refs/tags/') || matrix.os != 'macos-latest'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

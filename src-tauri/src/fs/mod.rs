@@ -1,3 +1,3 @@
-pub mod scanner;
 pub mod metadata;
+pub mod scanner;
 pub mod tempfile;

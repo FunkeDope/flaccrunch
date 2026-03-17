@@ -91,9 +91,9 @@ mod tests {
         let ihdr_data: [u8; 13] = [
             0, 0, 0, 1, // width  = 1
             0, 0, 0, 1, // height = 1
-            8,          // bit depth
-            2,          // color type RGB
-            0, 0, 0,    // compression, filter, interlace
+            8, // bit depth
+            2, // color type RGB
+            0, 0, 0, // compression, filter, interlace
         ];
         png.extend_from_slice(&chunk(b"IHDR", &ihdr_data));
 

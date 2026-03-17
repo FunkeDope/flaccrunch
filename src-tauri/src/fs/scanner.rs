@@ -59,7 +59,9 @@ pub fn scan_for_flac_files(paths: &[PathBuf]) -> ScanResult {
                             if let Some(ext) = entry.path().extension() {
                                 if ext.eq_ignore_ascii_case("flac") {
                                     if let Ok(meta) = entry.metadata() {
-                                        let canonical = entry.path().canonicalize()
+                                        let canonical = entry
+                                            .path()
+                                            .canonicalize()
                                             .unwrap_or_else(|_| entry.path().to_path_buf());
                                         if seen.insert(canonical) {
                                             let size = meta.len();
@@ -99,7 +101,11 @@ pub fn scan_for_flac_files(paths: &[PathBuf]) -> ScanResult {
 /// Remove stale .tmp files where a matching .flac file exists.
 pub fn cleanup_stale_temps(folders: &[PathBuf]) {
     for folder in folders {
-        for entry in WalkDir::new(folder).follow_links(true).into_iter().flatten() {
+        for entry in WalkDir::new(folder)
+            .follow_links(true)
+            .into_iter()
+            .flatten()
+        {
             if entry.file_type().is_file() {
                 let path = entry.path();
                 if let Some(ext) = path.extension() {
@@ -130,11 +136,7 @@ pub fn validate_folder(path: &Path) -> Result<(), String> {
             let _ = std::fs::remove_file(&test_file);
             Ok(())
         }
-        Err(e) => Err(format!(
-            "No write access to {}: {}",
-            path.display(),
-            e
-        )),
+        Err(e) => Err(format!("No write access to {}: {}", path.display(), e)),
     }
 }
 
@@ -193,8 +195,7 @@ mod tests {
         let dir2 = create_test_dir();
         fs::write(dir1.path().join("a.flac"), b"data1").unwrap();
         fs::write(dir2.path().join("b.flac"), b"data2").unwrap();
-        let result =
-            scan_for_flac_files(&[dir1.path().to_path_buf(), dir2.path().to_path_buf()]);
+        let result = scan_for_flac_files(&[dir1.path().to_path_buf(), dir2.path().to_path_buf()]);
         assert_eq!(result.files.len(), 2);
     }
 
@@ -257,11 +258,7 @@ mod tests {
         let file = dir.path().join("test.flac");
         fs::write(&file, b"flac data").unwrap();
         // Pass the same file twice and also its parent directory
-        let result = scan_for_flac_files(&[
-            file.clone(),
-            file.clone(),
-            dir.path().to_path_buf(),
-        ]);
+        let result = scan_for_flac_files(&[file.clone(), file.clone(), dir.path().to_path_buf()]);
         assert_eq!(result.files.len(), 1);
     }
 

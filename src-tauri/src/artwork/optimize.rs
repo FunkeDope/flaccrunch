@@ -56,17 +56,15 @@ pub async fn optimize_album_art(
         let export_path = scratch_dir.join(format!("art_block_{idx}"));
         metadata::export_picture(flac_path, block.block_number, &export_path).await?;
 
-        let image_data = fs::read(&export_path)
-            .map_err(|e| format!("Failed to read exported picture: {e}"))?;
+        let image_data =
+            fs::read(&export_path).map_err(|e| format!("Failed to read exported picture: {e}"))?;
         let format = detect_image_format(&image_data);
 
         let raw_saved = match format {
-            Some(ImageFormat::Png) => {
-                match optimize_png(&export_path) {
-                    Ok(result) => result.saved_bytes,
-                    Err(_) => 0,
-                }
-            }
+            Some(ImageFormat::Png) => match optimize_png(&export_path) {
+                Ok(result) => result.saved_bytes,
+                Err(_) => 0,
+            },
             Some(ImageFormat::Jpeg) => {
                 let optimized_path = scratch_dir.join(format!("art_block_{idx}_opt.jpg"));
                 match crate::image::jpeg::optimize_jpeg_file(&export_path, &optimized_path).await {
@@ -91,9 +89,7 @@ pub async fn optimize_album_art(
     }
 
     if !optimized_block_nums.is_empty() {
-        let mut block_numbers: Vec<u32> = all_exports.iter()
-            .map(|(b, _)| b.block_number)
-            .collect();
+        let mut block_numbers: Vec<u32> = all_exports.iter().map(|(b, _)| b.block_number).collect();
         block_numbers.sort_unstable();
         block_numbers.reverse();
         for bn in &block_numbers {

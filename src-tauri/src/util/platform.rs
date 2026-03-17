@@ -29,7 +29,14 @@ pub fn set_process_below_normal(pid: u32) {
     use std::process::Command;
     // Use wmic to set below-normal priority (priority 6 = below normal)
     let _ = Command::new("wmic")
-        .args(["process", "where", &format!("ProcessId={pid}"), "CALL", "setpriority", "16384"])
+        .args([
+            "process",
+            "where",
+            &format!("ProcessId={pid}"),
+            "CALL",
+            "setpriority",
+            "16384",
+        ])
         .output();
 }
 

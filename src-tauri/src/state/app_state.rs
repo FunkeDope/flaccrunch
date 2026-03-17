@@ -91,7 +91,10 @@ mod tests {
             map.insert("/cache/foo.flac".to_string(), "content://foo".to_string());
         }
         let map = state.content_uri_map.read().unwrap();
-        assert_eq!(map.get("/cache/foo.flac").map(|s| s.as_str()), Some("content://foo"));
+        assert_eq!(
+            map.get("/cache/foo.flac").map(|s| s.as_str()),
+            Some("content://foo")
+        );
     }
 
     #[test]

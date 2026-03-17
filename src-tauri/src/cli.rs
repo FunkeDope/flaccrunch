@@ -184,7 +184,10 @@ async fn run_cli_async(args: CliArgs) -> i32 {
     }
     drop(event_tx);
 
-    let mut counters = RunCounters { total_files, ..Default::default() };
+    let mut counters = RunCounters {
+        total_files,
+        ..Default::default()
+    };
     let start = std::time::Instant::now();
 
     while let Some(event) = event_rx.recv().await {
@@ -219,7 +222,11 @@ async fn run_cli_async(args: CliArgs) -> i32 {
         elapsed,
     );
 
-    if counters.failed > 0 { 1 } else { 0 }
+    if counters.failed > 0 {
+        1
+    } else {
+        0
+    }
 }
 
 fn print_file_event(fe: &FileEvent, counters: &mut RunCounters) {
@@ -245,7 +252,11 @@ fn print_file_event(fe: &FileEvent, counters: &mut RunCounters) {
             } else {
                 "no savings             ".to_string()
             };
-            let tag = if fe.status == FileStatus::WARN { "WARN" } else { " OK " };
+            let tag = if fe.status == FileStatus::WARN {
+                "WARN"
+            } else {
+                " OK "
+            };
             println!(
                 "[{}] {}  {:<50} {}  {}",
                 fe.time, tag, name, savings, fe.verification
@@ -302,8 +313,7 @@ async fn worker_loop(
             Some(item) => item,
             None => break,
         };
-        let result =
-            execute_job(&item, worker_id, &context, &event_tx, cancel_token.clone()).await;
+        let result = execute_job(&item, worker_id, &context, &event_tx, cancel_token.clone()).await;
 
         let fe = make_file_event(&result);
         if result.status == FileStatus::FAIL && item.attempt < context.max_retries {
@@ -453,9 +463,12 @@ mod tests {
     fn test_all_options_together() {
         let result = parse_cli_args(&args(&[
             "-silent",
-            "--threads", "4",
-            "-retries", "7",
-            "-logdir", "/logs",
+            "--threads",
+            "4",
+            "-retries",
+            "7",
+            "-logdir",
+            "/logs",
             "/path/to/music",
         ]));
         assert!(result.silent);
@@ -489,7 +502,11 @@ fn make_file_event(result: &crate::pipeline::stages::JobResult) -> FileEvent {
         source_hash: result.source_hash.clone(),
         output_hash: result.output_hash.clone(),
         embedded_md5: result.embedded_md5.clone(),
-        artwork_saved_bytes: result.artwork_result.as_ref().map(|a| a.saved_bytes).unwrap_or(0),
+        artwork_saved_bytes: result
+            .artwork_result
+            .as_ref()
+            .map(|a| a.saved_bytes)
+            .unwrap_or(0),
         artwork_raw_saved_bytes: result
             .artwork_result
             .as_ref()

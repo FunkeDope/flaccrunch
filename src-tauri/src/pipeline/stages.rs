@@ -23,7 +23,11 @@ pub enum HashPhase {
 
 /// Events emitted by the pipeline for UI updates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum PipelineEvent {
     WorkerStarted {
         worker_id: usize,
@@ -101,8 +105,16 @@ mod tests {
         };
         let json = serde_json::to_string(&event).unwrap();
         eprintln!("WorkerStarted: {}", json);
-        assert!(json.contains(r#""type":"workerStarted""#), "type field wrong: {}", json);
-        assert!(json.contains(r#""workerId":0"#), "worker_id field should be camelCase 'workerId': {}", json);
+        assert!(
+            json.contains(r#""type":"workerStarted""#),
+            "type field wrong: {}",
+            json
+        );
+        assert!(
+            json.contains(r#""workerId":0"#),
+            "worker_id field should be camelCase 'workerId': {}",
+            json
+        );
 
         // WorkerProgress
         let event = PipelineEvent::WorkerProgress {

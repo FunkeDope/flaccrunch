@@ -1,7 +1,9 @@
 use crate::artwork::optimize::optimize_album_art;
 use crate::flac::encoder::encode_flac;
 use crate::flac::hasher::hash_decoded_audio;
-use crate::flac::metadata::{copy_metadata_blocks, extract_non_flac_prefix, prepend_bytes_to_file, get_md5sum};
+use crate::flac::metadata::{
+    copy_metadata_blocks, extract_non_flac_prefix, get_md5sum, prepend_bytes_to_file,
+};
 use crate::fs::metadata::{restore_metadata, snapshot_metadata};
 use crate::fs::tempfile::{safe_move, safe_remove, temp_path_for};
 use crate::pipeline::queue::QueueItem;
@@ -9,8 +11,8 @@ use crate::pipeline::stages::{JobResult, PipelineEvent, PipelineStage, Verificat
 use crate::state::run_state::FileStatus;
 use crate::util::format::NULL_MD5;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -242,12 +244,9 @@ async fn run_job(
         })
         .await;
 
-    let artwork_result = optimize_album_art(
-        temp_path,
-        &context.scratch_dir,
-    )
-    .await
-    .ok();
+    let artwork_result = optimize_album_art(temp_path, &context.scratch_dir)
+        .await
+        .ok();
 
     if cancel_token.is_cancelled() {
         safe_remove(temp_path);

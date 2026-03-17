@@ -94,8 +94,7 @@ fn set_file_times(path: &Path, snapshot: &FileMetadataSnapshot) -> io::Result<()
     {
         use std::os::windows::fs::FileTimesExt;
         if let Some(ctime) = snapshot.created {
-            let ctime_system =
-                SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(ctime);
+            let ctime_system = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(ctime);
             times = times.set_created(ctime_system);
         }
     }

@@ -1,7 +1,7 @@
 use std::ffi::CString;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Result of a FLAC encoding operation.
 #[derive(Debug)]
@@ -126,8 +126,8 @@ fn decode_flac_to_pcm(input: &Path) -> Result<DecodedFlac, String> {
         error: None,
     };
 
-    let input_cstr = CString::new(input.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid input path")?;
+    let input_cstr =
+        CString::new(input.to_string_lossy().as_bytes()).map_err(|_| "Invalid input path")?;
 
     unsafe {
         let decoder = FLAC__stream_decoder_new();
@@ -149,7 +149,10 @@ fn decode_flac_to_pcm(input: &Path) -> Result<DecodedFlac, String> {
 
         if init_status != FLAC__STREAM_DECODER_INIT_STATUS_OK {
             FLAC__stream_decoder_delete(decoder);
-            return Err(format!("Failed to init FLAC decoder: status {}", init_status));
+            return Err(format!(
+                "Failed to init FLAC decoder: status {}",
+                init_status
+            ));
         }
 
         let ok = FLAC__stream_decoder_process_until_end_of_stream(decoder);
@@ -157,7 +160,9 @@ fn decode_flac_to_pcm(input: &Path) -> Result<DecodedFlac, String> {
         FLAC__stream_decoder_delete(decoder);
 
         if ok == 0 {
-            return Err(state.error.unwrap_or_else(|| "FLAC decoding failed".to_string()));
+            return Err(state
+                .error
+                .unwrap_or_else(|| "FLAC decoding failed".to_string()));
         }
         if let Some(err) = state.error {
             return Err(err);
@@ -187,8 +192,8 @@ fn encode_pcm_to_flac(
 ) -> Result<EncodeResult, String> {
     use libflac_sys::*;
 
-    let output_cstr = CString::new(output.to_string_lossy().as_bytes())
-        .map_err(|_| "Invalid output path")?;
+    let output_cstr =
+        CString::new(output.to_string_lossy().as_bytes()).map_err(|_| "Invalid output path")?;
 
     unsafe {
         let encoder = FLAC__stream_encoder_new();
@@ -202,8 +207,8 @@ fn encode_pcm_to_flac(
         FLAC__stream_encoder_set_sample_rate(encoder, decoded.sample_rate);
         FLAC__stream_encoder_set_compression_level(encoder, 8);
         FLAC__stream_encoder_set_do_exhaustive_model_search(encoder, 1); // -e
-        FLAC__stream_encoder_set_do_qlp_coeff_prec_search(encoder, 1);  // -p
-        FLAC__stream_encoder_set_verify(encoder, 1);                     // -V
+        FLAC__stream_encoder_set_do_qlp_coeff_prec_search(encoder, 1); // -p
+        FLAC__stream_encoder_set_verify(encoder, 1); // -V
 
         if decoded.total_samples > 0 {
             FLAC__stream_encoder_set_total_samples_estimate(encoder, decoded.total_samples);
@@ -219,7 +224,10 @@ fn encode_pcm_to_flac(
 
         if init_status != FLAC__STREAM_ENCODER_INIT_STATUS_OK {
             FLAC__stream_encoder_delete(encoder);
-            return Err(format!("Failed to init FLAC encoder: status {}", init_status));
+            return Err(format!(
+                "Failed to init FLAC encoder: status {}",
+                init_status
+            ));
         }
 
         // Process samples in chunks
@@ -248,7 +256,10 @@ fn encode_pcm_to_flac(
                 return Ok(EncodeResult {
                     success: false,
                     exit_code: Some(encoder_state as i32),
-                    stderr: format!("Encoding failed at frame {}: encoder state {}", offset, encoder_state),
+                    stderr: format!(
+                        "Encoding failed at frame {}: encoder state {}",
+                        offset, encoder_state
+                    ),
                 });
             }
 

@@ -55,7 +55,11 @@ pub async fn start_processing(
     }
 
     // Clean up stale temp files
-    let dir_paths: Vec<PathBuf> = folder_paths.iter().filter(|p| p.is_dir()).cloned().collect();
+    let dir_paths: Vec<PathBuf> = folder_paths
+        .iter()
+        .filter(|p| p.is_dir())
+        .cloned()
+        .collect();
     cleanup_stale_temps(&dir_paths);
 
     // Scan for FLAC files
@@ -79,10 +83,14 @@ pub async fn start_processing(
             #[cfg(mobile)]
             {
                 use tauri::Manager;
-                app.path().app_cache_dir().unwrap_or_else(|_| default_log_folder())
+                app.path()
+                    .app_cache_dir()
+                    .unwrap_or_else(|_| default_log_folder())
             }
             #[cfg(not(mobile))]
-            { default_log_folder() }
+            {
+                default_log_folder()
+            }
         } else {
             PathBuf::from(&settings.log_folder)
         };
@@ -99,7 +107,10 @@ pub async fn start_processing(
     // Create run state
     let run_state = Arc::new(RunState::new(run_id.clone(), worker_count));
     {
-        let mut counters = run_state.counters.write().unwrap_or_else(|e| e.into_inner());
+        let mut counters = run_state
+            .counters
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         counters.total_files = scan_result.files.len();
         counters.total_original_bytes = scan_result.total_size;
     }
@@ -127,17 +138,39 @@ pub async fn start_processing(
     let start_ms = chrono::Local::now().timestamp_millis();
 
     tokio::spawn(async move {
-        run_worker_pool(worker_count, queue, context, Arc::clone(&run_state_clone), app).await;
+        run_worker_pool(
+            worker_count,
+            queue,
+            context,
+            Arc::clone(&run_state_clone),
+            app,
+        )
+        .await;
 
         // Write EFC log to disk if verbose logging is enabled
         if let Some(log_dir) = verbose_log_dir {
             let finish_ms = chrono::Local::now().timestamp_millis();
             let elapsed = run_state_clone.start_time.elapsed().as_secs();
-            let counters = run_state_clone.counters.read().unwrap_or_else(|e| e.into_inner()).clone();
-            let top_compression = run_state_clone.top_compression.read().unwrap_or_else(|e| e.into_inner()).clone();
-            let all_events: Vec<_> = run_state_clone.all_events.read().unwrap_or_else(|e| e.into_inner()).clone();
+            let counters = run_state_clone
+                .counters
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let top_compression = run_state_clone
+                .top_compression
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let all_events: Vec<_> = run_state_clone
+                .all_events
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
             let run_canceled = {
-                let s = run_state_clone.status.read().unwrap_or_else(|e| e.into_inner());
+                let s = run_state_clone
+                    .status
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner());
                 matches!(*s, ProcessingStatus::Cancelling)
             };
 
@@ -158,7 +191,10 @@ pub async fn start_processing(
             let _ = std::fs::write(&log_path, log_text.as_bytes());
         }
 
-        let mut status = run_state_clone.status.write().unwrap_or_else(|e| e.into_inner());
+        let mut status = run_state_clone
+            .status
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         *status = ProcessingStatus::Complete;
     });
 
@@ -167,9 +203,7 @@ pub async fn start_processing(
 
 /// Cancel an active processing run.
 #[tauri::command]
-pub async fn cancel_processing(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn cancel_processing(state: State<'_, AppState>) -> Result<(), String> {
     let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
         {
@@ -185,9 +219,7 @@ pub async fn cancel_processing(
 
 /// Get the current processing status.
 #[tauri::command]
-pub async fn get_processing_status(
-    state: State<'_, AppState>,
-) -> Result<ProcessingStatus, String> {
+pub async fn get_processing_status(state: State<'_, AppState>) -> Result<ProcessingStatus, String> {
     let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
         Ok(run.status.read().unwrap_or_else(|e| e.into_inner()).clone())
@@ -198,12 +230,14 @@ pub async fn get_processing_status(
 
 /// Get the current status of all workers.
 #[tauri::command]
-pub async fn get_worker_statuses(
-    state: State<'_, AppState>,
-) -> Result<Vec<WorkerStatus>, String> {
+pub async fn get_worker_statuses(state: State<'_, AppState>) -> Result<Vec<WorkerStatus>, String> {
     let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
-        Ok(run.workers.read().unwrap_or_else(|e| e.into_inner()).clone())
+        Ok(run
+            .workers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone())
     } else {
         Ok(Vec::new())
     }
@@ -211,12 +245,16 @@ pub async fn get_worker_statuses(
 
 /// Get recent file processing events.
 #[tauri::command]
-pub async fn get_recent_events(
-    state: State<'_, AppState>,
-) -> Result<Vec<FileEvent>, String> {
+pub async fn get_recent_events(state: State<'_, AppState>) -> Result<Vec<FileEvent>, String> {
     let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
-        Ok(run.recent_events.read().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect())
+        Ok(run
+            .recent_events
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect())
     } else {
         Ok(Vec::new())
     }
@@ -229,7 +267,11 @@ pub async fn get_top_compression(
 ) -> Result<Vec<CompressionResult>, String> {
     let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
     if let Some(ref run) = *active {
-        Ok(run.top_compression.read().unwrap_or_else(|e| e.into_inner()).clone())
+        Ok(run
+            .top_compression
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone())
     } else {
         Ok(Vec::new())
     }
