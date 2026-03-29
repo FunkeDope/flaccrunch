@@ -28,6 +28,7 @@ function renderBar(overrides: {
   const onCancel = vi.fn();
   const onReset = vi.fn();
   const onExport = vi.fn();
+  const onShowFullLog = vi.fn();
   const { rerender, ...rest } = render(
     <RunStatusBar
       status={overrides.status ?? "processing"}
@@ -37,9 +38,10 @@ function renderBar(overrides: {
       onCancel={onCancel}
       onReset={onReset}
       onExport={onExport}
+      onShowFullLog={onShowFullLog}
     />
   );
-  return { onCancel, onReset, onExport, rerender, ...rest };
+  return { onCancel, onReset, onExport, onShowFullLog, rerender, ...rest };
 }
 
 describe("RunStatusBar — labels", () => {
@@ -96,8 +98,9 @@ describe("RunStatusBar — buttons", () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
-  it("shows Export Log and New Run buttons on completion", () => {
+  it("shows Show Full Log, Export Log and New Run buttons on completion", () => {
     renderBar({ status: "complete" });
+    expect(screen.getByRole("button", { name: /show full log/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /export log/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /new run/i })).toBeInTheDocument();
   });
@@ -117,6 +120,12 @@ describe("RunStatusBar — buttons", () => {
     const { onExport } = renderBar({ status: "complete" });
     fireEvent.click(screen.getByRole("button", { name: /export log/i }));
     expect(onExport).toHaveBeenCalledOnce();
+  });
+
+  it("calls onShowFullLog when Show Full Log clicked", () => {
+    const { onShowFullLog } = renderBar({ status: "complete" });
+    fireEvent.click(screen.getByRole("button", { name: /show full log/i }));
+    expect(onShowFullLog).toHaveBeenCalledOnce();
   });
 });
 

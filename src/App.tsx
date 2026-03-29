@@ -1,15 +1,21 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { AppShell } from "./components/layout/AppShell";
 import { FolderSelector } from "./components/folders/FolderSelector";
 import { ProcessingDashboard } from "./components/processing/ProcessingDashboard";
 import { RunStatusBar } from "./components/processing/RunStatusBar";
+import { LogViewerModal } from "./components/processing/LogViewerModal";
 import { SettingsModal } from "./components/settings/SettingsPanel";
 import { useProcessing } from "./hooks/useProcessing";
 import { useSettings } from "./hooks/useSettings";
 
 function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [logViewerOpen, setLogViewerOpen] = useState(false);
+  const [logViewerLoading, setLogViewerLoading] = useState(false);
+  const [logViewerText, setLogViewerText] = useState("");
+  const [logViewerError, setLogViewerError] = useState<string | null>(null);
+  const logRequestIdRef = useRef(0);
   const processing = useProcessing();
   const settings = useSettings();
 
@@ -45,6 +51,33 @@ function App() {
     );
   }, [processing.counters, processing.workers]);
 
+  async function handleShowFullLog() {
+    const requestId = logRequestIdRef.current + 1;
+    logRequestIdRef.current = requestId;
+
+    setLogViewerOpen(true);
+    setLogViewerLoading(true);
+    setLogViewerText("");
+    setLogViewerError(null);
+
+    try {
+      const text = await processing.getLogText();
+      if (logRequestIdRef.current !== requestId) return;
+      setLogViewerText(text);
+      setLogViewerLoading(false);
+    } catch (error) {
+      if (logRequestIdRef.current !== requestId) return;
+      setLogViewerError(`Unable to load log: ${String(error)}`);
+      setLogViewerLoading(false);
+    }
+  }
+
+  function handleCloseLogViewer() {
+    logRequestIdRef.current += 1;
+    setLogViewerOpen(false);
+    setLogViewerLoading(false);
+  }
+
   return (
     <AppShell
       onSettingsClick={() => setSettingsOpen(true)}
@@ -73,6 +106,7 @@ function App() {
             onCancel={processing.cancelRun}
             onReset={processing.resetRun}
             onExport={processing.exportLog}
+            onShowFullLog={handleShowFullLog}
           />
         )}
 
@@ -106,6 +140,16 @@ function App() {
           appVersion={settings.appVersion}
           onUpdate={settings.updateSettings}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {logViewerOpen && (
+        <LogViewerModal
+          text={logViewerText}
+          loading={logViewerLoading}
+          error={logViewerError}
+          onSave={processing.exportLog}
+          onClose={handleCloseLogViewer}
         />
       )}
     </AppShell>

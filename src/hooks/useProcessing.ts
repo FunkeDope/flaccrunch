@@ -304,42 +304,49 @@ export function useProcessing() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  const exportLog = useCallback(() => {
-    setAllEvents((events) => {
-      setStartTime((st) => {
-        setEndTime((et) => {
-          setRunSettings((rs) => {
-            const now = et ?? Date.now();
-            const elapsedSecs = Math.round((now - (st ?? now)) / 1000);
-            const ts = new Date(now).toISOString().slice(0, 19).replace(/[T:]/g, "-");
-            const filename = `flaccrunch-log-${ts}.txt`;
-            api.getEfcLog(
-              events,
-              elapsedSecs,
-              currentFolders.join(", "),
-              st ?? now,
-              now,
-              rs?.threadCount ?? 1,
-              rs?.maxRetries ?? 3,
-              false,
-            ).then((logContent) => {
-              tauriSaveDialog({
-                title: "Save Log",
-                defaultPath: filename,
-                filters: [{ name: "Text files", extensions: ["txt"] }],
-              }).then((path) => {
-                if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
-              }).catch(() => {});
-            }).catch(() => {});
-            return rs;
+  const getLogText = useCallback(() => {
+    return new Promise<string>((resolve, reject) => {
+      setAllEvents((events) => {
+        setStartTime((st) => {
+          setEndTime((et) => {
+            setRunSettings((rs) => {
+              const now = et ?? Date.now();
+              const startedAt = st ?? now;
+              const elapsedSecs = Math.round((now - startedAt) / 1000);
+              api.getEfcLog(
+                events,
+                elapsedSecs,
+                currentFolders.join(", "),
+                startedAt,
+                now,
+                rs?.threadCount ?? 1,
+                rs?.maxRetries ?? 3,
+                false,
+              ).then(resolve).catch(reject);
+              return rs;
+            });
+            return et;
           });
-          return et;
+          return st;
         });
-        return st;
+        return events;
       });
-      return events;
     });
   }, [currentFolders]);
+
+  const exportLog = useCallback(() => {
+    void getLogText().then((logContent) => {
+      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+      const filename = `flaccrunch-log-${ts}.txt`;
+      tauriSaveDialog({
+        title: "Save Log",
+        defaultPath: filename,
+        filters: [{ name: "Text files", extensions: ["txt"] }],
+      }).then((path) => {
+        if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
+      }).catch(() => {});
+    }).catch(() => {});
+  }, [getLogText]);
 
   const addFolder = useCallback(async () => {
     try {
@@ -478,6 +485,7 @@ export function useProcessing() {
     cancelRun,
     resetRun,
     exportLog,
+    getLogText,
     testStorage,
   };
 }

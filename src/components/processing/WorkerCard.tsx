@@ -77,10 +77,14 @@ function hashColors(
   return { srcColor, outColor: "hash-neutral", embColor };
 }
 
-function abbrev(hash: string | undefined | null): string {
+function displayHash(hash: string | undefined | null): string {
   if (!hash || hash === NULL_MD5) return "null";
-  if (hash.length <= 12) return hash;
-  return `${hash.slice(0, 8)}…${hash.slice(-4)}`;
+  return hash;
+}
+
+function formatSavedPct(value: number): string {
+  const normalized = Math.abs(value) < 0.05 ? 0 : value;
+  return `${normalized.toFixed(1)}%↓`;
 }
 
 export function WorkerCard({ worker }: WorkerCardProps) {
@@ -109,7 +113,7 @@ export function WorkerCard({ worker }: WorkerCardProps) {
     if (!val || val === NULL_MD5) {
       return <span className="hash-val hash-missing" title="Embedded MD5 is null">null</span>;
     }
-    return <span className={`hash-val ${embColor}`} title={val}>{abbrev(val)}</span>;
+    return <span className={`hash-val ${embColor}`} title={val}>{displayHash(val)}</span>;
   }
 
   // PRE slot — always rendered
@@ -120,7 +124,7 @@ export function WorkerCard({ worker }: WorkerCardProps) {
     if (!srcReady) return <span className="hash-val hash-missing" title="Source hash unavailable">—</span>;
     return (
       <span className={`hash-val ${srcColor}`} title={worker.lastSourceHash}>
-        {abbrev(worker.lastSourceHash)}
+        {displayHash(worker.lastSourceHash)}
       </span>
     );
   }
@@ -133,12 +137,12 @@ export function WorkerCard({ worker }: WorkerCardProps) {
     if (!outReady) return <span className="hash-val hash-missing" title="Output hash unavailable">—</span>;
     return (
       <span className={`hash-val ${outColor}`} title={worker.lastOutputHash}>
-        {abbrev(worker.lastOutputHash)}
+        {displayHash(worker.lastOutputHash)}
       </span>
     );
   }
 
-  // Ratio shown during encoding; saved% shown after idle with result
+  // Raw encode ratio shown during encoding; saved% shown after idle with result
   const showRatio = isConverting && !!worker.ratio;
   const showSaved = !isActive && worker.lastCompressionPct !== undefined;
 
@@ -189,9 +193,9 @@ export function WorkerCard({ worker }: WorkerCardProps) {
                 {showSaved && (
                   <span
                     className={`hash-extra hash-saved ${worker.lastCompressionPct! >= 5 ? "hash-saved-good" : "hash-saved-low"}`}
-                    title={`Saved ${worker.lastCompressionPct!.toFixed(1)}%`}
+                    title={`Saved ${formatSavedPct(worker.lastCompressionPct!).replace("↓", "")}`}
                   >
-                    {worker.lastCompressionPct!.toFixed(1)}%↓
+                    {formatSavedPct(worker.lastCompressionPct!)}
                   </span>
                 )}
               </span>

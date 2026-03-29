@@ -14,8 +14,6 @@ interface RecentEventsTableProps {
   defaultSortDir?: SortDir;
 }
 
-const PREVIEW_COUNT = 10;
-
 type SortKey = "time" | "file" | "audio" | "art" | "pct" | "verify" | "status";
 type SortDir = "asc" | "desc";
 
@@ -42,7 +40,6 @@ function SortHeader({
 }
 
 export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "time", defaultSortDir = "desc" }: RecentEventsTableProps) {
-  const [showAll, setShowAll] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>(defaultSortKey);
   const [sortDir, setSortDir] = useState<SortDir>(defaultSortDir);
 
@@ -96,9 +93,8 @@ export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "
     return copy;
   }, [events, sortKey, sortDir]);
 
-  const limit = maxRows ?? (showAll ? Infinity : PREVIEW_COUNT);
+  const limit = maxRows ?? Infinity;
   const visible = sorted.slice(0, limit);
-  const hasMore = maxRows === undefined && sorted.length > PREVIEW_COUNT;
 
   return (
     <div className="events-table-shell">
@@ -176,14 +172,9 @@ export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "
           </tbody>
         </table>
       </div>
-      {hasMore && (
-        <div className="events-table-footer">
-          <span>{sorted.length} total files</span>
-          <button className="btn btn-ghost" onClick={() => setShowAll((s) => !s)}>
-            {showAll ? "Show less" : `Show all ${sorted.length}`}
-          </button>
-        </div>
-      )}
+      <div className="events-table-footer">
+        <span>{sorted.length} total files</span>
+      </div>
     </div>
   );
 }

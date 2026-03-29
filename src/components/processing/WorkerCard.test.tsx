@@ -140,7 +140,7 @@ describe("WorkerCard — hash colors: null embedded MD5", () => {
   });
 });
 
-describe("WorkerCard — abbrev hash display", () => {
+describe("WorkerCard — hash display", () => {
   it("shows 'null' for null MD5 constant", () => {
     render(
       <WorkerCard
@@ -154,7 +154,7 @@ describe("WorkerCard — abbrev hash display", () => {
     expect(screen.getByText("null")).toBeInTheDocument();
   });
 
-  it("shows abbreviated hash for long hashes", () => {
+  it("shows full hash text and lets CSS handle truncation", () => {
     render(
       <WorkerCard
         worker={makeWorker({
@@ -163,10 +163,8 @@ describe("WorkerCard — abbrev hash display", () => {
         })}
       />
     );
-    // HASH_A = "aabbccddaabbccddaabbccddaabbccdd"
-    // abbrev: first 8 chars + "…" + last 4 chars = "aabbccdd…ccdd"
-    const abbrevs = screen.getAllByText("aabbccdd…ccdd");
-    expect(abbrevs.length).toBeGreaterThanOrEqual(1);
+    const hashes = screen.getAllByText(HASH_A);
+    expect(hashes.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -182,7 +180,7 @@ describe("WorkerCard — progress", () => {
     expect(screen.getByText("42%")).toBeInTheDocument();
   });
 
-  it("shows ratio in OUT row during converting", () => {
+  it("shows raw ratio in OUT row during converting", () => {
     render(
       <WorkerCard
         worker={makeWorker({ state: "converting", percent: 10, ratio: "0.450" })}
@@ -198,5 +196,14 @@ describe("WorkerCard — progress", () => {
       />
     );
     expect(screen.getByText("12.5%↓")).toBeInTheDocument();
+  });
+
+  it("clamps tiny negative zero saved% to 0.0% after completion", () => {
+    render(
+      <WorkerCard
+        worker={makeWorker({ state: "idle", lastCompressionPct: -0.01 })}
+      />
+    );
+    expect(screen.getByText("0.0%↓")).toBeInTheDocument();
   });
 });

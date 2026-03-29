@@ -36,6 +36,27 @@ body {
   background: #008080;
 }
 
+.win98-shell :where(
+  div,
+  span,
+  p,
+  button,
+  label,
+  input,
+  select,
+  option,
+  legend,
+  table,
+  th,
+  td,
+  li,
+  a
+):not(pre):not(code):not(.log-viewer-text) {
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
+  font-smooth: never;
+}
+
 .app-window {
   height: calc(100vh - 16px);
   display: flex;
@@ -108,6 +129,62 @@ body {
 
 .settings-window {
   width: min(520px, calc(100vw - 20px));
+}
+
+.log-viewer-window {
+  width: min(80vw, 1120px);
+  height: min(80vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+
+.log-viewer-window.is-maximized {
+  width: calc(100vw - 16px);
+  height: calc(100vh - 16px);
+}
+
+.log-viewer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.log-viewer-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 2px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.log-viewer-text {
+  margin: 0;
+  display: block;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  padding: 6px;
+  border: none;
+  box-shadow: none;
+  color: #000;
+  background: #fff;
+  white-space: pre;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+  overflow: auto;
+}
+
+.log-viewer-placeholder {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  color: var(--muted);
+  overflow: auto;
 }
 
 .settings-body {
@@ -363,25 +440,32 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .section-kicker {
   color: var(--muted);
 }
 
+.worker-summary {
+  color: var(--muted);
+}
+
 .worker-body {
-  height: min(42vh, 410px);
-  min-height: 300px;
+  height: auto;
+  max-height: clamp(332px, 43vh, 414px);
+  min-height: 0;
   padding: 1px;
   overflow: auto;
 }
 
 .worker-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+  grid-template-columns: repeat(auto-fit, 200px);
   gap: 1px;
   background: var(--line-dark);
   align-content: start;
+  justify-content: start;
 }
 
 .worker-panel {
@@ -498,7 +582,7 @@ body {
   min-width: 0;
 }
 
-.hash-row-out .hash-val {
+.hash-row .hash-val {
   flex: 1;
 }
 
@@ -513,7 +597,6 @@ body {
 .hash-label {
   min-width: 22px;
   color: var(--muted);
-  font-size: 10px;
   font-weight: 700;
 }
 
@@ -524,7 +607,6 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: inherit;
-  font-size: 10px;
   cursor: default;
 }
 
@@ -654,7 +736,7 @@ body {
   }
 
   .worker-grid {
-    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+    grid-template-columns: repeat(auto-fit, 180px);
   }
 
   .worker-body {

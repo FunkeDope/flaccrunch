@@ -10,6 +10,7 @@ interface RunStatusBarProps {
   onCancel: () => void;
   onReset: () => void;
   onExport: () => void;
+  onShowFullLog: () => void;
 }
 
 function useElapsed(startTime: number | null, running: boolean): number {
@@ -32,6 +33,7 @@ export function RunStatusBar({
   onCancel,
   onReset,
   onExport,
+  onShowFullLog,
 }: RunStatusBarProps) {
   const isRunning = status === "processing" || status === "cancelling";
   const isComplete = status === "complete";
@@ -98,6 +100,9 @@ export function RunStatusBar({
             )}
             {isComplete && (
               <>
+                <button onClick={onShowFullLog} title="Show the full final log in a window">
+                  Show Full Log
+                </button>
                 <button onClick={onExport} title="Export log as text file">
                   Export Log
                 </button>

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh run:*)",
+      "Bash(gh.exe run:*)",
+      "Bash(\"/c/Program Files/GitHub CLI/gh.exe\" run list --limit 3)",
+      "Bash(\"/c/Users/$USER/AppData/Local/GitHub CLI/gh.exe\" run list --limit 3)"
+    ]
+  }
+}

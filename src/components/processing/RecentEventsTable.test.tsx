@@ -64,27 +64,19 @@ describe("RecentEventsTable — rendering", () => {
   });
 });
 
-describe("RecentEventsTable — show more / show all", () => {
+describe("RecentEventsTable — row visibility", () => {
   const manyEvents = Array.from({ length: 15 }, (_, i) =>
     makeEvent({ file: `/music/track${i}.flac`, time: `12:00:${String(i).padStart(2, "0")}` })
   );
 
-  it("shows at most 10 rows by default (PREVIEW_COUNT)", () => {
+  it("shows all rows by default", () => {
     render(<RecentEventsTable events={manyEvents} />);
-    // Events are reversed (newest first), so visible rows are track14…track5.
-    // track4 and below are beyond the 10-row limit.
-    expect(screen.queryByText("track4.flac")).toBeNull();
+    expect(screen.getByText("track4.flac")).toBeInTheDocument();
   });
 
-  it("shows 'Show all' button when more than 10 events", () => {
+  it("does not show a 'Show all' button", () => {
     render(<RecentEventsTable events={manyEvents} />);
-    expect(screen.getByRole("button", { name: /show all/i })).toBeInTheDocument();
-  });
-
-  it("expands to all rows when 'Show all' is clicked", () => {
-    render(<RecentEventsTable events={manyEvents} />);
-    fireEvent.click(screen.getByRole("button", { name: /show all/i }));
-    expect(screen.getByText("track10.flac")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /show all/i })).toBeNull();
   });
 
   it("respects maxRows prop to limit visible rows", () => {

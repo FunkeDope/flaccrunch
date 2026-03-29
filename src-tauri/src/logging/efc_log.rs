@@ -3,9 +3,9 @@ use crate::util::format::sha256_hex;
 use chrono::{Local, TimeZone};
 
 /// Format a value line in EAC style:
-///   `     {label:<18} {value}`
+///   `     {label:<20} {value}`
 fn eac_line(label: &str, value: &str) -> String {
-    format!("     {:<18} {}", label, value)
+    format!("     {:<20} {}", label, value)
 }
 
 /// Format bytes like PS Format-Bytes (unsigned): `"   01.50 KB"` (8-char right-aligned number).
@@ -21,6 +21,12 @@ fn fmt_bytes(bytes: u64) -> String {
         (v, "B")
     };
     format!("{:>8} {}", format!("{:05.2}", val), unit)
+}
+
+/// Format a percentage for log output while normalizing away negative zero.
+fn fmt_pct(pct: f64) -> String {
+    let normalized = if pct.abs() < 0.005 { 0.0 } else { pct };
+    format!("{:.2}%", normalized)
 }
 
 /// Format a Unix-ms timestamp as EAC log datetime: `"15. March 2026, 14:30"`.
@@ -94,9 +100,9 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
                 lines.push(eac_line(
                     "Net saved",
                     &format!(
-                        "{} ({:.2}%)",
+                        "{} ({})",
                         fmt_bytes(event.saved_bytes.unsigned_abs()),
-                        event.compression_pct
+                        fmt_pct(event.compression_pct)
                     ),
                 ));
                 lines.push(eac_line("Audio delta", "N/A"));
@@ -191,10 +197,10 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
         lines.push(String::new());
         for (i, tc) in summary.top_compression.iter().enumerate() {
             lines.push(format!(
-                "  {}. Saved {} ({:.2}%) | {}",
+                "  {}. Saved {} ({}) | {}",
                 i + 1,
                 fmt_bytes(tc.saved_bytes.unsigned_abs()),
-                tc.saved_pct,
+                fmt_pct(tc.saved_pct),
                 tc.path
             ));
         }
@@ -539,6 +545,25 @@ mod tests {
         assert!(
             output.contains("Abbey Road"),
             "album name must be last path component"
+        );
+    }
+
+    #[test]
+    fn test_efc_log_normalizes_negative_zero_percentage() {
+        let summary = make_run_summary(1, 1, 1, 0);
+        let mut event = make_file_event(FileStatus::OK, "/music/song.flac", "");
+        event.saved_bytes = 44;
+        event.compression_pct = -0.0001;
+
+        let output = generate_efc_log(&summary, &[event]);
+
+        assert!(
+            output.contains("(0.00%)"),
+            "negative zero should be normalized to 0.00%, got: {output}"
+        );
+        assert!(
+            !output.contains("(-0.00%)"),
+            "log output must not contain negative zero percent"
         );
     }
 }
