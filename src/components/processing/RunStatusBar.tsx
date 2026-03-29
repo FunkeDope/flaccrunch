@@ -73,111 +73,87 @@ export function RunStatusBar({
   // Savings breakdown
   const audioSaved = counters.totalSavedBytes - counters.totalArtworkSaved;
   const metaSaved = counters.totalMetadataSaved + counters.totalPaddingSaved;
+  const totalSavedPct =
+    counters.totalOriginalBytes > 0
+      ? (counters.totalSavedBytes / counters.totalOriginalBytes) * 100
+      : 0;
 
   return (
-    <div className={`run-status-bar ${barClass}`}>
-      <div className="status-bar-top">
-        <span className={`status-bar-label ${labelClass}`}>{labelText}</span>
-        <div className="status-bar-progress-wrap">
-          <div className="progress-bar">
-            <div
-              className={`fill ${isRunning ? "animated" : ""}`}
-              style={{
-                width: `${barPct}%`,
-                background: isComplete
-                  ? counters.failed === 0
-                    ? "var(--success)"
-                    : counters.successful === 0
-                    ? "var(--error)"
-                    : "var(--warning)"
-                  : undefined,
-              }}
+    <div className={`window run-status-window ${barClass}`}>
+      <div className="window-body run-status-body">
+        <div className="run-status-main">
+          <span className={`status-bar-label ${labelClass}`}>{labelText}</span>
+          <div className="progress-indicator segmented run-progress">
+            <span
+              className="progress-indicator-bar"
+              style={{ width: `${barPct}%` }}
             />
           </div>
-        </div>
-        <span className="status-bar-pct">{pct}%</span>
-        <div className="status-bar-actions">
-          {isRunning && (
-            <button
-              className="btn btn-danger"
-              onClick={onCancel}
-              disabled={status === "cancelling"}
-              style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }}
-            >
-              {status === "cancelling" ? "Cancelling…" : "Cancel"}
-            </button>
-          )}
-          {isComplete && (
-            <>
-              <button
-                className="btn btn-secondary"
-                onClick={onExport}
-                title="Export log as text file"
-                style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }}
-              >
-                Export Log
+          <span className="status-bar-pct">{pct}%</span>
+          <div className="status-bar-actions">
+            {isRunning && (
+              <button onClick={onCancel} disabled={status === "cancelling"}>
+                {status === "cancelling" ? "Cancelling…" : "Cancel"}
               </button>
-              <button
-                className="btn btn-primary"
-                onClick={onReset}
-                style={{ padding: "5px 14px", minHeight: 30, fontSize: 12 }}
-              >
-                New Run
-              </button>
-            </>
-          )}
+            )}
+            {isComplete && (
+              <>
+                <button onClick={onExport} title="Export log as text file">
+                  Export Log
+                </button>
+                <button className="default" onClick={onReset}>
+                  New Run
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="status-bar-stats">
-        <span className="stat-chip">
-          <strong>{counters.processed}</strong> / {counters.totalFiles} files
-        </span>
+      <div className="status-bar">
+        {counters.totalSavedBytes > 0 && (
+          <p className="status-bar-field">
+            Saved {formatBytes(counters.totalSavedBytes)}
+            {counters.totalOriginalBytes > 0 ? ` (${totalSavedPct.toFixed(1)}%)` : ""}
+          </p>
+        )}
+        <p className="status-bar-field">
+          {counters.processed}/{counters.totalFiles} files
+        </p>
         {isRunning && startTime && (
-          <span className="stat-chip">
-            {formatElapsed(elapsed)}
-          </span>
+          <p className="status-bar-field">{formatElapsed(elapsed)}</p>
         )}
         {isComplete && startTime && (
-          <span className="stat-chip">
+          <p className="status-bar-field">
             {formatElapsed(Math.floor((Date.now() - startTime) / 1000))}
-          </span>
+          </p>
         )}
-        <span className="stat-chip chip-success">
-          ✓ <strong>{counters.successful}</strong>
-        </span>
+        <p className="status-bar-field chip-success">
+          OK <strong>{counters.successful}</strong>
+        </p>
         {counters.failed > 0 && (
-          <span className="stat-chip chip-error">
-            ✗ <strong>{counters.failed}</strong>
-          </span>
+          <p className="status-bar-field chip-error">
+            Fail <strong>{counters.failed}</strong>
+          </p>
         )}
         {counters.totalSavedBytes > 0 && (
-          <span className="stat-chip chip-saved">
-            Audio: <strong>{formatBytes(audioSaved > 0 ? audioSaved : counters.totalSavedBytes)}</strong>
-          </span>
+          <p className="status-bar-field">
+            Audio {formatBytes(audioSaved > 0 ? audioSaved : counters.totalSavedBytes)}
+          </p>
         )}
         {counters.totalArtworkSaved > 0 && (
-          <span className="stat-chip chip-art">
-            Art: <strong>{formatBytes(counters.totalArtworkSaved)}</strong>
-          </span>
+          <p className="status-bar-field">Art {formatBytes(counters.totalArtworkSaved)}</p>
         )}
         {metaSaved > 0 && (
-          <span className="stat-chip">
-            Meta: <strong>{formatBytes(metaSaved)}</strong>
-          </span>
+          <p className="status-bar-field">Meta {formatBytes(metaSaved)}</p>
         )}
         {isComplete && counters.totalFiles > 0 && (
-          <span className="stat-chip">
-            Rate:{" "}
-            <strong>
-              {((counters.successful / counters.totalFiles) * 100).toFixed(1)}%
-            </strong>
-          </span>
+          <p className="status-bar-field">
+            Rate {((counters.successful / counters.totalFiles) * 100).toFixed(1)}%
+          </p>
         )}
         {isComplete && counters.artworkOptimizedFiles > 0 && (
-          <span className="stat-chip chip-art">
-            Art files: <strong>{counters.artworkOptimizedFiles}</strong>
-          </span>
+          <p className="status-bar-field">Art files {counters.artworkOptimizedFiles}</p>
         )}
       </div>
     </div>

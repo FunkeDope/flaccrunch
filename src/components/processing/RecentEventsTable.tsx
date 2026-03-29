@@ -101,9 +101,9 @@ export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "
   const hasMore = maxRows === undefined && sorted.length > PREVIEW_COUNT;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
-      <div className="events-table-wrap">
-        <table className="events-table">
+    <div className="events-table-shell">
+      <div className="sunken-panel events-table-wrap">
+        <table className="events-table interactive">
           <thead>
             <tr>
               <SortHeader label="Time"   col="time"   current={sortKey} dir={sortDir} onSort={handleSort} />

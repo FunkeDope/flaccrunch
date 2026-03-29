@@ -17,36 +17,37 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
     <div className="modal-overlay" onClick={(e) => {
       if (e.target === e.currentTarget) onClose();
     }}>
-      <div className="modal">
-        <div className="modal-header">
-          <h2>Settings</h2>
-          <button className="btn-icon modal-close" onClick={onClose} aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="4" y1="4" x2="14" y2="14" />
-              <line x1="14" y1="4" x2="4" y2="14" />
-            </svg>
-          </button>
+      <div className="window modal settings-window">
+        <div className="title-bar">
+          <div className="title-bar-text">Settings</div>
+          <div className="title-bar-controls">
+            <button aria-label="Close" onClick={onClose} />
+          </div>
         </div>
-        <div className="modal-body">
+        <div className="window-body modal-body settings-body">
           {appVersion && (
-            <div style={{ textAlign: "center", marginBottom: 12, color: "var(--text-muted)", fontSize: 12 }}>
+            <div className="settings-version">
               FlacCrunch v{appVersion}
             </div>
           )}
-          <div className="card">
-            <h3>Performance</h3>
+          <fieldset className="settings-section">
+            <legend>Performance</legend>
             <ThreadSlider
               value={threadCount}
               max={cpuCount}
               onChange={(v) => onUpdate({ threadCount: v })}
             />
-          </div>
-          <div className="card">
-            <h3>Processing</h3>
+          </fieldset>
+          <fieldset className="settings-section">
+            <legend>Processing</legend>
             <div className="settings-group">
-              <label>
+              <label className="field-row-stacked">
+                <span>
                 Max Retries Per File
-                <span className="settings-value">{settings.maxRetries}</span>
+                  <span className="settings-value">
+                    {settings.maxRetries}
+                  </span>
+                </span>
               </label>
               <input
                 type="range"
@@ -56,30 +57,31 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
                 onChange={(e) => onUpdate({ maxRetries: parseInt(e.target.value) })}
               />
             </div>
-          </div>
-          <div className="card">
-            <h3>Logging</h3>
+          </fieldset>
+          <fieldset className="settings-section">
+            <legend>Logging</legend>
             <div className="settings-group">
-              <label className="settings-toggle-row">
-                <span>
-                  Verbose Logging
-                  <span className="settings-hint">Write an EFC-format log to disk after each run</span>
-                </span>
-                <button
-                  className={`toggle ${settings.verboseLogging ? "toggle-on" : ""}`}
-                  onClick={() => onUpdate({ verboseLogging: !settings.verboseLogging })}
-                  aria-pressed={settings.verboseLogging}
-                  aria-label="Toggle verbose logging"
+              <div className="field-row">
+                <input
+                  id="verbose-logging"
+                  type="checkbox"
+                  checked={settings.verboseLogging}
+                  onChange={() => onUpdate({ verboseLogging: !settings.verboseLogging })}
                 />
-              </label>
+                <label htmlFor="verbose-logging">Verbose logging</label>
+              </div>
+              <div className="settings-hint">Write an EFC-format log to disk after each run</div>
             </div>
             {settings.verboseLogging && (
-              <div className="settings-group" style={{ marginTop: 10 }}>
-                <label>
-                  Log Folder
-                  <span className="settings-hint">{settings.logFolder ? "" : `Default: ${defaultLogFolder}`}</span>
-                </label>
+              <div className="settings-group">
+                <div className="field-row-stacked">
+                  <label htmlFor="log-folder">Log Folder</label>
+                  <span className="settings-hint">
+                    {settings.logFolder ? "" : `Default: ${defaultLogFolder}`}
+                  </span>
+                </div>
                 <input
+                  id="log-folder"
                   type="text"
                   className="settings-input"
                   placeholder={defaultLogFolder}
@@ -89,6 +91,10 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
                 />
               </div>
             )}
+          </fieldset>
+          <div className="field-row settings-actions">
+            <button className="default" onClick={onClose}>OK</button>
+            <button onClick={onClose}>Cancel</button>
           </div>
         </div>
       </div>

@@ -101,25 +101,41 @@ export function WorkerCard({ worker }: WorkerCardProps) {
 
   // EMB slot — always rendered
   function embSlot() {
-    if (isHashingSrc && !embReady) return <span className="hash-val hash-computing">…</span>;
-    if (!embReady) return <span className="hash-val hash-missing">—</span>;
+    if (isHashingSrc && !embReady) {
+      return <span className="hash-val hash-computing" title="Computing embedded MD5">…</span>;
+    }
+    if (!embReady) return <span className="hash-val hash-missing" title="No embedded MD5">—</span>;
     const val = worker.lastEmbeddedMd5;
-    if (!val || val === NULL_MD5) return <span className="hash-val hash-missing">null</span>;
-    return <span className={`hash-val ${embColor}`}>{abbrev(val)}</span>;
+    if (!val || val === NULL_MD5) {
+      return <span className="hash-val hash-missing" title="Embedded MD5 is null">null</span>;
+    }
+    return <span className={`hash-val ${embColor}`} title={val}>{abbrev(val)}</span>;
   }
 
   // PRE slot — always rendered
   function srcSlot() {
-    if (isHashingSrc && !srcReady) return <span className="hash-val hash-computing">…</span>;
-    if (!srcReady) return <span className="hash-val hash-missing">—</span>;
-    return <span className={`hash-val ${srcColor}`}>{abbrev(worker.lastSourceHash)}</span>;
+    if (isHashingSrc && !srcReady) {
+      return <span className="hash-val hash-computing" title="Computing source hash">…</span>;
+    }
+    if (!srcReady) return <span className="hash-val hash-missing" title="Source hash unavailable">—</span>;
+    return (
+      <span className={`hash-val ${srcColor}`} title={worker.lastSourceHash}>
+        {abbrev(worker.lastSourceHash)}
+      </span>
+    );
   }
 
   // OUT slot — always rendered
   function outSlot() {
-    if (isHashingOut && !outReady) return <span className="hash-val hash-computing">…</span>;
-    if (!outReady) return <span className="hash-val hash-missing">—</span>;
-    return <span className={`hash-val ${outColor}`}>{abbrev(worker.lastOutputHash)}</span>;
+    if (isHashingOut && !outReady) {
+      return <span className="hash-val hash-computing" title="Computing output hash">…</span>;
+    }
+    if (!outReady) return <span className="hash-val hash-missing" title="Output hash unavailable">—</span>;
+    return (
+      <span className={`hash-val ${outColor}`} title={worker.lastOutputHash}>
+        {abbrev(worker.lastOutputHash)}
+      </span>
+    );
   }
 
   // Ratio shown during encoding; saved% shown after idle with result
@@ -127,51 +143,60 @@ export function WorkerCard({ worker }: WorkerCardProps) {
   const showSaved = !isActive && worker.lastCompressionPct !== undefined;
 
   return (
-    <div className={`worker-card ${isActive ? "active" : "idle-card"}`}>
-      <div className="worker-header">
-        <span className="worker-id">#{worker.id + 1}</span>
-        <span className={`worker-stage ${getStageColor(worker.state)}`}>
-          {getStageLabel(worker.state)}
-        </span>
-      </div>
-      <div className="file-name">
-        {worker.file ? (worker.file.split(/[/\\]/).pop() ?? worker.file) : "idle"}
-      </div>
-
-      {/* Progress bar — always reserve height, hide when not active */}
-      <div className="worker-progress-row" style={{ visibility: isActive ? "visible" : "hidden" }}>
-        <div className="progress-bar">
-          <div className="fill" style={{ width: `${worker.percent}%` }} />
+    <div className={`worker-card worker-panel ${isActive ? "active" : "idle-card"}`}>
+      <div className="worker-panel-top">
+        <div className="worker-id">#{worker.id + 1}</div>
+        <div className="worker-stage-cell">
+          <span className={`worker-stage ${getStageColor(worker.state)}`}>
+            {getStageLabel(worker.state)}
+          </span>
         </div>
-        {isConverting && worker.percent > 0 && (
-          <span className="worker-percent">{worker.percent}%</span>
-        )}
       </div>
+      <div className="worker-file-cell">
+        <div className="file-name" title={worker.file ?? "idle"}>
+          {worker.file ? (worker.file.split(/[/\\]/).pop() ?? worker.file) : "idle"}
+        </div>
 
-      {/* Always render all 3 hash rows — fixed height, no layout shift */}
-      <div className="worker-hashes">
-        <div className="hash-row">
+        <div className="worker-progress-row" style={{ visibility: isActive ? "visible" : "hidden" }}>
+          <div className="progress-indicator worker-progress">
+            <span className="progress-indicator-bar" style={{ width: `${worker.percent}%` }} />
+          </div>
+          {isConverting && worker.percent > 0 && (
+            <span className="worker-percent">{worker.percent}%</span>
+          )}
+        </div>
+      </div>
+      <div className="sunken-panel worker-hash-panel">
+        <div className="worker-hashes">
+          <div className="hash-row">
           <span className="hash-label">EMB</span>
           {embSlot()}
-        </div>
-        <div className="hash-row">
+          </div>
+          <div className="hash-row">
           <span className="hash-label">PRE</span>
           {srcSlot()}
-        </div>
-        <div className="hash-row">
-          <span className="hash-label">OUT</span>
-          {outSlot()}
-          {showRatio && (
-            <span className="hash-extra hash-match">≈{worker.ratio}</span>
-          )}
-          {showSaved && (
-            <span
-              className="hash-extra"
-              style={{ color: worker.lastCompressionPct! >= 5 ? "var(--success)" : "var(--text-muted)" }}
-            >
-              {worker.lastCompressionPct!.toFixed(1)}%↓
-            </span>
-          )}
+          </div>
+          <div className="hash-row hash-row-out">
+            <span className="hash-label">OUT</span>
+            {outSlot()}
+            {(showRatio || showSaved) && (
+              <span className="hash-metric-lane">
+                {showRatio && (
+                  <span className="hash-extra hash-match" title={`Compression ratio ${worker.ratio}`}>
+                    ≈{worker.ratio}
+                  </span>
+                )}
+                {showSaved && (
+                  <span
+                    className={`hash-extra hash-saved ${worker.lastCompressionPct! >= 5 ? "hash-saved-good" : "hash-saved-low"}`}
+                    title={`Saved ${worker.lastCompressionPct!.toFixed(1)}%`}
+                  >
+                    {worker.lastCompressionPct!.toFixed(1)}%↓
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>

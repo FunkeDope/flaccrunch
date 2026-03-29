@@ -31,6 +31,7 @@ export function FolderSelector({
   const [localFolderDragOver, setLocalFolderDragOver] = useState(false);
   const [localFileDragOver, setLocalFileDragOver] = useState(false);
   const [mobile, setMobile] = useState(false);
+  const [showQueue, setShowQueue] = useState(false);
 
   // Native OS drag highlights both zones (we can't detect file vs folder until drop)
   const folderDragOver = nativeDragOver || localFolderDragOver;
@@ -44,111 +45,101 @@ export function FolderSelector({
 
   // During/after processing: show a compact "add more" strip
   if (isActive) {
-    const queueLabel =
-      folders.length === 0
-        ? "Queue additional files while processing"
-        : folders.length === 1
-        ? folders[0]
-        : `${folders[0]}  (+${folders.length - 1} more)`;
-
     return (
-      <div className="folder-section">
+      <>
         {error && <div className="error-banner">{error}</div>}
-        <div className="add-more-strip">
-          <span className="queue-label" title={folders.join("\n")}>
-            {queueLabel}
-          </span>
-          {mobile ? (
-            <button className="btn btn-secondary" style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }} onClick={onAddFiles}>
-              + Files
-            </button>
-          ) : (
-            <>
-              <button className="btn btn-secondary" style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }} onClick={onAddFolder}>
-                + Folder
-              </button>
-              <button className="btn btn-secondary" style={{ padding: "5px 12px", minHeight: 30, fontSize: 12 }} onClick={onAddFiles}>
-                + Files
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+      </>
     );
   }
 
   // Idle state: full UI
   return (
-    <div className="folder-section">
+    <fieldset className="folder-section start-fieldset">
+      <legend>Source Selection</legend>
       {error && <div className="error-banner">{error}</div>}
+      <div className="start-screen-copy">
+        <p>Select FLAC folders or files from the toolbar, then continue.</p>
+        <p>
+          {folders.length === 0
+            ? "No items selected."
+            : `${folders.length} ${folders.length === 1 ? "item" : "items"} selected.`}
+        </p>
+      </div>
 
       {mobile ? (
-        <div className="drop-zone drop-zone-mobile" onClick={onAddFiles}>
-          Tap to select FLAC files
+        <div className="drop-zone sunken-panel drop-zone-mobile" onClick={onAddFiles}>
+          <strong className="drop-zone-title">Tap to add FLAC files</strong>
         </div>
       ) : (
-        <div className="drop-zone-row">
+        <div className="drop-zone-row intake-drop-grid">
           <div
-            className={`drop-zone ${folderDragOver ? "active" : ""}`}
+            className={`drop-zone sunken-panel ${folderDragOver ? "active" : ""}`}
             onClick={onAddFolder}
             onDragOver={(e) => { e.preventDefault(); setLocalFolderDragOver(true); }}
             onDragLeave={() => setLocalFolderDragOver(false)}
             onDrop={(e) => { e.preventDefault(); setLocalFolderDragOver(false); }}
           >
-            Drop folders here or click to browse
+            <strong className="drop-zone-title">Drop folders</strong>
+            <span className="drop-zone-note">or click to browse</span>
           </div>
           <div
-            className={`drop-zone ${fileDragOver ? "active" : ""}`}
+            className={`drop-zone sunken-panel ${fileDragOver ? "active" : ""}`}
             onClick={onAddFiles}
             onDragOver={(e) => { e.preventDefault(); setLocalFileDragOver(true); }}
             onDragLeave={() => setLocalFileDragOver(false)}
             onDrop={(e) => { e.preventDefault(); setLocalFileDragOver(false); }}
           >
-            Drop files here or click to add individual FLAC files
+            <strong className="drop-zone-title">Drop files</strong>
+            <span className="drop-zone-note">or click to browse</span>
           </div>
         </div>
       )}
 
-      {folders.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h2>Selected ({folders.length})</h2>
-          </div>
-          <ul className="folder-list">
-            {folders.map((folder) => (
-              <li key={folder} className="folder-item">
-                <span className="path" title={folder}>{mobile ? (folder.split('/').pop() || folder) : folder}</span>
-                <button
-                  className="remove-btn"
-                  onClick={() => onRemoveFolder(folder)}
-                  title="Remove"
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <div className="intake-footer" style={mobile ? { marginTop: 20 } : undefined}>
+        {folders.length > 0 && (
+          <>
+            <div className="field-row queue-toggle-row">
+              <button
+                type="button"
+                className="queue-peek"
+                aria-expanded={showQueue}
+                onClick={() => setShowQueue((value) => !value)}
+              >
+                {showQueue ? "Hide queue" : `Show queue (${folders.length})`}
+              </button>
+            </div>
 
-      <div className="action-bar" style={mobile ? { justifyContent: "center", marginTop: 20 } : undefined}>
-        {mobile && (
-          <button
-            className="btn btn-secondary"
-            onClick={onTestStorage}
-            style={{ marginRight: 12 }}
-          >
-            Test Storage
-          </button>
+            {showQueue && (
+              <div className="sunken-panel queue-list-panel">
+                <ul className="folder-list">
+                  {folders.map((folder) => (
+                    <li key={folder} className="folder-item">
+                      <span className="path" title={folder}>
+                        {mobile ? (folder.split("/").pop() || folder) : folder}
+                      </span>
+                      <button
+                        className="remove-btn"
+                        onClick={() => onRemoveFolder(folder)}
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
         )}
-        <button
-          className={`btn btn-primary${mobile ? " btn-mobile-start" : " btn-full"}`}
-          onClick={onStart}
-          disabled={!canStart}
-        >
-          Start Processing
-        </button>
+        <div className="start-footer-actions">
+          {mobile && (
+            <button onClick={onTestStorage}>Test Storage</button>
+          )}
+          <button className="default start-next-button" onClick={onStart} disabled={!canStart}>
+            Start &gt;
+          </button>
+        </div>
       </div>
-    </div>
+    </fieldset>
   );
 }

@@ -14,6 +14,7 @@ function App() {
   const settings = useSettings();
 
   const isActive = processing.status !== "idle";
+  const queueCount = processing.folders.length;
 
   useEffect(() => {
     if (settings.appVersion) {
@@ -45,39 +46,57 @@ function App() {
   }, [processing.counters, processing.workers]);
 
   return (
-    <AppShell onSettingsClick={() => setSettingsOpen(true)}>
-      {isActive && (
-        <RunStatusBar
+    <AppShell
+      onSettingsClick={() => setSettingsOpen(true)}
+      onAddFolder={processing.addFolder}
+      onAddFiles={processing.addFiles}
+      showQueueActions={!isActive}
+    >
+      <div className="app-stack">
+        {!isActive && (
+          <div className="status-bar app-summary-bar">
+            <p className="status-bar-field">Queue: {queueCount}</p>
+            <p className="status-bar-field">Threads: {settings.processingSettings.threadCount}</p>
+            <p className="status-bar-field">Retries: {settings.processingSettings.maxRetries}</p>
+            <p className="status-bar-field">
+              Logging: {settings.processingSettings.verboseLogging ? "On" : "Off"}
+            </p>
+          </div>
+        )}
+
+        {isActive && (
+          <RunStatusBar
+            status={processing.status}
+            counters={processing.counters}
+            startTime={processing.startTime}
+            livePct={livePct}
+            onCancel={processing.cancelRun}
+            onReset={processing.resetRun}
+            onExport={processing.exportLog}
+          />
+        )}
+
+        <FolderSelector
+          folders={processing.folders}
+          onAddFolder={processing.addFolder}
+          onAddFiles={processing.addFiles}
+          onRemoveFolder={processing.removeFolder}
+          onStart={() => processing.startRun(settings.processingSettings)}
+          onTestStorage={processing.testStorage}
+          canStart={processing.folders.length > 0 && processing.status === "idle"}
           status={processing.status}
-          counters={processing.counters}
-          startTime={processing.startTime}
-          livePct={livePct}
-          onCancel={processing.cancelRun}
-          onReset={processing.resetRun}
-          onExport={processing.exportLog}
+          error={processing.error}
+          isDragOver={processing.isDragOver}
         />
-      )}
 
-      <FolderSelector
-        folders={processing.folders}
-        onAddFolder={processing.addFolder}
-        onAddFiles={processing.addFiles}
-        onRemoveFolder={processing.removeFolder}
-        onStart={() => processing.startRun(settings.processingSettings)}
-        onTestStorage={processing.testStorage}
-        canStart={processing.folders.length > 0 && processing.status === "idle"}
-        status={processing.status}
-        error={processing.error}
-        isDragOver={processing.isDragOver}
-      />
-
-      {isActive && (
-        <ProcessingDashboard
-          workers={processing.workers}
-          recentEvents={processing.recentEvents}
-          topCompression={processing.topCompression}
-        />
-      )}
+        {isActive && (
+          <ProcessingDashboard
+            workers={processing.workers}
+            recentEvents={processing.recentEvents}
+            topCompression={processing.topCompression}
+          />
+        )}
+      </div>
 
       {settingsOpen && (
         <SettingsModal
