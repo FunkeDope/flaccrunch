@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { WorkerGrid } from "./WorkerGrid";
 import { RecentEventsTable } from "./RecentEventsTable";
 import type {
@@ -17,6 +17,33 @@ export function ProcessingDashboard({
   recentEvents,
 }: ProcessingDashboardProps) {
   const [workersCollapsed, setWorkersCollapsed] = useState(false);
+  const [splitRatio, setSplitRatio] = useState(0.5);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const ratio = (ev.clientY - rect.top) / rect.height;
+      setSplitRatio(Math.max(0.1, Math.min(0.85, ratio)));
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
 
   const convertingCount = workers.filter((worker) => worker.state === "converting").length;
   const hashingCount = workers.filter(
@@ -39,9 +66,18 @@ export function ProcessingDashboard({
     ? workerSummaryParts.join(" | ")
     : "waiting for work";
 
+  const showWorkers = workers.length > 0;
+  const gridRows = showWorkers
+    ? `minmax(0, ${splitRatio}fr) auto minmax(0, ${1 - splitRatio}fr)`
+    : "minmax(0, 1fr)";
+
   return (
-    <div className="processing-section">
-      {workers.length > 0 && (
+    <div
+      className="processing-section"
+      ref={containerRef}
+      style={{ gridTemplateRows: gridRows }}
+    >
+      {showWorkers && (
         <fieldset className="workers-pane">
           <legend>Workers</legend>
           <div className="pane-toolbar">
@@ -66,6 +102,14 @@ export function ProcessingDashboard({
             </div>
           )}
         </fieldset>
+      )}
+
+      {showWorkers && (
+        <div
+          className="resize-handle"
+          onMouseDown={handleDragStart}
+          onDoubleClick={() => setSplitRatio(0.5)}
+        />
       )}
 
       <fieldset className="files-pane">

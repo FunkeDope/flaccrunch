@@ -140,7 +140,7 @@ export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "
                   </td>
                   <td>
                     {event.compressionPct > 0 ? (
-                      <span style={{ color: event.compressionPct >= 10 ? "var(--success)" : event.compressionPct >= 5 ? "var(--warning)" : "var(--text-muted)" }}>
+                      <span style={{ color: event.compressionPct >= 10 ? "var(--ok)" : event.compressionPct >= 5 ? "var(--warn)" : "var(--muted)" }}>
                         {event.compressionPct.toFixed(1)}%
                       </span>
                     ) : (
@@ -151,12 +151,12 @@ export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "
                     {(() => {
                       const v = (event.verification || event.detail || "").toLowerCase();
                       const color = v.startsWith("mismatch") || v.startsWith("fail")
-                        ? "var(--error)"
+                        ? "var(--fail)"
                         : v.startsWith("match") || v === "ok"
-                        ? "var(--success)"
+                        ? "var(--ok)"
                         : v.includes("warn") || v.includes("error")
-                        ? "var(--warning)"
-                        : "var(--text-muted)";
+                        ? "var(--warn)"
+                        : "var(--muted)";
                       return <span style={{ color }}>{event.verification || event.detail || "—"}</span>;
                     })()}
                   </td>
@@ -166,7 +166,7 @@ export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "
             {minRows !== undefined &&
               Array.from({ length: Math.max(0, minRows - visible.length) }).map((_, i) => (
                 <tr key={`placeholder-${i}`} className="placeholder-row">
-                  <td colSpan={7} style={{ color: "var(--text-muted)", textAlign: "center" }}>—</td>
+                  <td colSpan={7} style={{ color: "var(--muted)", textAlign: "center" }}>—</td>
                 </tr>
               ))}
           </tbody>

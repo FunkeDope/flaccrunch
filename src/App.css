@@ -34,28 +34,10 @@ body {
   height: 100vh;
   padding: 8px;
   background: #008080;
-}
-
-.win98-shell :where(
-  div,
-  span,
-  p,
-  button,
-  label,
-  input,
-  select,
-  option,
-  legend,
-  table,
-  th,
-  td,
-  li,
-  a
-):not(pre):not(code):not(.log-viewer-text) {
   -webkit-font-smoothing: none;
-  text-rendering: optimizeSpeed;
   font-smooth: never;
 }
+
 
 .app-window {
   height: calc(100vh - 16px);
@@ -409,10 +391,26 @@ body {
 
 .processing-section {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 6px;
+  gap: 0;
   flex: 1;
   min-height: 0;
+}
+
+.resize-handle {
+  height: 7px;
+  cursor: row-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resize-handle::after {
+  content: "";
+  width: 36px;
+  height: 3px;
+  border-top: 1px solid #dfdfdf;
+  border-bottom: 1px solid #808080;
+  background: #c0c0c0;
 }
 
 .workers-pane,
@@ -420,6 +418,12 @@ body {
 .top-saved-pane {
   margin: 0;
   min-width: 0;
+  min-height: 0;
+}
+
+.workers-pane {
+  display: flex;
+  flex-direction: column;
 }
 
 .files-pane {
@@ -452,8 +456,7 @@ body {
 }
 
 .worker-body {
-  height: auto;
-  max-height: clamp(332px, 43vh, 414px);
+  flex: 1;
   min-height: 0;
   padding: 1px;
   overflow: auto;
@@ -461,11 +464,10 @@ body {
 
 .worker-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, 200px);
+  grid-template-columns: repeat(auto-fill, 200px);
   gap: 1px;
   background: var(--line-dark);
   align-content: start;
-  justify-content: start;
 }
 
 .worker-panel {
@@ -736,11 +738,7 @@ body {
   }
 
   .worker-grid {
-    grid-template-columns: repeat(auto-fit, 180px);
-  }
-
-  .worker-body {
-    height: min(40vh, 360px);
+    grid-template-columns: repeat(auto-fill, 180px);
   }
 }
 
@@ -758,7 +756,7 @@ body {
   }
 
   .worker-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, 160px);
   }
 
   .start-footer-actions {
