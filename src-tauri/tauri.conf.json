@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerdicer/tauri-v2-schema/refs/heads/main/tauri.conf.json",
   "productName": "FlacCrunch",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "identifier": "com.flaccrunch.app",
   "build": {
     "frontendDist": "../dist",
