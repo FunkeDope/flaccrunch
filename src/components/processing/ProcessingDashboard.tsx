@@ -17,7 +17,7 @@ export function ProcessingDashboard({
   recentEvents,
 }: ProcessingDashboardProps) {
   const [workersCollapsed, setWorkersCollapsed] = useState(false);
-  const [splitRatio, setSplitRatio] = useState(0.5);
+  const [splitRatio, setSplitRatio] = useState(0.75);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {

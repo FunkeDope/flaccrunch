@@ -466,7 +466,7 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, 200px);
   gap: 1px;
-  background: var(--line-dark);
+  background: var(--pane-bg);
   align-content: start;
 }
 
@@ -728,20 +728,6 @@ body {
   text-align: center;
 }
 
-@media (max-width: 900px) {
-  .run-status-main {
-    grid-template-columns: 1fr;
-  }
-
-  .status-bar-actions {
-    flex-wrap: wrap;
-  }
-
-  .worker-grid {
-    grid-template-columns: repeat(auto-fill, 180px);
-  }
-}
-
 @media (max-width: 640px) {
   .win98-shell {
     padding: 4px;
@@ -753,10 +739,6 @@ body {
 
   .drop-zone-row {
     flex-direction: column;
-  }
-
-  .worker-grid {
-    grid-template-columns: repeat(auto-fill, 160px);
   }
 
   .start-footer-actions {
