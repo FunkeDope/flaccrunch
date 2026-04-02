@@ -39,6 +39,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          prefix-key: v1-rust-check-backend
 
       - name: Install Linux dependencies
         run: |
