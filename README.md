@@ -28,11 +28,11 @@ Get the latest build from [GitHub Releases](../../releases).
 - **PADDING removal** — all PADDING metadata blocks stripped; savings tracked separately
 - **Full metadata preservation** — all Vorbis comments, PICTURE blocks, cue sheets, and application metadata copied to re-encoded output
 - **Multi-threaded worker pool** — configurable thread count, defaults to CPU count − 1
-- **Live dashboard** — per-worker progress bars, live compression ratio, hash values with color-coded verification
+- **Live dashboard** — per-worker progress with collapse/expand, drag-to-resize split between workers and file results, live hash verification display
+- **In-app log viewer** — view the full run log in a modal window; also exportable as a text file
 - **CLI mode** — `-silent` flag skips the GUI entirely and prints results to stdout
 - **GUI pre-load** — pass paths on the command line to open the GUI with folders already loaded
 - **Drag-and-drop** — drop folders or files directly onto the app window (desktop)
-- **Export log** — save a full run summary as a text file after completion
 - **Configurable retries** — failed files automatically re-queued up to N times (default 3)
 
 ---
@@ -92,36 +92,50 @@ Files are only replaced when verification passes. The live progress bar blends c
 
 ## UI Overview
 
+The UI uses a Win98-inspired desktop window aesthetic with a toolbar, fieldset panels, and a status bar.
+
+### Toolbar
+Shown at the top of the app window at all times:
+- **Folder...** / **Files...** buttons — add folders or individual FLAC files to the queue (hidden during active processing)
+- **Settings...** — opens the settings dialog
+- Brand tagline on the right
+
+### Idle Summary Bar
+Shown when no run is active. Displays current queue count, thread count, retry limit, and verbose logging state at a glance.
+
 ### Run Status Bar
 Shown during and after processing:
 - Live-blended overall progress bar + percentage
-- File counter (`X / Y files`), elapsed time
-- Byte savings breakdown: audio saved, artwork saved, metadata saved
-- **Cancel** button during processing; **New Run** and **Export Log** buttons on completion
+- **Cancel** button during processing
+- On completion: **Show Full Log** (opens in-app viewer), **Export Log** (save to file), **New Run**
+- Status bar strip below the progress bar: total saved (bytes + %), file counter, elapsed time, OK/Fail counts, per-category savings (audio, artwork, metadata), success rate, artwork file count
 
-### Worker Grid
-One card per worker thread. Each card shows:
-- Current filename and processing stage
+### Worker Pane
+A collapsible `fieldset` panel showing one card per worker thread. A summary line always shows worker state breakdown (e.g. `4 converting | 2 hashing | 1 idle`). Each card shows:
+- Current filename and processing stage badge
 - Encoding progress bar + live percentage
 - Live compression ratio (output bytes ÷ PCM bytes consumed), e.g. `≈0.433`
 - Three hash rows — `EMB` (original embedded MD5), `PRE` (pre-encode decoded audio), `OUT` (post-encode decoded audio)
 - Hash color coding: **green** = verified match, **red** = mismatch, **yellow** = alternative verification, **dim** = present but unverified
 - Saved percentage shown after file completes, e.g. `22.1%↓`
+- **Collapse/Expand** toggle to hide cards and reclaim screen space
 
-### Top Compression
-Top 3 files by total byte savings (audio + artwork), updated live. Shows filename, bytes saved, and savings percentage. Placeholder rows shown until results arrive.
+### Drag-to-Resize Split
+A draggable divider between the Workers pane and the Files pane. Double-click to reset to 50/50. Drag to any ratio from 10/90 to 85/15.
 
-### Recent Events Table
-All processed files, newest first. Columns: time, status (OK / FAIL / RETRY), filename, audio saved, artwork saved, total savings %, verification code. Color-coded by verification result. Expandable to show full history.
+### Files Pane
+All processed files in a `fieldset` panel, sorted by savings % descending by default. Columns: time, status (OK / FAIL / RETRY), filename, audio saved, artwork saved, total savings %, verification code. Color-coded rows by compression tier. All columns sortable. Count shown in pane header.
 
-### Folder Selector
-- **Desktop:** drag-and-drop zone + Add Folder (recursive) + Add Files (individual FLACs)
+### Log Viewer
+Opens as a modal on "Show Full Log". Displays the full EFC summary log text. Maximize/restore toggle. Save button exports to file.
+
+### Folder Selector (idle state)
+- **Desktop:** drag-and-drop zones for folders and files, plus toolbar buttons
 - **Android:** native file picker (folder picker unavailable on Android)
-- Shows all selected paths with individual remove buttons
 - Permission errors from scan reported inline
 
 ### Settings
-Thread count, log output folder, max retries per file.
+Thread count, log output folder, max retries per file, verbose logging toggle.
 
 ---
 
@@ -201,9 +215,10 @@ flaccrunch/
 │   ├── components/
 │   │   ├── common/               # Badge, ProgressBar, ByteDisplay, ElapsedTimer
 │   │   ├── folders/              # FolderSelector, drag-and-drop
-│   │   ├── layout/               # AppShell, header
+│   │   ├── layout/               # AppShell, toolbar
 │   │   ├── processing/           # RunStatusBar, WorkerCard, WorkerGrid,
-│   │   │                         # RecentEventsTable, TopCompression
+│   │   │                         # ProcessingDashboard, RecentEventsTable,
+│   │   │                         # LogViewerModal
 │   │   └── settings/             # SettingsPanel
 │   ├── hooks/                    # useProcessing, useSettings, useWorkerStatus
 │   ├── types/                    # TypeScript interfaces
