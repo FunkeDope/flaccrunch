@@ -10,13 +10,19 @@ interface ProcessingDashboardProps {
   workers: WorkerStatus[];
   recentEvents: FileEvent[];
   topCompression: FileEvent[];
+  runFolders: string[];
 }
 
 export function ProcessingDashboard({
   workers,
   recentEvents,
+  runFolders,
 }: ProcessingDashboardProps) {
   const [workersCollapsed, setWorkersCollapsed] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const inProgressFiles = workers
+    .filter((w) => w.state !== "idle" && w.file)
+    .map((w) => w.file as string);
   const [splitRatio, setSplitRatio] = useState(0.75);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -90,12 +96,61 @@ export function ProcessingDashboard({
             <button
               type="button"
               className="worker-toggle"
+              aria-expanded={queueOpen}
+              onClick={() => setQueueOpen((value) => !value)}
+              title="Show the source folders/files queued for this run"
+            >
+              {queueOpen ? "Hide queue" : `Show queue (${runFolders.length})`}
+            </button>
+            <button
+              type="button"
+              className="worker-toggle"
               aria-expanded={!workersCollapsed}
               onClick={() => setWorkersCollapsed((value) => !value)}
             >
               {workersCollapsed ? "Expand" : "Collapse"}
             </button>
           </div>
+          {queueOpen && (
+            <div className="sunken-panel queue-list-panel">
+              <div className="queue-section-label">
+                Sources ({runFolders.length})
+              </div>
+              {runFolders.length === 0 ? (
+                <div className="queue-empty">No sources recorded.</div>
+              ) : (
+                <ul className="folder-list">
+                  {runFolders.map((path) => {
+                    const inProgress = inProgressFiles.some((f) => f === path || f.startsWith(path));
+                    return (
+                      <li key={path} className="folder-item">
+                        <span className="path" title={path}>{path}</span>
+                        {inProgress && (
+                          <span className="queue-badge-active" title="A file under this source is being processed">
+                            in progress
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {inProgressFiles.length > 0 && (
+                <>
+                  <div className="queue-section-label">
+                    In progress ({inProgressFiles.length})
+                  </div>
+                  <ul className="folder-list">
+                    {inProgressFiles.map((file) => (
+                      <li key={file} className="folder-item">
+                        <span className="path" title={file}>{file}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
           {!workersCollapsed && (
             <div className="sunken-panel worker-body">
               <WorkerGrid workers={workers} />

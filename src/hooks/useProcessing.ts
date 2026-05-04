@@ -47,6 +47,9 @@ export function useProcessing() {
 
   const [isDragOver, setIsDragOver] = useState(false);
   const [currentFolders, setCurrentFolders] = useState<string[]>([]);
+  // Set by the drop handler when files land while status is "complete".
+  // App.tsx watches this and auto-starts a fresh run with the dropped paths.
+  const [autoStartPaths, setAutoStartPaths] = useState<string[] | null>(null);
 
   // Status ref so the native drag-drop listener (registered once on mount)
   // can branch on the latest status without becoming stale.
@@ -255,6 +258,15 @@ export function useProcessing() {
         if (currentStatus === "processing" || currentStatus === "cancelling") {
           // Mid-run: append to the live Rust queue instead of the FE list.
           api.enqueueFiles(dropped).catch(() => {});
+          // Reflect the source paths in the run's folder list so the
+          // "Show queue" panel can display what's been added mid-run.
+          setCurrentFolders((prev) => [
+            ...prev,
+            ...dropped.filter((p) => !prev.includes(p)),
+          ]);
+        } else if (currentStatus === "complete") {
+          // Run is over and the user dropped more work — auto-start a new run.
+          setAutoStartPaths(dropped);
         } else {
           setFolders((prev) => [
             ...prev,
@@ -398,20 +410,22 @@ export function useProcessing() {
   }, []);
 
   const startRun = useCallback(
-    async (settings: ProcessingSettings) => {
-      if (folders.length === 0) return;
+    async (settings: ProcessingSettings, pathsOverride?: string[]) => {
+      const targets = pathsOverride ?? folders;
+      if (targets.length === 0) return;
 
       setError(null);
 
       try {
-        const scan = await api.scanFolders(folders);
+        const scan = await api.scanFolders(targets);
 
         if (scan.files.length === 0) {
           setError("No FLAC files found in the selected folders.");
           return;
         }
 
-        setCurrentFolders(folders);
+        if (pathsOverride) setFolders(pathsOverride);
+        setCurrentFolders(targets);
         setStatus("processing");
         const now = Date.now();
         setStartTime(now);
@@ -437,7 +451,7 @@ export function useProcessing() {
           totalOriginalBytes: scan.totalSize,
         }));
 
-        await api.startProcessing(folders, settings);
+        await api.startProcessing(targets, settings);
       } catch (e) {
         setStatus("idle");
         setError(String(e));
@@ -492,9 +506,12 @@ export function useProcessing() {
     }
   }, []);
 
+  const clearAutoStartPaths = useCallback(() => setAutoStartPaths(null), []);
+
   return {
     status,
     folders,
+    runFolders: currentFolders,
     workers,
     counters,
     recentEvents: allEvents,
@@ -503,6 +520,8 @@ export function useProcessing() {
     error,
     jobHistory,
     isDragOver,
+    autoStartPaths,
+    clearAutoStartPaths,
     addFolder,
     addFiles,
     removeFolder,

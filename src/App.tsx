@@ -28,6 +28,16 @@ function App() {
     }
   }, [settings.appVersion]);
 
+  // Auto-start a fresh run when the user drops files onto a completed run.
+  useEffect(() => {
+    if (processing.autoStartPaths && processing.autoStartPaths.length > 0) {
+      const paths = processing.autoStartPaths;
+      processing.clearAutoStartPaths();
+      void processing.startRun(settings.processingSettings, paths);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processing.autoStartPaths]);
+
   // Live blended progress: completed files + fractional in-flight worker progress
   const livePct = useMemo(() => {
     if (processing.counters.totalFiles === 0) return 0;
@@ -128,6 +138,7 @@ function App() {
             workers={processing.workers}
             recentEvents={processing.recentEvents}
             topCompression={processing.topCompression}
+            runFolders={processing.runFolders}
           />
         )}
       </div>
