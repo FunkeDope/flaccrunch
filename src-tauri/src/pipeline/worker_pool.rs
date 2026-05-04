@@ -142,6 +142,11 @@ pub async fn run_worker_pool(
                 run_state.update_worker(*worker_id, WorkerState::Idle, None, 0, String::new());
                 event
             }
+            PipelineEvent::QueueGrew { .. } => {
+                // QueueGrew is emitted by the enqueue_files command directly,
+                // not by workers. Pass through if it ever arrives via this path.
+                event
+            }
             PipelineEvent::RunComplete => event,
         };
 
@@ -184,18 +189,24 @@ async fn worker_loop(
     cancel_token: CancellationToken,
 ) {
     loop {
-        if cancel_token.is_cancelled() {
-            break;
-        }
-
-        let item = match queue.dequeue() {
-            Some(item) => item,
-            None => break, // Queue empty, worker done
+        // Wait for an item, allowing the queue to grow mid-run. Exits only on
+        // cancel, or when the queue is closed AND drained.
+        let item = loop {
+            if cancel_token.is_cancelled() {
+                return;
+            }
+            if let Some(item) = queue.dequeue() {
+                break item;
+            }
+            if queue.is_closed() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         };
 
         let result = execute_job(&item, worker_id, &context, &event_tx, cancel_token.clone()).await;
 
-        // Handle retry
+        // Handle retry — SKIPPED is terminal and never retries.
         let file_event = make_file_event(&result);
         let dummy_counters = RunCounters::default();
         if result.status == FileStatus::FAIL && item.attempt < context.max_retries {
@@ -216,6 +227,8 @@ async fn worker_loop(
                 })
                 .await;
         }
+
+        queue.touch();
 
         // Mark worker idle
         let _ = event_tx.send(PipelineEvent::WorkerIdle { worker_id }).await;

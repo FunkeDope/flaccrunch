@@ -92,6 +92,38 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
               </div>
             )}
           </fieldset>
+          <fieldset className="settings-section">
+            <legend>Crunched marker</legend>
+            <div className="settings-group">
+              <div className="field-row">
+                <input
+                  id="mark-as-crunched"
+                  type="checkbox"
+                  checked={settings.markAsCrunched}
+                  onChange={() => onUpdate({ markAsCrunched: !settings.markAsCrunched })}
+                />
+                <label htmlFor="mark-as-crunched">Mark files as Crunched</label>
+              </div>
+              <div className="settings-hint">
+                Stamp re-encoded files with a marker tag (FLACCRUNCH_INFO Vorbis comment) so future
+                runs can skip them. Existing tags are preserved.
+              </div>
+            </div>
+            <div className="settings-group">
+              <div className="field-row">
+                <input
+                  id="skip-crunched"
+                  type="checkbox"
+                  checked={settings.skipCrunched}
+                  onChange={() => onUpdate({ skipCrunched: !settings.skipCrunched })}
+                />
+                <label htmlFor="skip-crunched">Skip previously Crunched files</label>
+              </div>
+              <div className="settings-hint">
+                Detect the marker and skip files already processed by FlacCrunch.
+              </div>
+            </div>
+          </fieldset>
           <div className="field-row settings-actions">
             <button className="default" onClick={onClose}>OK</button>
             <button onClick={onClose}>Cancel</button>

@@ -165,6 +165,8 @@ async fn run_cli_async(args: CliArgs) -> i32 {
     let context = Arc::new(ProcessingContext {
         max_retries: args.retries,
         scratch_dir,
+        mark_as_crunched: false,
+        skip_crunched: false,
     });
 
     let queue = Arc::new(JobQueue::new(scan.files));
@@ -183,6 +185,9 @@ async fn run_cli_async(args: CliArgs) -> i32 {
         }));
     }
     drop(event_tx);
+    // CLI: no more items will arrive after the initial scan; close immediately
+    // so workers exit as soon as the queue drains (preserves prior behavior).
+    queue.close();
 
     let mut counters = RunCounters {
         total_files,
@@ -276,6 +281,10 @@ fn print_file_event(fe: &FileEvent, counters: &mut RunCounters) {
         }
         FileStatus::RETRY => {
             println!("[{}] RETRY {}", fe.time, name);
+        }
+        FileStatus::SKIPPED => {
+            counters.skipped += 1;
+            println!("[{}] SKIP {:<50} already crunched", fe.time, name);
         }
     }
 

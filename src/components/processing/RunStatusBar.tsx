@@ -141,6 +141,11 @@ export function RunStatusBar({
             Fail <strong>{counters.failed}</strong>
           </p>
         )}
+        {counters.skipped > 0 && (
+          <p className="status-bar-field">
+            Skip <strong>{counters.skipped}</strong>
+          </p>
+        )}
         {counters.totalSavedBytes > 0 && (
           <p className="status-bar-field">
             Audio {formatBytes(audioSaved > 0 ? audioSaved : counters.totalSavedBytes)}

@@ -15,6 +15,12 @@ pub struct AppSettings {
     /// Write EFC-format logs to disk after each run.
     #[serde(default)]
     pub verbose_logging: bool,
+    /// Append a FLACCRUNCH_INFO Vorbis comment to re-encoded files.
+    #[serde(default)]
+    pub mark_as_crunched: bool,
+    /// Skip files that already carry a FLACCRUNCH_INFO marker.
+    #[serde(default)]
+    pub skip_crunched: bool,
 }
 
 impl Default for AppSettings {
@@ -25,6 +31,8 @@ impl Default for AppSettings {
             log_folder: None,
             recent_folders: Vec::new(),
             verbose_logging: false,
+            mark_as_crunched: false,
+            skip_crunched: false,
         }
     }
 }
@@ -37,6 +45,10 @@ pub struct ProcessingSettings {
     pub log_folder: String,
     pub max_retries: u32,
     pub verbose_logging: bool,
+    #[serde(default)]
+    pub mark_as_crunched: bool,
+    #[serde(default)]
+    pub skip_crunched: bool,
 }
 
 #[cfg(test)]
@@ -86,6 +98,8 @@ mod tests {
             max_retries: 5,
             recent_folders: vec!["/music".to_string(), "/more".to_string()],
             verbose_logging: false,
+            mark_as_crunched: false,
+            skip_crunched: false,
         };
         let json = serde_json::to_string(&original).expect("serialize");
         let back: AppSettings = serde_json::from_str(&json).expect("deserialize");
@@ -103,6 +117,8 @@ mod tests {
             max_retries: 2,
             recent_folders: vec![],
             verbose_logging: false,
+            mark_as_crunched: false,
+            skip_crunched: false,
         };
         let json = serde_json::to_string(&s).expect("serialize");
         assert!(

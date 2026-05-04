@@ -138,6 +138,13 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
                 lines.push("     Copy failed".to_string());
                 lines.push(eac_line("Reason", &event.detail));
             }
+            FileStatus::SKIPPED => {
+                lines.push(eac_line("Original size", &fmt_bytes(event.before_size)));
+                lines.push("     Skipped — already crunched".to_string());
+                if !event.detail.is_empty() {
+                    lines.push(eac_line("Reason", &event.detail));
+                }
+            }
         }
 
         lines.push(String::new());
@@ -153,10 +160,16 @@ pub fn generate_efc_log(summary: &RunSummary, events: &[FileEvent]) -> String {
     if c.failed > 0 {
         lines.push(format!(" {} file(s) failed", c.failed));
     }
+    if c.skipped > 0 {
+        lines.push(format!(
+            " {} file(s) skipped (already crunched)",
+            c.skipped
+        ));
+    }
     if pending > 0 {
         lines.push(format!(" {} file(s) pending", pending));
     }
-    if c.successful == 0 && c.failed == 0 && pending == 0 {
+    if c.successful == 0 && c.failed == 0 && c.skipped == 0 && pending == 0 {
         lines.push(" 0 file(s) processed".to_string());
     }
 
@@ -545,6 +558,36 @@ mod tests {
         assert!(
             output.contains("Abbey Road"),
             "album name must be last path component"
+        );
+    }
+
+    #[test]
+    fn test_efc_log_skipped_event_renders_status_and_status_report_line() {
+        let mut summary = make_run_summary(2, 2, 1, 0);
+        summary.counters.skipped = 1;
+        let mut skipped = make_file_event(FileStatus::SKIPPED, "/music/done.flac", "Already crunched");
+        skipped.before_size = 4096;
+        skipped.after_size = 4096;
+        skipped.saved_bytes = 0;
+        skipped.compression_pct = 0.0;
+        let events = vec![
+            make_file_event(FileStatus::OK, "/music/new.flac", ""),
+            skipped,
+        ];
+
+        let output = generate_efc_log(&summary, &events);
+
+        assert!(
+            output.contains("Skipped — already crunched"),
+            "skipped event must show the skipped marker line"
+        );
+        assert!(
+            output.contains("1 file(s) skipped (already crunched)"),
+            "status report must include skipped count"
+        );
+        assert!(
+            output.contains("1 file(s) processed successfully"),
+            "successful count must still appear"
         );
     }
 

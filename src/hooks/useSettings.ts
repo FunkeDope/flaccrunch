@@ -10,6 +10,8 @@ const defaultSettings: AppSettings = {
   maxRetries: 3,
   recentFolders: [],
   verboseLogging: false,
+  markAsCrunched: false,
+  skipCrunched: false,
 };
 
 export function useSettings() {
@@ -45,6 +47,8 @@ export function useSettings() {
     logFolder: settings.logFolder ?? defaultLogFolder,
     maxRetries: settings.maxRetries,
     verboseLogging: settings.verboseLogging,
+    markAsCrunched: settings.markAsCrunched,
+    skipCrunched: settings.skipCrunched,
   };
 
   return { settings, cpuCount, defaultLogFolder, appVersion, processingSettings, updateSettings };

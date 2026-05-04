@@ -30,6 +30,7 @@ pub fn run_with_startup_paths(startup_paths: Vec<String>) {
         .invoke_handler(tauri::generate_handler![
             commands::processing::start_processing,
             commands::processing::cancel_processing,
+            commands::processing::enqueue_files,
             commands::processing::get_processing_status,
             commands::processing::get_worker_statuses,
             commands::processing::get_recent_events,

@@ -4,4 +4,6 @@ export interface AppSettings {
   maxRetries: number;
   recentFolders: string[];
   verboseLogging: boolean;
+  markAsCrunched: boolean;
+  skipCrunched: boolean;
 }

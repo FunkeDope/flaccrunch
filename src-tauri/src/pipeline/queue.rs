@@ -1,6 +1,8 @@
 use crate::fs::scanner::ScannedFile;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 
 /// An item in the processing queue.
 #[derive(Debug, Clone)]
@@ -10,9 +12,15 @@ pub struct QueueItem {
 }
 
 /// Thread-safe job queue for distributing work to workers.
+///
+/// Supports live-append: callers may push more items into a running queue
+/// (drag-and-drop while processing). Workers wait on an empty-but-open queue;
+/// they exit only after `close()` is called and the queue is drained.
 pub struct JobQueue {
     items: Mutex<VecDeque<QueueItem>>,
-    total: usize,
+    total: AtomicUsize,
+    closed: AtomicBool,
+    last_activity: Mutex<Instant>,
 }
 
 impl JobQueue {
@@ -25,7 +33,9 @@ impl JobQueue {
             .collect();
         Self {
             items: Mutex::new(items),
-            total,
+            total: AtomicUsize::new(total),
+            closed: AtomicBool::new(false),
+            last_activity: Mutex::new(Instant::now()),
         }
     }
 
@@ -46,6 +56,50 @@ impl JobQueue {
         });
     }
 
+    /// Append new files to the queue (e.g. from a mid-run drag-and-drop).
+    /// Returns the number of items added. No-op (returns 0) if the queue is closed.
+    pub fn push_files(&self, files: Vec<ScannedFile>) -> usize {
+        if self.closed.load(Ordering::Acquire) {
+            return 0;
+        }
+        let added = files.len();
+        if added == 0 {
+            return 0;
+        }
+        {
+            let mut items = self.items.lock().unwrap_or_else(|e| e.into_inner());
+            for file in files {
+                items.push_back(QueueItem { file, attempt: 1 });
+            }
+        }
+        self.total.fetch_add(added, Ordering::Relaxed);
+        self.touch();
+        added
+    }
+
+    /// Mark the queue as closed: workers will exit once it drains.
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+    }
+
+    /// Whether the queue has been closed to new items.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
+    /// Update the last-activity timestamp. Called on push and on job completion.
+    pub fn touch(&self) {
+        *self.last_activity.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
+    }
+
+    /// Time since the last activity (push or job completion).
+    pub fn idle_since(&self) -> std::time::Duration {
+        self.last_activity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .elapsed()
+    }
+
     /// Number of items remaining in the queue.
     pub fn remaining(&self) -> usize {
         self.items.lock().unwrap_or_else(|e| e.into_inner()).len()
@@ -59,9 +113,9 @@ impl JobQueue {
             .is_empty()
     }
 
-    /// Total number of files initially queued.
+    /// Total number of files ever queued (grows as items are pushed).
     pub fn total(&self) -> usize {
-        self.total
+        self.total.load(Ordering::Relaxed)
     }
 }
 
@@ -118,5 +172,45 @@ mod tests {
         assert_eq!(queue.total(), 3);
         let _ = queue.dequeue();
         assert_eq!(queue.remaining(), 2);
+    }
+
+    #[test]
+    fn test_push_files_grows_queue_and_total() {
+        let queue = JobQueue::new(vec![make_file("a.flac", 100)]);
+        assert_eq!(queue.total(), 1);
+        let added = queue.push_files(vec![make_file("b.flac", 50), make_file("c.flac", 25)]);
+        assert_eq!(added, 2);
+        assert_eq!(queue.total(), 3);
+        assert_eq!(queue.remaining(), 3);
+    }
+
+    #[test]
+    fn test_push_files_appends_to_back() {
+        let queue = JobQueue::new(vec![make_file("a.flac", 100)]);
+        queue.push_files(vec![make_file("b.flac", 50)]);
+        let first = queue.dequeue().unwrap();
+        assert_eq!(first.file.name, "a.flac");
+        let second = queue.dequeue().unwrap();
+        assert_eq!(second.file.name, "b.flac");
+    }
+
+    #[test]
+    fn test_close_rejects_pushes() {
+        let queue = JobQueue::new(vec![]);
+        assert!(!queue.is_closed());
+        queue.close();
+        assert!(queue.is_closed());
+        let added = queue.push_files(vec![make_file("a.flac", 100)]);
+        assert_eq!(added, 0);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn test_idle_since_increases() {
+        let queue = JobQueue::new(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert!(queue.idle_since() >= std::time::Duration::from_millis(10));
+        queue.touch();
+        assert!(queue.idle_since() < std::time::Duration::from_millis(10));
     }
 }

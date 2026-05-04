@@ -1,6 +1,7 @@
 use crate::artwork::optimize::optimize_album_art;
 use crate::flac::encoder::encode_flac;
 use crate::flac::hasher::hash_decoded_audio;
+use crate::flac::marker;
 use crate::flac::metadata::{
     copy_metadata_blocks, extract_non_flac_prefix, get_md5sum, prepend_bytes_to_file,
 };
@@ -20,6 +21,10 @@ use tokio_util::sync::CancellationToken;
 pub struct ProcessingContext {
     pub max_retries: u32,
     pub scratch_dir: PathBuf,
+    /// Stamp re-encoded files with a FLACCRUNCH_INFO Vorbis comment.
+    pub mark_as_crunched: bool,
+    /// Skip files that already carry a FLACCRUNCH_INFO marker.
+    pub skip_crunched: bool,
 }
 
 /// Execute the full processing pipeline for a single FLAC file.
@@ -95,6 +100,12 @@ async fn run_job(
             stage: PipelineStage::Hashing(crate::pipeline::stages::HashPhase::Source),
         })
         .await;
+
+    // Early skip: if the user opted in and the file already carries a marker,
+    // bail out before doing any hash/encode work.
+    if context.skip_crunched && marker::read_crunched_marker(file_path).unwrap_or(false) {
+        return make_skipped(file_path, item.attempt, before_size);
+    }
 
     let embedded_md5 = get_md5sum(file_path).await.ok().flatten();
     let source_hash = hash_decoded_audio(file_path).await.ok();
@@ -212,6 +223,22 @@ async fn run_job(
             before_size,
             &format!("Metadata copy failed: {e}"),
         );
+    }
+
+    // Stamp the FLACCRUNCH_INFO marker if requested. This is non-destructive:
+    // only the FLACCRUNCH_INFO entry is added or updated; all other tags are
+    // preserved at their original index. Runs before artwork so the marker is
+    // covered by the post-hash verification at the end of the pipeline.
+    if context.mark_as_crunched {
+        if let Err(e) = marker::write_crunched_marker(temp_path).await {
+            safe_remove(temp_path);
+            return make_failure(
+                file_path,
+                item.attempt,
+                before_size,
+                &format!("Marker write failed: {e}"),
+            );
+        }
     }
 
     // Re-attach any non-FLAC prefix bytes (ID3v2 etc.)
@@ -438,5 +465,23 @@ fn make_failure(file_path: &Path, attempt: u32, before_size: u64, error: &str) -
         verification: "N/A".to_string(),
         artwork_result: None,
         error: Some(error.to_string()),
+    }
+}
+
+fn make_skipped(file_path: &Path, attempt: u32, before_size: u64) -> JobResult {
+    JobResult {
+        status: FileStatus::SKIPPED,
+        file_path: file_path.to_string_lossy().to_string(),
+        attempt,
+        before_size,
+        after_size: before_size,
+        saved_bytes: 0,
+        compression_pct: 0.0,
+        source_hash: None,
+        output_hash: None,
+        embedded_md5: None,
+        verification: "SKIPPED".to_string(),
+        artwork_result: None,
+        error: Some("Already crunched".to_string()),
     }
 }

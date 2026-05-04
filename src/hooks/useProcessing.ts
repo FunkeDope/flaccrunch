@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
@@ -28,6 +28,7 @@ const defaultCounters: RunCounters = {
   artworkOptimizedFiles: 0,
   artworkOptimizedBlocks: 0,
   warned: 0,
+  skipped: 0,
 };
 
 
@@ -46,6 +47,13 @@ export function useProcessing() {
 
   const [isDragOver, setIsDragOver] = useState(false);
   const [currentFolders, setCurrentFolders] = useState<string[]>([]);
+
+  // Status ref so the native drag-drop listener (registered once on mount)
+  // can branch on the latest status without becoming stale.
+  const statusRef = useRef<RunStatus>("idle");
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   // On mount: load any paths supplied via CLI args
   useEffect(() => {
@@ -211,6 +219,14 @@ export function useProcessing() {
           break;
         }
 
+        case "queueGrew": {
+          const newCounters = payload.counters as RunCounters | undefined;
+          if (newCounters) {
+            setCounters(newCounters);
+          }
+          break;
+        }
+
         case "runComplete":
           setStatus("complete");
           // Snapshot will be handled via a useEffect watching status + allEvents
@@ -234,10 +250,17 @@ export function useProcessing() {
         setIsDragOver(false);
       } else if (payload.type === "drop" && payload.paths && payload.paths.length > 0) {
         setIsDragOver(false);
-        setFolders((prev) => [
-          ...prev,
-          ...payload.paths!.filter((p) => !prev.includes(p)),
-        ]);
+        const dropped = payload.paths!;
+        const currentStatus = statusRef.current;
+        if (currentStatus === "processing" || currentStatus === "cancelling") {
+          // Mid-run: append to the live Rust queue instead of the FE list.
+          api.enqueueFiles(dropped).catch(() => {});
+        } else {
+          setFolders((prev) => [
+            ...prev,
+            ...dropped.filter((p) => !prev.includes(p)),
+          ]);
+        }
       }
     });
     return () => {
@@ -440,6 +463,8 @@ export function useProcessing() {
     setTopCompression([]);
     setStartTime(null);
     setError(null);
+    setFolders([]);
+    setCurrentFolders([]);
   }, []);
 
   const testStorage = useCallback(async () => {

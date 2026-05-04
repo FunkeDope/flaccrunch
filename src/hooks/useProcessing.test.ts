@@ -186,10 +186,24 @@ describe("useProcessing — resetRun", () => {
 
     expect(result.current.error).toBeNull();
   });
+
+  it("clears the folder queue so a fresh run starts empty", async () => {
+    mockSelectFolders.mockResolvedValue(["/music/one", "/music/two"]);
+    const { result } = renderHook(() => useProcessing());
+
+    await act(async () => { await result.current.addFolder(); });
+    await waitFor(() => expect(result.current.folders.length).toBe(2));
+
+    act(() => {
+      result.current.resetRun();
+    });
+
+    expect(result.current.folders).toEqual([]);
+  });
 });
 
 describe("useProcessing — startRun", () => {
-  const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3, verboseLogging: false };
+  const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false };
 
   it("does nothing when no folders selected", async () => {
     const { result } = renderHook(() => useProcessing());

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use tokio_util::sync::CancellationToken;
 
 /// Unique identifier for a processing run.
@@ -68,6 +68,8 @@ pub enum FileStatus {
     WARN,
     RETRY,
     FAIL,
+    /// File already carries a FLACCRUNCH_INFO marker; processing was skipped.
+    SKIPPED,
 }
 
 /// A compression result for tracking top compressions.
@@ -101,6 +103,8 @@ pub struct RunCounters {
     /// Files that compressed OK but write-back to the intended destination
     /// was incomplete, leaving the original file unchanged.
     pub warned: usize,
+    /// Files skipped because they already carried a FLACCRUNCH_INFO marker.
+    pub skipped: usize,
 }
 
 /// Summary of a completed processing run.
@@ -135,6 +139,9 @@ pub struct RunState {
     pub counters: RwLock<RunCounters>,
     pub cancel_token: CancellationToken,
     pub start_time: std::time::Instant,
+    /// Reference to the active job queue. Set after `start_processing` builds
+    /// the queue; used by `enqueue_files` to append to a running run.
+    pub queue: RwLock<Option<Arc<crate::pipeline::queue::JobQueue>>>,
 }
 
 impl RunState {
@@ -159,6 +166,7 @@ impl RunState {
             counters: RwLock::new(RunCounters::default()),
             cancel_token: CancellationToken::new(),
             start_time: std::time::Instant::now(),
+            queue: RwLock::new(None),
         }
     }
 
@@ -208,6 +216,9 @@ impl RunState {
                 FileStatus::RETRY => {
                     // Retries don't count as processed yet
                     counters.processed -= 1;
+                }
+                FileStatus::SKIPPED => {
+                    counters.skipped += 1;
                 }
             }
         }
@@ -539,12 +550,31 @@ mod tests {
             FileStatus::WARN,
             FileStatus::FAIL,
             FileStatus::RETRY,
+            FileStatus::SKIPPED,
         ];
         for status in &statuses {
             let json = serde_json::to_string(status).expect("serialize");
             let back: FileStatus = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(status, &back);
         }
+    }
+
+    #[test]
+    fn test_record_skipped_event_increments_skipped_only() {
+        let rs = RunState::new("run-skip".to_string(), 1);
+        let mut event = make_ok_event("/music/already.flac", 1000, 1000, 0, 0.0);
+        event.status = FileStatus::SKIPPED;
+        event.detail = "Already crunched".to_string();
+        rs.record_event(event);
+        let c = rs.counters.read().unwrap();
+        assert_eq!(c.processed, 1);
+        assert_eq!(c.skipped, 1);
+        assert_eq!(c.successful, 0);
+        assert_eq!(c.failed, 0);
+        // Byte counters are not touched for skipped files.
+        assert_eq!(c.total_saved_bytes, 0);
+        assert_eq!(c.total_original_bytes, 0);
+        assert_eq!(c.total_new_bytes, 0);
     }
 
     #[test]

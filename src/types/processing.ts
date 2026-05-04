@@ -29,11 +29,12 @@ export interface RunCounters {
   artworkOptimizedFiles: number;
   artworkOptimizedBlocks: number;
   warned: number;
+  skipped: number;
 }
 
 export interface FileEvent {
   time: string;
-  status: "OK" | "WARN" | "RETRY" | "FAIL";
+  status: "OK" | "WARN" | "RETRY" | "FAIL" | "SKIPPED";
   file: string;
   attempt: string;
   verification: string;
@@ -69,6 +70,8 @@ export interface ProcessingSettings {
   logFolder: string;
   maxRetries: number;
   verboseLogging: boolean;
+  markAsCrunched: boolean;
+  skipCrunched: boolean;
 }
 
 export interface JobRecord {

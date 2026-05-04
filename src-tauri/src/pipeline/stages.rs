@@ -60,6 +60,13 @@ pub enum PipelineEvent {
     WorkerIdle {
         worker_id: usize,
     },
+    /// Emitted when files were appended to a running queue (live drag-and-drop).
+    /// Carries a counters snapshot so the FE can refresh `totalFiles` /
+    /// `totalOriginalBytes` without a separate poll.
+    QueueGrew {
+        added: usize,
+        counters: RunCounters,
+    },
     RunComplete,
 }
 

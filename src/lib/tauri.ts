@@ -39,6 +39,10 @@ export async function cancelProcessing(): Promise<void> {
   return invoke<void>("cancel_processing");
 }
 
+export async function enqueueFiles(paths: string[]): Promise<number> {
+  return invoke<number>("enqueue_files", { paths });
+}
+
 // Settings
 export async function getSettings(): Promise<AppSettings> {
   return invoke<AppSettings>("get_settings");

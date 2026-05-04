@@ -3,16 +3,18 @@ use crate::fs::tempfile::test_directory_write_access;
 use crate::logging::efc_log::generate_efc_log;
 use crate::pipeline::job::ProcessingContext;
 use crate::pipeline::queue::JobQueue;
+use crate::pipeline::stages::PipelineEvent;
 use crate::pipeline::worker_pool::run_worker_pool;
 use crate::state::app_state::AppState;
 use crate::state::run_state::{
-    CompressionResult, FileEvent, ProcessingStatus, RunState, RunSummary, WorkerStatus,
+    CompressionResult, FileEvent, ProcessingStatus, RunState, RunSummary, WorkerState,
+    WorkerStatus,
 };
 use crate::state::settings::ProcessingSettings;
 use crate::util::platform::default_log_folder;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 
 /// Start processing FLAC files in the given folders.
 #[tauri::command]
@@ -128,14 +130,47 @@ pub async fn start_processing(
     let context = Arc::new(ProcessingContext {
         max_retries: settings.max_retries,
         scratch_dir,
+        mark_as_crunched: settings.mark_as_crunched,
+        skip_crunched: settings.skip_crunched,
     });
 
     let queue = Arc::new(JobQueue::new(scan_result.files));
+    {
+        let mut q = run_state.queue.write().unwrap_or_else(|e| e.into_inner());
+        *q = Some(Arc::clone(&queue));
+    }
     let run_state_clone = Arc::clone(&run_state);
     let source_folder_str = folders.join(", ");
     let thread_count = worker_count;
     let max_retries = settings.max_retries;
     let start_ms = chrono::Local::now().timestamp_millis();
+
+    // Watchdog: closes the queue once it stays empty + idle for the grace
+    // period, so workers can exit. Without this, workers would wait forever
+    // for live drops that may never arrive.
+    let watchdog_queue = Arc::clone(&queue);
+    let watchdog_run = Arc::clone(&run_state);
+    tokio::spawn(async move {
+        const GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            if watchdog_run.cancel_token.is_cancelled() {
+                watchdog_queue.close();
+                break;
+            }
+            let all_idle = {
+                let workers = watchdog_run
+                    .workers
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner());
+                workers.iter().all(|w| w.state == WorkerState::Idle)
+            };
+            if watchdog_queue.is_empty() && all_idle && watchdog_queue.idle_since() >= GRACE {
+                watchdog_queue.close();
+                break;
+            }
+        }
+    });
 
     tokio::spawn(async move {
         run_worker_pool(
@@ -191,6 +226,13 @@ pub async fn start_processing(
             let _ = std::fs::write(&log_path, log_text.as_bytes());
         }
 
+        {
+            let mut q = run_state_clone
+                .queue
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            *q = None;
+        }
         let mut status = run_state_clone
             .status
             .write()
@@ -199,6 +241,68 @@ pub async fn start_processing(
     });
 
     Ok(run_id)
+}
+
+/// Append more files to a currently-running job queue. Used by the frontend
+/// when a user drops folders/files onto the window mid-run.
+///
+/// Returns the number of FLAC files actually added (may be 0 if no FLACs were
+/// found in the dropped paths, or if there is no active run).
+#[tauri::command]
+pub async fn enqueue_files(
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<usize, String> {
+    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
+    let Some(run) = active.as_ref().cloned() else {
+        return Ok(0);
+    };
+    drop(active);
+
+    {
+        let status = run.status.read().unwrap_or_else(|e| e.into_inner());
+        if *status != ProcessingStatus::Processing {
+            return Ok(0);
+        }
+    }
+
+    let queue = {
+        let q = run.queue.read().unwrap_or_else(|e| e.into_inner());
+        q.as_ref().cloned()
+    };
+    let Some(queue) = queue else {
+        return Ok(0);
+    };
+    if queue.is_closed() {
+        return Ok(0);
+    }
+
+    let path_bufs: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let scan = scan_for_flac_files(&path_bufs);
+    if scan.files.is_empty() {
+        return Ok(0);
+    }
+
+    let added_size = scan.total_size;
+    let added = queue.push_files(scan.files);
+    if added == 0 {
+        return Ok(0);
+    }
+
+    let counters = {
+        let mut c = run.counters.write().unwrap_or_else(|e| e.into_inner());
+        c.total_files += added;
+        c.total_original_bytes += added_size;
+        c.clone()
+    };
+
+    let _ = app.emit(
+        "pipeline-event",
+        &PipelineEvent::QueueGrew { added, counters },
+    );
+
+    Ok(added)
 }
 
 /// Cancel an active processing run.

@@ -52,6 +52,7 @@ export function getStatusColor(status: string): string {
     case "WARN": return "status-warn";
     case "FAIL": return "status-fail";
     case "RETRY": return "status-retry";
+    case "SKIPPED": return "status-skipped";
     default: return "";
   }
 }

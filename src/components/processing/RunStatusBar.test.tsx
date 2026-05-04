@@ -18,6 +18,7 @@ const defaultCounters: RunCounters = {
   artworkOptimizedFiles: 0,
   artworkOptimizedBlocks: 0,
   warned: 0,
+  skipped: 0,
 };
 
 function renderBar(overrides: {
