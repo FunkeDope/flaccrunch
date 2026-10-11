@@ -112,6 +112,7 @@ function App() {
             status={processing.status}
             counters={processing.counters}
             startTime={processing.startTime}
+            endTime={processing.endTime}
             livePct={livePct}
             onCancel={processing.cancelRun}
             onReset={processing.resetRun}
@@ -137,7 +138,6 @@ function App() {
           <ProcessingDashboard
             workers={processing.workers}
             recentEvents={processing.recentEvents}
-            topCompression={processing.topCompression}
             runFolders={processing.runFolders}
           />
         )}

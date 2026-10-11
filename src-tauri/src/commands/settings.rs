@@ -6,17 +6,20 @@ use tauri::State;
 /// Get the current application settings.
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
-    Ok(state.settings.read().unwrap().clone())
+    Ok(state
+        .settings
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone())
 }
 
-/// Save application settings.
+/// Save application settings (in memory for the lifetime of the process).
 #[tauri::command]
 pub async fn save_settings(
     settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut current = state.settings.write().unwrap();
-    *current = settings;
+    *state.settings.write().unwrap_or_else(|e| e.into_inner()) = settings;
     Ok(())
 }
 

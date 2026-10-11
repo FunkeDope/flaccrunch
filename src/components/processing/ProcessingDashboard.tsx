@@ -1,6 +1,7 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { WorkerGrid } from "./WorkerGrid";
 import { RecentEventsTable } from "./RecentEventsTable";
+import { failedFolders } from "../../lib/format";
 import type {
   WorkerStatus,
   FileEvent,
@@ -9,7 +10,6 @@ import type {
 interface ProcessingDashboardProps {
   workers: WorkerStatus[];
   recentEvents: FileEvent[];
-  topCompression: FileEvent[];
   runFolders: string[];
 }
 
@@ -25,6 +25,8 @@ export function ProcessingDashboard({
     .map((w) => w.file as string);
   const [splitRatio, setSplitRatio] = useState(0.75);
   const containerRef = useRef<HTMLDivElement>(null);
+  const badFolders = useMemo(() => failedFolders(recentEvents), [recentEvents]);
+  const failedCount = badFolders.reduce((sum, f) => sum + f.count, 0);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -172,8 +174,27 @@ export function ProcessingDashboard({
         <div className="pane-toolbar">
           <div className="workers-heading">
             <span className="section-kicker">{recentEvents.length} results</span>
+            {failedCount > 0 && (
+              <span className="bad-files-kicker">
+                {failedCount} bad file{failedCount === 1 ? "" : "s"} in {badFolders.length} folder
+                {badFolders.length === 1 ? "" : "s"}
+              </span>
+            )}
           </div>
         </div>
+        {badFolders.length > 0 && (
+          <div className="sunken-panel bad-folders-panel" data-testid="bad-folders">
+            <div className="queue-section-label">Folders with bad files ({badFolders.length})</div>
+            <ul className="folder-list">
+              {badFolders.map(({ folder, count }) => (
+                <li key={folder} className="folder-item">
+                  <span className="path" title={folder}>{folder}</span>
+                  <span className="bad-folder-count">{count}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <RecentEventsTable events={recentEvents} defaultSortKey="pct" />
       </fieldset>
     </div>

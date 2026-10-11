@@ -1,187 +1,127 @@
+//! Worker pool: N workers pull from the shared queue, run the per-file
+//! pipeline, and report back over a channel. A single dispatcher task applies
+//! every event to `RunState` and forwards it to the `EventSink`.
+//!
+//! Shared by the GUI and the CLI.
+
 use crate::pipeline::job::{execute_job, ProcessingContext};
 use crate::pipeline::queue::JobQueue;
-use crate::pipeline::stages::PipelineEvent;
-use crate::state::run_state::{FileEvent, FileStatus, RunCounters, RunState, WorkerState};
+use crate::pipeline::sink::EventSink;
+use crate::pipeline::stages::{PipelineEvent, PipelineStage};
+use crate::state::run_state::{FileStatus, RunCounters, RunState, WorkerState};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use tauri::Emitter;
+/// How long an idle worker sleeps before re-checking an empty-but-open queue.
+const QUEUE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(150);
 
-/// Run the worker pool: spawns N workers that pull from the queue and process files.
+/// Run the worker pool to completion. Returns when every worker has exited
+/// (queue closed and drained, or cancelled) and `RunComplete` has been emitted.
 pub async fn run_worker_pool(
     worker_count: usize,
     queue: Arc<JobQueue>,
     context: Arc<ProcessingContext>,
     run_state: Arc<RunState>,
-    app_handle: tauri::AppHandle,
+    sink: Arc<dyn EventSink>,
 ) {
     let (event_tx, mut event_rx) = mpsc::channel::<PipelineEvent>(256);
 
-    // Spawn worker tasks
-    let mut worker_handles = Vec::new();
+    let mut worker_handles = Vec::with_capacity(worker_count);
     for worker_id in 0..worker_count {
         let queue = Arc::clone(&queue);
         let context = Arc::clone(&context);
         let cancel_token = run_state.cancel_token.clone();
         let event_tx = event_tx.clone();
-
-        let handle = tokio::spawn(async move {
-            worker_loop(worker_id, queue, context, event_tx, cancel_token.clone()).await;
-        });
-        worker_handles.push(handle);
+        worker_handles.push(tokio::spawn(async move {
+            worker_loop(worker_id, queue, context, event_tx, cancel_token).await;
+        }));
     }
-
-    // Drop our copy of the sender so the receiver closes when all workers finish
+    // Drop our copy so the receiver closes once every worker is done.
     drop(event_tx);
 
-    // Event dispatcher: forward events to RunState and Tauri frontend
     while let Some(event) = event_rx.recv().await {
-        let emit_event = match &event {
-            PipelineEvent::WorkerStarted {
-                worker_id,
-                file,
-                stage,
-            } => {
-                let initial_state = match stage {
-                    crate::pipeline::stages::PipelineStage::Hashing(_) => WorkerState::Hashing,
-                    _ => WorkerState::Converting,
-                };
-                run_state.update_worker(
-                    *worker_id,
-                    initial_state,
-                    Some(file.clone()),
-                    0,
-                    String::new(),
-                );
-                event
-            }
-            PipelineEvent::WorkerProgress {
-                worker_id,
-                percent,
-                ratio,
-            } => {
-                let workers = run_state.workers.read().unwrap_or_else(|e| e.into_inner());
-                if let Some(w) = workers.get(*worker_id) {
-                    let file = w.file.clone();
-                    drop(workers);
-                    run_state.update_worker(
-                        *worker_id,
-                        WorkerState::Converting,
-                        file,
-                        *percent,
-                        ratio.clone(),
-                    );
-                }
-                event
-            }
-            PipelineEvent::WorkerStageChanged { worker_id, stage } => {
-                let new_state = match stage {
-                    crate::pipeline::stages::PipelineStage::Converting => WorkerState::Converting,
-                    crate::pipeline::stages::PipelineStage::Hashing(_) => WorkerState::Hashing,
-                    crate::pipeline::stages::PipelineStage::Artwork => WorkerState::Artwork,
-                    crate::pipeline::stages::PipelineStage::Finalizing => WorkerState::Finalizing,
-                    crate::pipeline::stages::PipelineStage::Complete => WorkerState::Idle,
-                };
-                let workers = run_state.workers.read().unwrap_or_else(|e| e.into_inner());
-                let file = workers.get(*worker_id).and_then(|w| w.file.clone());
-                drop(workers);
-                run_state.update_worker(*worker_id, new_state, file, 0, String::new());
-                event
-            }
-            PipelineEvent::FileCompleted {
-                worker_id,
-                event: file_event,
-                ..
-            } => {
-                // Android: write the compressed cache file back to the original
-                // user-selected document URI BEFORE recording/emitting so that
-                // write failures are reflected in the event status shown to the user.
-                #[cfg(target_os = "android")]
-                let file_event = {
-                    let mut ev = file_event.clone();
-                    if ev.status == crate::state::run_state::FileStatus::OK {
-                        match android_write_back(&app_handle, &ev.file) {
-                            Ok(()) => {
-                                // Successfully written back to the original document URI.
-                                // Clean up the cached input file to prevent app size bloat.
-                                let _ = std::fs::remove_file(&ev.file);
-                            }
-                            Err(err) => {
-                                ev.status = crate::state::run_state::FileStatus::FAIL;
-                                ev.detail = format!("Write back to original file failed: {err}");
-                            }
-                        }
-                    }
-                    ev
-                };
-
-                // Record the event in run state (updates counters)
-                run_state.record_event(*file_event.clone());
-                // Read updated counters and re-emit with snapshot
-                let counters = run_state
-                    .counters
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
-                let enriched = PipelineEvent::FileCompleted {
-                    worker_id: *worker_id,
-                    event: file_event.clone(),
-                    counters,
-                };
-                // Emit enriched event instead of original
-                let _ = app_handle.emit("pipeline-event", &enriched);
-
-                continue;
-            }
-            PipelineEvent::WorkerHashComputed { .. } => {
-                // Pass through to frontend unchanged — no run_state update needed
-                event
-            }
-            PipelineEvent::WorkerIdle { worker_id } => {
-                run_state.update_worker(*worker_id, WorkerState::Idle, None, 0, String::new());
-                event
-            }
-            PipelineEvent::QueueGrew { .. } => {
-                // QueueGrew is emitted by the enqueue_files command directly,
-                // not by workers. Pass through if it ever arrives via this path.
-                event
-            }
-            PipelineEvent::RunComplete => event,
-        };
-
-        // Emit event to frontend
-        let _ = app_handle.emit("pipeline-event", &emit_event);
+        dispatch(event, &run_state, sink.as_ref());
     }
 
-    // Wait for all workers to complete
     for handle in worker_handles {
         let _ = handle.await;
     }
 
-    // Android: clean up the entire flac_input cache directory at the end of the run.
-    // Individual files are deleted after successful write-back, but this sweeps up
-    // any leftovers from failed files so the app doesn't accumulate stale data.
-    #[cfg(target_os = "android")]
-    {
-        use tauri::Manager;
-        if let Ok(cache_dir) = app_handle.path().app_cache_dir() {
-            let flac_cache = cache_dir.join("flac_input");
-            let _ = std::fs::remove_dir_all(&flac_cache);
-        }
-        let state = app_handle.state::<crate::state::app_state::AppState>();
-        state
-            .content_uri_map
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
-    }
-
-    // Emit RunComplete to frontend
-    let _ = app_handle.emit("pipeline-event", &PipelineEvent::RunComplete);
+    sink.run_finished();
+    sink.emit(&PipelineEvent::RunComplete);
 }
 
-async fn worker_loop(
+/// Apply one event to run state, then forward it.
+fn dispatch(event: PipelineEvent, run_state: &RunState, sink: &dyn EventSink) {
+    match event {
+        PipelineEvent::WorkerStarted {
+            worker_id,
+            ref file,
+            ref stage,
+        } => {
+            run_state.update_worker(
+                worker_id,
+                stage_to_state(stage),
+                Some(file.clone()),
+                0,
+                String::new(),
+            );
+            sink.emit(&event);
+        }
+        PipelineEvent::WorkerProgress {
+            worker_id,
+            percent,
+            ref ratio,
+        } => {
+            run_state.set_worker_progress(worker_id, percent, ratio.clone());
+            sink.emit(&event);
+        }
+        PipelineEvent::WorkerStageChanged {
+            worker_id,
+            ref stage,
+        } => {
+            run_state.set_worker_state(worker_id, stage_to_state(stage));
+            sink.emit(&event);
+        }
+        PipelineEvent::FileCompleted {
+            worker_id,
+            event: mut file_event,
+            ..
+        } => {
+            sink.finalize_file_event(&mut file_event);
+            run_state.record_event((*file_event).clone());
+            let counters = run_state.counters_snapshot();
+            sink.emit(&PipelineEvent::FileCompleted {
+                worker_id,
+                event: file_event,
+                counters,
+            });
+        }
+        PipelineEvent::WorkerIdle { worker_id } => {
+            run_state.update_worker(worker_id, WorkerState::Idle, None, 0, String::new());
+            sink.emit(&event);
+        }
+        // Pass-through events: no run-state bookkeeping needed.
+        PipelineEvent::WorkerHashComputed { .. }
+        | PipelineEvent::QueueGrew { .. }
+        | PipelineEvent::RunComplete => sink.emit(&event),
+    }
+}
+
+fn stage_to_state(stage: &PipelineStage) -> WorkerState {
+    match stage {
+        PipelineStage::Converting => WorkerState::Converting,
+        PipelineStage::Hashing(_) => WorkerState::Hashing,
+        PipelineStage::Artwork => WorkerState::Artwork,
+        PipelineStage::Finalizing => WorkerState::Finalizing,
+        PipelineStage::Complete => WorkerState::Idle,
+    }
+}
+
+/// One worker: pull items until the queue is closed and drained (or the run
+/// is cancelled), run each through the pipeline, schedule retries.
+pub async fn worker_loop(
     worker_id: usize,
     queue: Arc<JobQueue>,
     context: Arc<ProcessingContext>,
@@ -189,8 +129,7 @@ async fn worker_loop(
     cancel_token: CancellationToken,
 ) {
     loop {
-        // Wait for an item, allowing the queue to grow mid-run. Exits only on
-        // cancel, or when the queue is closed AND drained.
+        // Wait for an item, allowing the queue to grow mid-run (live drops).
         let item = loop {
             if cancel_token.is_cancelled() {
                 return;
@@ -201,112 +140,153 @@ async fn worker_loop(
             if queue.is_closed() {
                 return;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            tokio::time::sleep(QUEUE_POLL_INTERVAL).await;
         };
 
         let result = execute_job(&item, worker_id, &context, &event_tx, cancel_token.clone()).await;
 
-        // Handle retry — SKIPPED is terminal and never retries.
-        let file_event = make_file_event(&result);
-        let dummy_counters = RunCounters::default();
-        if result.status == FileStatus::FAIL && item.attempt < context.max_retries {
+        // A failure is retried unless the run was cancelled or the attempt
+        // budget is exhausted. SKIPPED is terminal and never retries.
+        let mut file_event = result.to_file_event();
+        let will_retry = result.status == FileStatus::FAIL
+            && !cancel_token.is_cancelled()
+            && item.attempt < context.max_retries;
+        if will_retry {
+            file_event.status = FileStatus::RETRY;
             queue.requeue_for_retry(item, result.attempt + 1);
-            let _ = event_tx
-                .send(PipelineEvent::FileCompleted {
-                    worker_id,
-                    event: Box::new(file_event),
-                    counters: dummy_counters,
-                })
-                .await;
-        } else {
-            let _ = event_tx
-                .send(PipelineEvent::FileCompleted {
-                    worker_id,
-                    event: Box::new(file_event),
-                    counters: dummy_counters,
-                })
-                .await;
         }
 
-        queue.touch();
+        let _ = event_tx
+            .send(PipelineEvent::FileCompleted {
+                worker_id,
+                event: Box::new(file_event),
+                counters: RunCounters::default(),
+            })
+            .await;
 
-        // Mark worker idle
+        queue.touch();
         let _ = event_tx.send(PipelineEvent::WorkerIdle { worker_id }).await;
     }
 }
 
-/// Android only: write the compressed cache file back to the original document URI
-/// that the user selected via ACTION_OPEN_DOCUMENT.
-#[cfg(target_os = "android")]
-fn android_write_back<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    cache_path: &str,
-) -> Result<(), String> {
-    use tauri::Manager;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fs::scanner::ScannedFile;
+    use crate::state::run_state::FileEvent;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
 
-    let state = app.state::<crate::state::app_state::AppState>();
-    let bridge = app
-        .try_state::<crate::android_bridge::AndroidBridge>()
-        .ok_or_else(|| "AndroidBridge not available".to_string())?;
-
-    // Look up the original content URI for this cached file.
-    let original_uri = {
-        let map = state
-            .content_uri_map
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
-        map.get(cache_path).cloned()
-    };
-    let Some(original_uri) = original_uri else {
-        return Err(format!(
-            "No original document URI recorded for cached file: {cache_path}"
-        ));
-    };
-
-    bridge
-        .write_file_to_uri(&original_uri, cache_path)
-        .map_err(|e| format!("Failed to open original document for writing: {e}"))?;
-
-    {
-        let mut map = state
-            .content_uri_map
-            .write()
-            .unwrap_or_else(|e| e.into_inner());
-        map.remove(cache_path);
+    /// Collects every emitted event for assertions.
+    struct RecordingSink {
+        events: Mutex<Vec<PipelineEvent>>,
+        finished: std::sync::atomic::AtomicBool,
     }
 
-    Ok(())
-}
+    impl EventSink for RecordingSink {
+        fn emit(&self, event: &PipelineEvent) {
+            self.events.lock().unwrap().push(event.clone());
+        }
+        fn finalize_file_event(&self, event: &mut FileEvent) {
+            // Simulate a platform hook that downgrades OK → WARN.
+            if event.status == FileStatus::OK {
+                event.status = FileStatus::WARN;
+                event.detail = "hooked".into();
+            }
+        }
+        fn run_finished(&self) {
+            self.finished
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
 
-fn make_file_event(result: &crate::pipeline::stages::JobResult) -> FileEvent {
-    FileEvent {
-        time: chrono::Local::now().format("%H:%M:%S").to_string(),
-        status: result.status.clone(),
-        file: result.file_path.clone(),
-        attempt: format!("{}", result.attempt),
-        verification: result.verification.clone(),
-        before_size: result.before_size,
-        after_size: result.after_size,
-        saved_bytes: result.saved_bytes,
-        compression_pct: result.compression_pct,
-        detail: result.error.clone().unwrap_or_default(),
-        source_hash: result.source_hash.clone(),
-        output_hash: result.output_hash.clone(),
-        embedded_md5: result.embedded_md5.clone(),
-        artwork_saved_bytes: result
-            .artwork_result
-            .as_ref()
-            .map(|a| a.saved_bytes)
-            .unwrap_or(0),
-        artwork_raw_saved_bytes: result
-            .artwork_result
-            .as_ref()
-            .map(|a| a.raw_saved_bytes)
-            .unwrap_or(0),
-        artwork_blocks_optimized: result
-            .artwork_result
-            .as_ref()
-            .map(|a| a.blocks_optimized)
-            .unwrap_or(0),
+    fn missing_file(name: &str) -> ScannedFile {
+        ScannedFile {
+            path: PathBuf::from(format!("/definitely/not/here/{name}")),
+            name: name.to_string(),
+            size: 10,
+        }
+    }
+
+    /// Nonexistent inputs fail fast in the pipeline, which exercises the
+    /// retry → RETRY → FAIL bookkeeping without needing libFLAC fixtures.
+    #[tokio::test]
+    async fn test_pool_retries_failures_then_records_final_fail() {
+        let queue = Arc::new(JobQueue::new(vec![missing_file("a.flac")]));
+        queue.close();
+        let run_state = Arc::new(RunState::new("t".into(), 1));
+        run_state.counters.write().unwrap().total_files = 1;
+        let sink = Arc::new(RecordingSink {
+            events: Mutex::new(Vec::new()),
+            finished: Default::default(),
+        });
+        let ctx = Arc::new(ProcessingContext {
+            max_retries: 3,
+            mark_as_crunched: false,
+            skip_crunched: false,
+        });
+
+        run_worker_pool(1, queue, ctx, Arc::clone(&run_state), sink.clone()).await;
+
+        let events = sink.events.lock().unwrap();
+        let statuses: Vec<FileStatus> = events
+            .iter()
+            .filter_map(|e| match e {
+                PipelineEvent::FileCompleted { event, .. } => Some(event.status.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![FileStatus::RETRY, FileStatus::RETRY, FileStatus::FAIL],
+            "attempts 1 and 2 retry, attempt 3 is terminal"
+        );
+        assert!(matches!(events.last(), Some(PipelineEvent::RunComplete)));
+        assert!(sink.finished.load(std::sync::atomic::Ordering::SeqCst));
+
+        let c = run_state.counters_snapshot();
+        assert_eq!(c.processed, 1, "retries must not count as processed");
+        assert_eq!(c.failed, 1);
+        assert_eq!(c.successful, 0);
+
+        // The last FileCompleted carries the dispatcher's counters snapshot.
+        let last_completed = events
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                PipelineEvent::FileCompleted { counters, .. } => Some(counters.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(last_completed.failed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_pool_does_not_retry_when_cancelled() {
+        let queue = Arc::new(JobQueue::new(vec![missing_file("a.flac")]));
+        queue.close();
+        let run_state = Arc::new(RunState::new("t".into(), 1));
+        // Cancel before starting: the job fails immediately and must not be
+        // rescheduled.
+        run_state.cancel_token.cancel();
+        let sink = Arc::new(RecordingSink {
+            events: Mutex::new(Vec::new()),
+            finished: Default::default(),
+        });
+        let ctx = Arc::new(ProcessingContext {
+            max_retries: 3,
+            mark_as_crunched: false,
+            skip_crunched: false,
+        });
+
+        run_worker_pool(1, queue.clone(), ctx, run_state, sink.clone()).await;
+
+        let events = sink.events.lock().unwrap();
+        let completed = events
+            .iter()
+            .filter(|e| matches!(e, PipelineEvent::FileCompleted { .. }))
+            .count();
+        assert_eq!(completed, 0, "cancelled worker exits before taking work");
+        assert_eq!(queue.remaining(), 1);
     }
 }

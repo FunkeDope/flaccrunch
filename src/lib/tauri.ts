@@ -15,16 +15,8 @@ export async function isMobile(): Promise<boolean> {
   return invoke<boolean>("is_mobile");
 }
 
-export async function selectOutputFolder(): Promise<string | null> {
-  return invoke<string | null>("select_output_folder");
-}
-
 export async function scanFolders(folders: string[]): Promise<ScanResult> {
   return invoke<ScanResult>("scan_folders", { folders });
-}
-
-export async function validateFolder(path: string): Promise<boolean> {
-  return invoke<boolean>("validate_folder", { path });
 }
 
 // Processing operations
@@ -81,6 +73,10 @@ export async function getEfcLog(
     maxRetries,
     runCanceled,
   });
+}
+
+export async function writeTextFile(path: string, content: string): Promise<void> {
+  return invoke<void>("write_text_file", { path, content });
 }
 
 // Startup paths from CLI args (consumed on first call)

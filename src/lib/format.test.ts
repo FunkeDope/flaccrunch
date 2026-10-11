@@ -7,7 +7,32 @@ import {
   getStageLabel,
   getStatusColor,
   compressionRowClass,
+  parentFolder,
+  failedFolders,
 } from "./format";
+
+describe("failedFolders", () => {
+  it("dedupes parent folders of FAIL events and counts them", () => {
+    const events = [
+      { status: "FAIL", file: "/music/Album B/02.flac" },
+      { status: "OK", file: "/music/Album A/01.flac" },
+      { status: "FAIL", file: "C:\\Music\\Album A\\03.flac" },
+      { status: "FAIL", file: "/music/Album B/05.flac" },
+      { status: "RETRY", file: "/music/Album C/01.flac" },
+    ];
+    expect(failedFolders(events)).toEqual([
+      { folder: "/music/Album B", count: 2 },
+      { folder: "C:\\Music\\Album A", count: 1 },
+    ]);
+    expect(failedFolders([])).toEqual([]);
+  });
+
+  it("parentFolder handles both separators and bare names", () => {
+    expect(parentFolder("/a/b/c.flac")).toBe("/a/b");
+    expect(parentFolder("C:\\a\\b.flac")).toBe("C:\\a");
+    expect(parentFolder("track.flac")).toBe("track.flac");
+  });
+});
 
 // ─── formatBytes ────────────────────────────────────────────────────────────
 

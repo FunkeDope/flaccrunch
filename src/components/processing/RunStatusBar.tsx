@@ -6,6 +6,8 @@ interface RunStatusBarProps {
   status: RunStatus;
   counters: RunCounters;
   startTime: number | null;
+  /** When the run finished; frozen elapsed time is shown after completion. */
+  endTime?: number | null;
   livePct?: number;
   onCancel: () => void;
   onReset: () => void;
@@ -29,6 +31,7 @@ export function RunStatusBar({
   status,
   counters,
   startTime,
+  endTime,
   livePct,
   onCancel,
   onReset,
@@ -72,13 +75,17 @@ export function RunStatusBar({
     }
   }
 
-  // Savings breakdown
-  const audioSaved = counters.totalSavedBytes - counters.totalArtworkSaved;
+  // Savings breakdown: artwork = picture bytes, meta = padding + other
+  // metadata, audio = everything else.
   const metaSaved = counters.totalMetadataSaved + counters.totalPaddingSaved;
+  const audioSaved = counters.totalSavedBytes - counters.totalArtworkSaved - metaSaved;
   const totalSavedPct =
     counters.totalOriginalBytes > 0
       ? (counters.totalSavedBytes / counters.totalOriginalBytes) * 100
       : 0;
+
+  const finalElapsed =
+    startTime ? Math.floor(((endTime ?? Date.now()) - startTime) / 1000) : 0;
 
   return (
     <div className={`window run-status-window ${barClass}`}>
@@ -129,9 +136,7 @@ export function RunStatusBar({
           <p className="status-bar-field">{formatElapsed(elapsed)}</p>
         )}
         {isComplete && startTime && (
-          <p className="status-bar-field">
-            {formatElapsed(Math.floor((Date.now() - startTime) / 1000))}
-          </p>
+          <p className="status-bar-field">{formatElapsed(finalElapsed)}</p>
         )}
         <p className="status-bar-field chip-success">
           OK <strong>{counters.successful}</strong>
@@ -146,10 +151,8 @@ export function RunStatusBar({
             Skip <strong>{counters.skipped}</strong>
           </p>
         )}
-        {counters.totalSavedBytes > 0 && (
-          <p className="status-bar-field">
-            Audio {formatBytes(audioSaved > 0 ? audioSaved : counters.totalSavedBytes)}
-          </p>
+        {audioSaved > 0 && (
+          <p className="status-bar-field">Audio {formatBytes(audioSaved)}</p>
         )}
         {counters.totalArtworkSaved > 0 && (
           <p className="status-bar-field">Art {formatBytes(counters.totalArtworkSaved)}</p>

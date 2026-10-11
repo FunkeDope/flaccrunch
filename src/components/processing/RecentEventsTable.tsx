@@ -113,9 +113,11 @@ export function RecentEventsTable({ events, maxRows, minRows, defaultSortKey = "
           </thead>
           <tbody>
             {visible.map((event, i) => {
-              const rowClass = compressionRowClass(event.compressionPct);
+              // A failed file is the headline of a run: the whole row lights up.
+              const rowClass =
+                event.status === "FAIL" ? "row-fail" : compressionRowClass(event.compressionPct);
               return (
-                <tr key={i} className={rowClass}>
+                <tr key={i} className={rowClass} title={event.status === "FAIL" ? event.detail : undefined}>
                   <td>{event.time}</td>
                   <td className={getStatusColor(event.status)}>{event.status}</td>
                   <td

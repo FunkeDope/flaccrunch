@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 /// Get the number of logical CPU cores.
 pub fn get_cpu_count() -> usize {
-    num_cpus::get().max(1)
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .max(1)
 }
 
 /// Get the default number of worker threads (CPU count - 1, minimum 1).
@@ -23,35 +26,6 @@ pub fn default_log_folder() -> PathBuf {
     PathBuf::from("EFC-logs")
 }
 
-/// Set the process to below-normal priority.
-#[cfg(target_os = "windows")]
-pub fn set_process_below_normal(pid: u32) {
-    use std::process::Command;
-    // Use wmic to set below-normal priority (priority 6 = below normal)
-    let _ = Command::new("wmic")
-        .args([
-            "process",
-            "where",
-            &format!("ProcessId={pid}"),
-            "CALL",
-            "setpriority",
-            "16384",
-        ])
-        .output();
-}
-
-#[cfg(unix)]
-pub fn set_process_below_normal(pid: u32) {
-    unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, pid, 10);
-    }
-}
-
-#[cfg(not(any(unix, target_os = "windows")))]
-pub fn set_process_below_normal(_pid: u32) {
-    // No-op on unsupported platforms
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,14 +36,10 @@ mod tests {
     }
 
     #[test]
-    fn test_default_thread_count_at_least_one() {
-        assert!(default_thread_count() >= 1);
-    }
-
-    #[test]
     fn test_default_thread_count_less_than_cpu_count() {
         let cpus = get_cpu_count();
         let threads = default_thread_count();
+        assert!(threads >= 1);
         if cpus > 1 {
             assert_eq!(threads, cpus - 1);
         } else {
@@ -79,7 +49,6 @@ mod tests {
 
     #[test]
     fn test_default_log_folder_not_empty() {
-        let folder = default_log_folder();
-        assert!(!folder.as_os_str().is_empty());
+        assert!(!default_log_folder().as_os_str().is_empty());
     }
 }

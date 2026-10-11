@@ -24,22 +24,74 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Frontend unit tests
+        run: npx vitest run
+
       - name: Build frontend
         run: npm run build
 
-  check-backend:
+  # The processing core + headless CLI. No GTK/WebKit needed: this is what the
+  # Linux CLI artifact is built from.
+  check-core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          prefix-key: v2-rust-core-${{ matrix.os }}
+
+      - name: Clippy (core)
+        working-directory: src-tauri
+        run: cargo clippy --no-default-features --all-targets -- -D warnings
+
+      - name: Test (core)
+        working-directory: src-tauri
+        run: cargo test --no-default-features
+
+      - name: Build CLI
+        working-directory: src-tauri
+        run: cargo build --release --no-default-features --bin flaccrunch-cli
+
+      - name: Smoke-test CLI
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          BIN=target/release/flaccrunch-cli
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          "$BIN" --version
+          mkdir -p /tmp/smoke && cp ../Tests/un-optimized.flac /tmp/smoke/track.flac
+          "$BIN" --dry-run /tmp/smoke
+          "$BIN" --threads 2 --mark --log /tmp/smoke/run.log /tmp/smoke
+          "$BIN" --skip-crunched /tmp/smoke
+          cat /tmp/smoke/run.log | head -20
+
+  check-gui:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          prefix-key: v1-rust-check-backend
+          prefix-key: v2-rust-gui
 
       - name: Install Linux dependencies
         run: |
@@ -51,7 +103,11 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - name: Run tests
+      - name: Clippy (GUI)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test (GUI feature set)
         working-directory: src-tauri
         run: cargo test
 

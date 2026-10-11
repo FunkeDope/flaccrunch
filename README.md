@@ -1,8 +1,8 @@
 # FlacCrunch
 
-A cross-platform FLAC optimizer with a modern desktop UI and full CLI support. Losslessly recompresses FLAC files at maximum compression, verifies decoded-audio integrity via MD5, and optimizes embedded album art — all with native performance via statically linked libFLAC. No external binaries required.
+A cross-platform FLAC optimizer with a desktop UI and a standalone headless CLI. Losslessly recompresses FLAC files at maximum compression, verifies decoded-audio integrity via MD5, and losslessly optimizes embedded album art — all with native performance via statically linked libFLAC and mozjpeg. No external binaries required.
 
-Built with **Tauri v2** (Rust) and **React** (TypeScript). Runs on Windows, macOS, Linux, and Android.
+Built with **Tauri v2** (Rust) and **React** (TypeScript). The GUI runs on Windows, macOS, Linux, and Android. The CLI (`flaccrunch-cli`) is a single binary with no GUI dependencies at all — it runs on a headless Linux box with no X server.
 
 ---
 
@@ -12,11 +12,15 @@ Get the latest build from [GitHub Releases](../../releases).
 
 | Platform | File |
 |----------|------|
-| Windows (portable) | `FlacCrunch.exe` |
-| Windows (installer) | `.msi` or NSIS `.exe` |
+| Windows (portable GUI) | `FlacCrunch.exe` |
+| Windows (installer) | `.msi` |
 | macOS (Apple Silicon) | `.dmg` |
-| Linux | `.deb` or `.AppImage` |
+| Linux (GUI) | `.deb` or `.AppImage` |
+| **Linux (headless CLI, no X needed)** | `flaccrunch-cli-linux-x86_64` |
+| Windows / macOS (headless CLI) | `flaccrunch-cli-windows-x86_64.exe`, `flaccrunch-cli-macos-arm64` |
 | Android | `.apk` |
+
+The Linux CLI binary needs glibc 2.35+ (Ubuntu 22.04, Debian 12, Fedora 36 or newer).
 
 ---
 
@@ -24,13 +28,14 @@ Get the latest build from [GitHub Releases](../../releases).
 
 - **Maximum FLAC compression** — re-encodes at level 8 with exhaustive model search and exhaustive QLP coefficient precision search (equivalent to `flac -8 -e -p`)
 - **Audio integrity verification** — MD5 of decoded PCM computed before and after re-encoding; original file replaced only on hash match
-- **Lossless album art optimization** — PNG via oxipng (lossless); JPEG via metadata stripping + Huffman table reoptimization (original quantization tables preserved — pixel data is bit-identical)
-- **PADDING removal** — all PADDING metadata blocks stripped; savings tracked separately
+- **Lossless album art optimization** — PNG via oxipng; JPEG via metadata stripping plus coefficient-level Huffman re-optimization (the same transform as `jpegtran -optimize`, done with mozjpeg: the quantized DCT coefficients are rewritten with optimal Huffman tables and never decoded). Every result is verified to decode to identical pixels before it replaces the original
+- **PADDING removal** — all PADDING metadata blocks stripped; savings tracked separately from artwork
+- **Bad-file reporting** — a file that fails to decode or verify is left untouched and highlighted; the run summary lists the folders (albums) that contain bad files so they can be re-ripped
 - **Full metadata preservation** — all Vorbis comments, PICTURE blocks, cue sheets, and application metadata copied to re-encoded output
 - **Multi-threaded worker pool** — configurable thread count, defaults to CPU count − 1
 - **Live dashboard** — per-worker progress with collapse/expand, drag-to-resize split between workers and file results, live hash verification display
 - **In-app log viewer** — view the full run log in a modal window; also exportable as a text file
-- **CLI mode** — `-silent` flag skips the GUI entirely and prints results to stdout
+- **Headless CLI** — `flaccrunch-cli` has no Tauri/WebKit/GTK dependency; the GUI binary also accepts `-silent`
 - **GUI pre-load** — pass paths on the command line to open the GUI with folders already loaded
 - **Drag-and-drop** — drop folders or files directly onto the app window (desktop)
 - **Configurable retries** — failed files automatically re-queued up to N times (default 3)
@@ -40,24 +45,33 @@ Get the latest build from [GitHub Releases](../../releases).
 ## CLI Usage
 
 ```
-FlacCrunch.exe [paths...] [options]
+flaccrunch-cli [options] <path>...
+
+  <path> may be a folder (scanned recursively) or a .flac file.
 
 Options:
-  -silent              No GUI — process folders and print results to stdout
-  -threads <N>         Worker thread count (default: CPU count - 1, min: 1)
-  -retries <N>         Max retries per file (default: 3)
-  -logdir <path>       Log output directory (default: platform log folder)
-  -help                Show this help
+  -t, --threads <N>     Worker threads (default: CPU count - 1)
+  -r, --retries <N>     Max retries per file (default: 3)
+      --mark            Stamp output with a FLACCRUNCH_INFO marker tag
+      --skip-crunched   Skip files that already carry the marker
+      --log <file>      Write an EFC-format log to <file>
+      --logdir <dir>    Write a timestamped EFC-format log into <dir>
+  -n, --dry-run         Scan only: list what would be processed
+  -q, --quiet           Only print the final summary
+  -V, --version         Show version
+  -h, --help            Show this help
 
 Examples:
-  FlacCrunch.exe "D:\Music"                              Open GUI with folder pre-loaded
-  FlacCrunch.exe -silent "D:\Music"                      Process silently, console output
-  FlacCrunch.exe -silent -threads 4 "D:\Music" "E:\More" Multiple folders, 4 threads
+  flaccrunch-cli ~/Music
+  flaccrunch-cli --threads 4 --mark --skip-crunched ~/Music /mnt/nas/More
+  flaccrunch-cli --log run.log "D:\Music\Album"
 ```
 
-On Linux/macOS the binary is named `flaccrunch`. Paths can be directories (recursively scanned) or individual `.flac` files.
+Both `-flag` and `--flag` spellings work; `--` ends option parsing. Ctrl+C cancels cleanly (in-flight temp files are removed, originals untouched). The GUI binary accepts the same options plus `-silent` to run headless, e.g. `FlacCrunch.exe -silent "D:\Music"`; without `-silent` it opens the GUI with the paths pre-loaded.
 
-**Exit codes:** `0` = all files successful, `1` = one or more failures.
+**Exit codes:** `0` = all files successful, `1` = one or more failures, `2` = usage error or no FLAC files found, `130` = interrupted.
+
+After the summary, the CLI prints **Folders with bad files**: every folder (usually one album) that contains a file that could not be decoded or verified, with a count, followed by the individual failures and reasons. Bad files are never modified.
 
 ---
 
@@ -68,8 +82,8 @@ Each file passes through five stages in order:
 | Stage | What happens |
 |-------|-------------|
 | **1. Hashing source** | Reads the embedded MD5 from FLAC STREAMINFO. Decodes the original audio and computes a PRE hash (MD5 of raw PCM). Result emitted to UI immediately. |
-| **2. Converting** | Re-encodes audio at FLAC level 8 with exhaustive model search and exhaustive QLP precision search. Live progress % and compression ratio emitted every ~100 ms. All metadata blocks re-applied from the original after encoding. Non-FLAC prefix bytes (e.g. ID3v2 tags prepended by some tools) are extracted, preserved, and re-attached. |
-| **3. Artwork** | PNG images optimized with oxipng preset 4 (lossless). JPEG images losslessly reoptimized: non-essential APP markers stripped (EXIF, ICC, XMP, COM), then Huffman tables rebuilt with optimal prefix codes using the original DQT quantization tables — equivalent to `jpegtran -optimize`, pixel data is bit-identical. PADDING blocks removed. |
+| **2. Converting** | Streams the decoded audio straight into a libFLAC encoder at level 8 with exhaustive model search and exhaustive QLP precision search (memory use is bounded by one block, not the track length). Tags, pictures, application and cuesheet blocks are attached to the encoder up front, so the output is written in one pass. Live progress % and compression ratio emitted every ~100 ms. Non-FLAC prefix bytes (e.g. ID3v2 tags prepended by some tools) are preserved and re-attached. |
+| **3. Artwork** | Done in memory on the metadata chain in a single pass. PNG images optimized with oxipng preset 4 (lossless). JPEG images: non-essential APP markers stripped (EXIF, ICC, XMP, COM), then the quantized DCT coefficients are rewritten with optimal Huffman tables by mozjpeg (`jpegtran -optimize`; baseline and progressive layouts tried, smaller kept). The result is only accepted if it decodes to exactly the same pixels. PADDING blocks removed. |
 | **4. Hashing output** | Decodes the fully assembled output file and computes an OUT hash. Verified against PRE. On mismatch: temp file deleted, file marked FAIL. |
 | **5. Finalizing** | Atomically replaces the original file. Restores original filesystem timestamps. |
 
@@ -164,7 +178,9 @@ logs/
 
 The EFC summary includes: per-file results, total/success/fail counts, elapsed time, full savings breakdown (audio / artwork raw / artwork net / metadata / padding), success rate, average savings, top 3 compression results, and a SHA-256 checksum of the body for integrity verification.
 
-CLI mode prints progress every 10 files and a full summary on completion.
+The log also lists **Folders with bad files** (deduplicated, with counts) when any file failed, and an **EFC Savings** block with the audio / artwork / padding breakdown.
+
+The CLI prints one line per file as it completes, a live progress line on stderr, and a full summary on completion; `--log` / `--logdir` write the same EFC log the GUI exports.
 
 ---
 
@@ -182,18 +198,40 @@ Required manifest permissions: `READ_MEDIA_AUDIO`, `READ_EXTERNAL_STORAGE` (≤ 
 
 ### Prerequisites
 
-- **Rust** stable (`rustup`)
-- **Node.js** 22+
-- **Linux only:** `libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`
+- **Rust** stable (`rustup`), a C compiler and CMake (libFLAC and mozjpeg are built from source and linked statically)
+- **Node.js** 22+ (GUI only)
+- **Linux GUI only:** `libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`
 - **Android only:** Java 17, Android SDK, Android NDK 27.0.12077973
 
-### Desktop
+### Headless CLI (no GUI dependencies)
+
+```bash
+cd src-tauri
+cargo build --release --no-default-features --bin flaccrunch-cli
+# → target/release/flaccrunch-cli
+```
+
+The `gui` cargo feature (on by default) gates everything Tauri; with `--no-default-features` nothing from Tauri, WebKit or GTK is compiled or linked.
+
+### Desktop GUI
 
 ```bash
 npm ci
 npm run dev          # Dev server + hot reload
 npm run tauri build  # Production build + installer
 ```
+
+### Tests
+
+```bash
+cd src-tauri
+cargo test --no-default-features   # core (fast, no GTK needed)
+cargo test                         # with the GUI feature set
+cargo clippy --all-targets -- -D warnings
+cd .. && npx tsc --noEmit && npx vitest run
+```
+
+Fixture-based tests re-encode `Tests/un-optimized.flac`; dependencies are compiled optimized even in the dev profile so this takes seconds rather than minutes.
 
 ### Android
 
@@ -225,20 +263,25 @@ flaccrunch/
 │   └── lib/                      # Tauri IPC wrappers, format utilities
 ├── src-tauri/
 │   └── src/
-│       ├── main.rs               # Entry point: CLI detection, GUI launch
-│       ├── cli.rs                # CLI mode — silent processing, stdout output
+│       ├── main.rs               # GUI binary entry: -silent detection, GUI launch
+│       ├── bin/flaccrunch-cli.rs # Headless CLI binary (no `gui` feature)
+│       ├── gui.rs                # Tauri app wiring (gui feature only)
+│       ├── cli.rs                # CLI argument parsing, console output, run loop
 │       ├── pipeline/
-│       │   ├── job.rs            # Per-file 5-stage pipeline, cancellation, retry
-│       │   ├── worker_pool.rs    # Worker pool, event dispatch, Android write-back
-│       │   ├── queue.rs          # Lock-free job queue with retry support
+│       │   ├── job.rs            # Per-file 5-stage pipeline, cancellation
+│       │   ├── worker_pool.rs    # Worker pool, retries, event dispatch (shared by GUI + CLI)
+│       │   ├── sink.rs           # EventSink: GUI forwards to webview, CLI prints
+│       │   ├── queue.rs          # Job queue with live append + retry support
 │       │   └── stages.rs         # PipelineEvent, PipelineStage, JobResult types
 │       ├── flac/
-│       │   ├── encoder.rs        # libFLAC level-8 encoder, live progress, ratio
+│       │   ├── encoder.rs        # Streaming libFLAC level-8 encoder, metadata attach, progress
 │       │   ├── hasher.rs         # Decoded-audio MD5 via libFLAC decoder
-│       │   └── metadata.rs       # Metadata block copy, STREAMINFO MD5 read
+│       │   ├── metadata.rs       # Chain/iterator RAII wrappers, block cloning, ID3 prefix
+│       │   ├── marker.rs         # FLACCRUNCH_INFO marker read/write
+│       │   └── ffi.rs            # libFLAC state/status strings, path helpers
 │       ├── artwork/
-│       │   └── optimize.rs       # PNG (oxipng) + JPEG (lossless Huffman) optimization
-│       ├── image/                 # PNG/JPEG format detection, compression helpers
+│       │   └── optimize.rs       # In-memory picture optimization + padding removal
+│       ├── image/                # PNG (oxipng) + JPEG (mozjpeg coefficient transcode)
 │       ├── fs/
 │       │   ├── scanner.rs        # Recursive FLAC scan, dedup, permission errors
 │       │   ├── tempfile.rs       # Atomic temp-file move/remove
@@ -264,12 +307,12 @@ flaccrunch/
 ## CI/CD
 
 **`ci.yml`** runs on every push and pull request to `main`:
-- TypeScript type check (`tsc --noEmit`)
-- Vite production build
-- `cargo test`
-- `cargo build`
+- TypeScript type check, vitest, Vite production build
+- `check-core` (Ubuntu + Windows, no GTK): clippy `-D warnings`, `cargo test`, release build and smoke test of `flaccrunch-cli`
+- `check-gui` (Ubuntu): clippy, `cargo test`, `cargo build` with the GUI feature set
 
-**`release.yml`** runs on `v*` tag pushes:
+**`release.yml`** runs on `v*` tag pushes (and builds, without publishing, on `main`):
+- Builds `flaccrunch-cli` for Linux x86_64, Windows x86_64 and macOS arm64 (`target-cpu=x86-64-v3` for portability)
 - Builds desktop installers for Windows (x86_64), macOS (aarch64), Linux (x86_64)
 - Builds and signs Android APK (arm64, armv7, x86_64, x86)
 - Creates a GitHub Release and attaches all artifacts

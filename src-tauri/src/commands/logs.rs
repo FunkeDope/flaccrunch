@@ -8,6 +8,7 @@ use tauri::State;
 /// The frontend passes its full in-memory event list, timing, and run metadata;
 /// the backend contributes counters and top-compression from the run state.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn get_efc_log(
     events: Vec<FileEvent>,
     elapsed_secs: u64,
@@ -19,28 +20,17 @@ pub async fn get_efc_log(
     run_canceled: bool,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
-    let (counters, top_compression) = if let Some(ref run) = *active {
-        let c = run
-            .counters
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let t = run
+    let run = state
+        .active_run()
+        .ok_or_else(|| "No active run".to_string())?;
+    let summary = RunSummary {
+        counters: run.counters_snapshot(),
+        elapsed_secs,
+        top_compression: run
             .top_compression
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        (c, t)
-    } else {
-        return Err("No active run".to_string());
-    };
-
-    let summary = RunSummary {
-        counters,
-        elapsed_secs,
-        top_compression,
-        status_lines: vec![],
+            .clone(),
         source_folder,
         start_ms,
         finish_ms,
@@ -48,7 +38,6 @@ pub async fn get_efc_log(
         max_retries,
         run_canceled,
     };
-
     Ok(generate_efc_log(&summary, &events))
 }
 
@@ -87,7 +76,6 @@ fn write_bytes_to_path(
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
         use std::io::Write;
-        use tauri::Manager;
         use tauri_plugin_dialog::FilePath;
         use tauri_plugin_fs::{FsExt, OpenOptions};
 

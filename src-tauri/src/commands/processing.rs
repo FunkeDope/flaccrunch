@@ -3,18 +3,104 @@ use crate::fs::tempfile::test_directory_write_access;
 use crate::logging::efc_log::generate_efc_log;
 use crate::pipeline::job::ProcessingContext;
 use crate::pipeline::queue::JobQueue;
+use crate::pipeline::sink::EventSink;
 use crate::pipeline::stages::PipelineEvent;
 use crate::pipeline::worker_pool::run_worker_pool;
 use crate::state::app_state::AppState;
-use crate::state::run_state::{
-    CompressionResult, FileEvent, ProcessingStatus, RunState, RunSummary, WorkerState,
-    WorkerStatus,
-};
+use crate::state::run_state::{FileEvent, ProcessingStatus, RunState, RunSummary};
 use crate::state::settings::ProcessingSettings;
 use crate::util::platform::default_log_folder;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{Emitter, State};
+
+/// Name of the Tauri event every pipeline event is delivered on.
+pub const PIPELINE_EVENT: &str = "pipeline-event";
+
+/// Forwards pipeline events to the webview. On Android it also writes the
+/// compressed cache file back to the original content URI.
+struct GuiSink {
+    app: tauri::AppHandle,
+}
+
+impl EventSink for GuiSink {
+    fn emit(&self, event: &PipelineEvent) {
+        let _ = self.app.emit(PIPELINE_EVENT, event);
+    }
+
+    #[cfg(target_os = "android")]
+    fn finalize_file_event(&self, event: &mut FileEvent) {
+        use crate::state::run_state::FileStatus;
+        if event.status != FileStatus::OK {
+            return;
+        }
+        match android_write_back(&self.app, &event.file) {
+            Ok(()) => {
+                // Written back to the original document URI; drop the cached
+                // input so the app's cache does not bloat.
+                let _ = std::fs::remove_file(&event.file);
+            }
+            Err(err) => {
+                event.status = FileStatus::FAIL;
+                event.detail = format!("Write back to original file failed: {err}");
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn finalize_file_event(&self, _event: &mut FileEvent) {}
+
+    fn run_finished(&self) {
+        // Android: sweep the flac_input cache (leftovers from failed files)
+        // and forget the URI map for this run.
+        #[cfg(target_os = "android")]
+        {
+            use tauri::Manager;
+            if let Ok(cache_dir) = self.app.path().app_cache_dir() {
+                let _ = std::fs::remove_dir_all(cache_dir.join("flac_input"));
+            }
+            let state = self.app.state::<AppState>();
+            state
+                .content_uri_map
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
+        }
+    }
+}
+
+/// Android only: write the compressed cache file back to the original
+/// document URI that the user selected via ACTION_OPEN_DOCUMENT.
+#[cfg(target_os = "android")]
+fn android_write_back(app: &tauri::AppHandle, cache_path: &str) -> Result<(), String> {
+    use tauri::Manager;
+
+    let state = app.state::<AppState>();
+    let bridge = app
+        .try_state::<crate::android_bridge::AndroidBridge>()
+        .ok_or_else(|| "AndroidBridge not available".to_string())?;
+
+    let original_uri = state
+        .content_uri_map
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(cache_path)
+        .cloned()
+        .ok_or_else(|| {
+            format!("No original document URI recorded for cached file: {cache_path}")
+        })?;
+
+    bridge
+        .write_file_to_uri(&original_uri, cache_path)
+        .map_err(|e| format!("Failed to open original document for writing: {e}"))?;
+
+    state
+        .content_uri_map
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(cache_path);
+    Ok(())
+}
 
 /// Start processing FLAC files in the given folders.
 #[tauri::command]
@@ -24,39 +110,29 @@ pub async fn start_processing(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
-    // Check if already processing
-    {
-        let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
-        if let Some(ref run) = *active {
-            let status = run.status.read().unwrap_or_else(|e| e.into_inner());
-            if *status == ProcessingStatus::Processing {
-                return Err("Processing is already in progress".to_string());
-            }
+    if let Some(run) = state.active_run() {
+        if run.status_snapshot() == ProcessingStatus::Processing {
+            return Err("Processing is already in progress".to_string());
         }
     }
 
     let folder_paths: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
 
-    // Verify write access on all target folders before doing any work.
-    // Mirrors PowerShell's Test-DirectoryWriteAccess — fail fast with a clear
-    // error rather than discovering permission problems mid-run.
-    let unwritable: Vec<&PathBuf> = folder_paths
+    // Fail fast with a clear error rather than discovering permission
+    // problems mid-run (mirrors PowerShell's Test-DirectoryWriteAccess).
+    let unwritable: Vec<String> = folder_paths
         .iter()
         .filter(|p| p.is_dir() && !test_directory_write_access(p))
+        .map(|p| p.display().to_string())
         .collect();
     if !unwritable.is_empty() {
-        let paths = unwritable
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
         return Err(format!(
-            "Permission denied: cannot write to folder(s): {paths}. \
-             Check that the folders are not read-only and that you have write access."
+            "Permission denied: cannot write to folder(s): {}. \
+             Check that the folders are not read-only and that you have write access.",
+            unwritable.join(", ")
         ));
     }
 
-    // Clean up stale temp files
     let dir_paths: Vec<PathBuf> = folder_paths
         .iter()
         .filter(|p| p.is_dir())
@@ -64,20 +140,17 @@ pub async fn start_processing(
         .collect();
     cleanup_stale_temps(&dir_paths);
 
-    // Scan for FLAC files
     let scan_result = scan_for_flac_files(&folder_paths);
     if scan_result.files.is_empty() {
         return Err("No FLAC files found in the selected folders".to_string());
     }
 
-    let worker_count = settings.thread_count.min(scan_result.files.len());
-    let run_id = uuid::Uuid::new_v4().to_string();
-
-    // Scratch dir lives in the system temp directory — no persistent log folder needed
-    let scratch_dir = std::env::temp_dir()
-        .join("flaccrunch_scratch")
-        .join(&run_id);
-    let _ = std::fs::create_dir_all(&scratch_dir);
+    let worker_count = settings.thread_count.clamp(1, scan_result.files.len());
+    let run_id = format!(
+        "run_{}_{}",
+        chrono::Local::now().format("%Y%m%d_%H%M%S"),
+        std::process::id()
+    );
 
     // Resolve the verbose-log output folder (only used when verbose_logging is true)
     let verbose_log_dir: Option<PathBuf> = if settings.verbose_logging {
@@ -106,7 +179,6 @@ pub async fn start_processing(
         None
     };
 
-    // Create run state
     let run_state = Arc::new(RunState::new(run_id.clone(), worker_count));
     {
         let mut counters = run_state
@@ -116,30 +188,18 @@ pub async fn start_processing(
         counters.total_files = scan_result.files.len();
         counters.total_original_bytes = scan_result.total_size;
     }
-    {
-        let mut status = run_state.status.write().unwrap_or_else(|e| e.into_inner());
-        *status = ProcessingStatus::Processing;
-    }
-
-    // Store run state
-    {
-        let mut active = state.active_run.write().unwrap_or_else(|e| e.into_inner());
-        *active = Some(Arc::clone(&run_state));
-    }
+    run_state.set_status(ProcessingStatus::Processing);
+    *state.active_run.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&run_state));
 
     let context = Arc::new(ProcessingContext {
         max_retries: settings.max_retries,
-        scratch_dir,
         mark_as_crunched: settings.mark_as_crunched,
         skip_crunched: settings.skip_crunched,
     });
 
     let queue = Arc::new(JobQueue::new(scan_result.files));
-    {
-        let mut q = run_state.queue.write().unwrap_or_else(|e| e.into_inner());
-        *q = Some(Arc::clone(&queue));
-    }
-    let run_state_clone = Arc::clone(&run_state);
+    *run_state.queue.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&queue));
+
     let source_folder_str = folders.join(", ");
     let thread_count = worker_count;
     let max_retries = settings.max_retries;
@@ -148,96 +208,56 @@ pub async fn start_processing(
     // Watchdog: closes the queue once it stays empty + idle for the grace
     // period, so workers can exit. Without this, workers would wait forever
     // for live drops that may never arrive.
-    let watchdog_queue = Arc::clone(&queue);
-    let watchdog_run = Arc::clone(&run_state);
-    tokio::spawn(async move {
-        const GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            if watchdog_run.cancel_token.is_cancelled() {
-                watchdog_queue.close();
-                break;
+    {
+        let queue = Arc::clone(&queue);
+        let run_state = Arc::clone(&run_state);
+        tokio::spawn(async move {
+            const GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                if run_state.cancel_token.is_cancelled() {
+                    queue.close();
+                    break;
+                }
+                if queue.is_empty() && run_state.all_workers_idle() && queue.idle_since() >= GRACE {
+                    queue.close();
+                    break;
+                }
             }
-            let all_idle = {
-                let workers = watchdog_run
-                    .workers
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner());
-                workers.iter().all(|w| w.state == WorkerState::Idle)
-            };
-            if watchdog_queue.is_empty() && all_idle && watchdog_queue.idle_since() >= GRACE {
-                watchdog_queue.close();
-                break;
-            }
-        }
-    });
+        });
+    }
 
+    let sink: Arc<dyn EventSink> = Arc::new(GuiSink { app });
     tokio::spawn(async move {
-        run_worker_pool(
-            worker_count,
-            queue,
-            context,
-            Arc::clone(&run_state_clone),
-            app,
-        )
-        .await;
+        run_worker_pool(worker_count, queue, context, Arc::clone(&run_state), sink).await;
 
-        // Write EFC log to disk if verbose logging is enabled
         if let Some(log_dir) = verbose_log_dir {
-            let finish_ms = chrono::Local::now().timestamp_millis();
-            let elapsed = run_state_clone.start_time.elapsed().as_secs();
-            let counters = run_state_clone
-                .counters
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            let top_compression = run_state_clone
-                .top_compression
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            let all_events: Vec<_> = run_state_clone
+            let summary = RunSummary {
+                counters: run_state.counters_snapshot(),
+                elapsed_secs: run_state.start_time.elapsed().as_secs(),
+                top_compression: run_state
+                    .top_compression
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
+                source_folder: source_folder_str,
+                start_ms,
+                finish_ms: chrono::Local::now().timestamp_millis(),
+                thread_count,
+                max_retries,
+                run_canceled: run_state.status_snapshot() == ProcessingStatus::Cancelling,
+            };
+            let all_events: Vec<_> = run_state
                 .all_events
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
-            let run_canceled = {
-                let s = run_state_clone
-                    .status
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner());
-                matches!(*s, ProcessingStatus::Cancelling)
-            };
-
-            let summary = RunSummary {
-                counters,
-                elapsed_secs: elapsed,
-                top_compression,
-                status_lines: vec![],
-                source_folder: source_folder_str.clone(),
-                start_ms,
-                finish_ms,
-                thread_count,
-                max_retries,
-                run_canceled,
-            };
             let log_text = generate_efc_log(&summary, &all_events);
-            let log_path = log_dir.join("flaccrunch.log");
-            let _ = std::fs::write(&log_path, log_text.as_bytes());
+            let _ = std::fs::write(log_dir.join("flaccrunch.log"), log_text.as_bytes());
         }
 
-        {
-            let mut q = run_state_clone
-                .queue
-                .write()
-                .unwrap_or_else(|e| e.into_inner());
-            *q = None;
-        }
-        let mut status = run_state_clone
-            .status
-            .write()
-            .unwrap_or_else(|e| e.into_inner());
-        *status = ProcessingStatus::Complete;
+        *run_state.queue.write().unwrap_or_else(|e| e.into_inner()) = None;
+        run_state.set_status(ProcessingStatus::Complete);
     });
 
     Ok(run_id)
@@ -254,23 +274,13 @@ pub async fn enqueue_files(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<usize, String> {
-    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
-    let Some(run) = active.as_ref().cloned() else {
+    let Some(run) = state.active_run() else {
         return Ok(0);
     };
-    drop(active);
-
-    {
-        let status = run.status.read().unwrap_or_else(|e| e.into_inner());
-        if *status != ProcessingStatus::Processing {
-            return Ok(0);
-        }
+    if run.status_snapshot() != ProcessingStatus::Processing {
+        return Ok(0);
     }
-
-    let queue = {
-        let q = run.queue.read().unwrap_or_else(|e| e.into_inner());
-        q.as_ref().cloned()
-    };
+    let queue = run.queue.read().unwrap_or_else(|e| e.into_inner()).clone();
     let Some(queue) = queue else {
         return Ok(0);
     };
@@ -296,87 +306,22 @@ pub async fn enqueue_files(
         c.total_original_bytes += added_size;
         c.clone()
     };
-
     let _ = app.emit(
-        "pipeline-event",
+        PIPELINE_EVENT,
         &PipelineEvent::QueueGrew { added, counters },
     );
-
     Ok(added)
 }
 
 /// Cancel an active processing run.
 #[tauri::command]
 pub async fn cancel_processing(state: State<'_, AppState>) -> Result<(), String> {
-    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
-    if let Some(ref run) = *active {
-        {
-            let mut status = run.status.write().unwrap_or_else(|e| e.into_inner());
-            *status = ProcessingStatus::Cancelling;
+    match state.active_run() {
+        Some(run) => {
+            run.set_status(ProcessingStatus::Cancelling);
+            run.cancel_token.cancel();
+            Ok(())
         }
-        run.cancel_token.cancel();
-        Ok(())
-    } else {
-        Err("No active processing run".to_string())
-    }
-}
-
-/// Get the current processing status.
-#[tauri::command]
-pub async fn get_processing_status(state: State<'_, AppState>) -> Result<ProcessingStatus, String> {
-    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
-    if let Some(ref run) = *active {
-        Ok(run.status.read().unwrap_or_else(|e| e.into_inner()).clone())
-    } else {
-        Ok(ProcessingStatus::Idle)
-    }
-}
-
-/// Get the current status of all workers.
-#[tauri::command]
-pub async fn get_worker_statuses(state: State<'_, AppState>) -> Result<Vec<WorkerStatus>, String> {
-    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
-    if let Some(ref run) = *active {
-        Ok(run
-            .workers
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone())
-    } else {
-        Ok(Vec::new())
-    }
-}
-
-/// Get recent file processing events.
-#[tauri::command]
-pub async fn get_recent_events(state: State<'_, AppState>) -> Result<Vec<FileEvent>, String> {
-    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
-    if let Some(ref run) = *active {
-        Ok(run
-            .recent_events
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .cloned()
-            .collect())
-    } else {
-        Ok(Vec::new())
-    }
-}
-
-/// Get top compression results.
-#[tauri::command]
-pub async fn get_top_compression(
-    state: State<'_, AppState>,
-) -> Result<Vec<CompressionResult>, String> {
-    let active = state.active_run.read().unwrap_or_else(|e| e.into_inner());
-    if let Some(ref run) = *active {
-        Ok(run
-            .top_compression
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone())
-    } else {
-        Ok(Vec::new())
+        None => Err("No active processing run".to_string()),
     }
 }

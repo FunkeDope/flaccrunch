@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Persisted application settings.
+/// Application settings (held in memory for the lifetime of the process).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -10,8 +10,6 @@ pub struct AppSettings {
     pub log_folder: Option<String>,
     /// Maximum retry attempts per file.
     pub max_retries: u32,
-    /// Recently used folder paths.
-    pub recent_folders: Vec<String>,
     /// Write EFC-format logs to disk after each run.
     #[serde(default)]
     pub verbose_logging: bool,
@@ -29,7 +27,6 @@ impl Default for AppSettings {
             thread_count: None,
             max_retries: 3,
             log_folder: None,
-            recent_folders: Vec::new(),
             verbose_logging: false,
             mark_as_crunched: false,
             skip_crunched: false,
@@ -56,38 +53,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_app_settings_default_thread_count_none() {
+    fn test_app_settings_defaults() {
         let s = AppSettings::default();
         assert!(s.thread_count.is_none());
-    }
-
-    #[test]
-    fn test_app_settings_default_max_retries_three() {
-        let s = AppSettings::default();
         assert_eq!(s.max_retries, 3);
-    }
-
-    #[test]
-    fn test_app_settings_default_log_folder_none() {
-        let s = AppSettings::default();
         assert!(s.log_folder.is_none());
-    }
-
-    #[test]
-    fn test_app_settings_default_recent_folders_empty() {
-        let s = AppSettings::default();
-        assert!(s.recent_folders.is_empty());
-    }
-
-    #[test]
-    fn test_app_settings_serde_roundtrip_defaults() {
-        let original = AppSettings::default();
-        let json = serde_json::to_string(&original).expect("serialize");
-        let back: AppSettings = serde_json::from_str(&json).expect("deserialize");
-        assert!(back.thread_count.is_none());
-        assert_eq!(back.max_retries, 3);
-        assert!(back.log_folder.is_none());
-        assert!(back.recent_folders.is_empty());
+        assert!(!s.verbose_logging);
+        assert!(!s.mark_as_crunched);
+        assert!(!s.skip_crunched);
     }
 
     #[test]
@@ -96,42 +69,26 @@ mod tests {
             thread_count: Some(8),
             log_folder: Some("/var/log".to_string()),
             max_retries: 5,
-            recent_folders: vec!["/music".to_string(), "/more".to_string()],
-            verbose_logging: false,
-            mark_as_crunched: false,
+            verbose_logging: true,
+            mark_as_crunched: true,
             skip_crunched: false,
         };
         let json = serde_json::to_string(&original).expect("serialize");
+        assert!(json.contains("threadCount"), "{json}");
+        assert!(json.contains("maxRetries"), "{json}");
         let back: AppSettings = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.thread_count, Some(8));
         assert_eq!(back.log_folder, Some("/var/log".to_string()));
         assert_eq!(back.max_retries, 5);
-        assert_eq!(back.recent_folders, vec!["/music", "/more"]);
+        assert!(back.verbose_logging);
+        assert!(back.mark_as_crunched);
     }
 
     #[test]
-    fn test_app_settings_json_uses_camel_case() {
-        let s = AppSettings {
-            thread_count: Some(4),
-            log_folder: None,
-            max_retries: 2,
-            recent_folders: vec![],
-            verbose_logging: false,
-            mark_as_crunched: false,
-            skip_crunched: false,
-        };
-        let json = serde_json::to_string(&s).expect("serialize");
-        assert!(
-            json.contains("threadCount"),
-            "expected 'threadCount' in JSON: {json}"
-        );
-        assert!(
-            json.contains("maxRetries"),
-            "expected 'maxRetries' in JSON: {json}"
-        );
-        assert!(
-            json.contains("recentFolders"),
-            "expected 'recentFolders' in JSON: {json}"
-        );
+    fn test_app_settings_ignores_unknown_fields_from_older_frontends() {
+        let json = r#"{"threadCount":null,"logFolder":null,"maxRetries":2,"recentFolders":["/x"]}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.max_retries, 2);
+        assert!(!s.verbose_logging);
     }
 }

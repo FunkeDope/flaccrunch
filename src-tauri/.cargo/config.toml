@@ -1,7 +1,12 @@
 # Build optimizations for maximum CPU performance on native hardware.
 # These flags affect both the Rust compiler and the C compiler used to build
-# libflac-sys (via the `cc` crate), enabling SIMD/AVX2 vectorization that
+# libflac-sys (via the `cmake` crate), enabling SIMD/AVX2 vectorization that
 # matches what a pre-built flac.exe typically has.
+#
+# NOTE: `target-cpu=native` means a binary built on one machine may use
+# instructions (e.g. AVX-512) that an older CPU lacks and crash with SIGILL.
+# That is fine for local builds; for binaries published from CI consider
+# `target-cpu=x86-64-v3` instead.
 
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=native"]
@@ -15,10 +20,14 @@ rustflags = ["-C", "target-cpu=native"]
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "target-cpu=native"]
 
+[env]
 # CFLAGS is picked up by the `cc` crate (used by libflac-sys's build script)
 # to compile the libFLAC C sources with SIMD optimizations.
-# MSVC: /O2 = full optimization, /arch:AVX2 = enable AVX2 SIMD instructions
-# These are set only on Windows; on other platforms cc uses -O3 -march=native
-# via the rust opt-level=3 passthrough.
-[env]
-CFLAGS_x86_64-pc-windows-msvc = "/O2 /arch:AVX2"
+# MSVC: /arch:AVX2 = enable AVX2 SIMD instructions. (/O2 is intentionally NOT
+# here: the `cmake` crate strips every /O flag; see the toolchain file below.)
+CFLAGS_x86_64-pc-windows-msvc = "/arch:AVX2"
+# The `cmake` crate overrides CMake's per-configuration MSVC flags with ones
+# that carry no optimization switch, which left libFLAC compiled at /Od for
+# the dev/test profile (fixture tests ran ~5x slower). This toolchain file
+# forces /O2 back on for every configuration.
+CMAKE_TOOLCHAIN_FILE_x86_64-pc-windows-msvc = { value = "cmake/msvc-flags.cmake", relative = true }

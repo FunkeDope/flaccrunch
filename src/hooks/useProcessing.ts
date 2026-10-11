@@ -2,14 +2,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
 import * as api from "../lib/tauri";
 import type {
   RunStatus,
   WorkerStatus,
   RunCounters,
   FileEvent,
-  JobRecord,
   ProcessingSettings,
 } from "../types/processing";
 
@@ -31,6 +29,38 @@ const defaultCounters: RunCounters = {
   skipped: 0,
 };
 
+function idleWorker(id: number): WorkerStatus {
+  return { id, state: "idle", file: null, percent: 0, ratio: "" };
+}
+
+/** Map a backend `PipelineStage` payload to the worker state string. */
+function stageToState(stage: unknown): WorkerStatus["state"] {
+  if (typeof stage === "string") {
+    return stage === "complete" ? "idle" : (stage as WorkerStatus["state"]);
+  }
+  if (stage && typeof stage === "object" && "hashing" in stage) {
+    return (stage as { hashing: string }).hashing === "output" ? "hashing-output" : "hashing-source";
+  }
+  return "idle";
+}
+
+/** Timestamp suitable for a default log filename. */
+function logTimestamp(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19).replace(/[T:]/g, "-");
+}
+
+async function saveLogWithDialog(title: string, filename: string, content: string) {
+  try {
+    const path = await tauriSaveDialog({
+      title,
+      defaultPath: filename,
+      filters: [{ name: "Text files", extensions: ["txt"] }],
+    });
+    if (path) await api.writeTextFile(path, content);
+  } catch {
+    // Dialog cancelled or write failed — nothing to surface here.
+  }
+}
 
 export function useProcessing() {
   const [status, setStatus] = useState<RunStatus>("idle");
@@ -38,25 +68,35 @@ export function useProcessing() {
   const [workers, setWorkers] = useState<WorkerStatus[]>([]);
   const [counters, setCounters] = useState<RunCounters>(defaultCounters);
   const [allEvents, setAllEvents] = useState<FileEvent[]>([]);
-  const [topCompression, setTopCompression] = useState<FileEvent[]>([]);
   const [startTime, setStartTime] = useState<number | null>(null);
-  const [, setEndTime] = useState<number | null>(null);
-  const [, setRunSettings] = useState<ProcessingSettings | null>(null);
+  const [endTime, setEndTime] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [jobHistory, setJobHistory] = useState<JobRecord[]>([]);
-
   const [isDragOver, setIsDragOver] = useState(false);
+  // Sources of the run in progress (grows with live drops).
   const [currentFolders, setCurrentFolders] = useState<string[]>([]);
   // Set by the drop handler when files land while status is "complete".
   // App.tsx watches this and auto-starts a fresh run with the dropped paths.
   const [autoStartPaths, setAutoStartPaths] = useState<string[] | null>(null);
 
-  // Status ref so the native drag-drop listener (registered once on mount)
-  // can branch on the latest status without becoming stale.
+  // Mirrors of state that async callbacks need to read at call time without
+  // re-subscribing (listeners are registered once on mount). Reading state
+  // through nested setState updaters — the previous approach — is impure and
+  // double-fires under StrictMode.
   const statusRef = useRef<RunStatus>("idle");
-  useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
+  const eventsRef = useRef<FileEvent[]>([]);
+  const countersRef = useRef<RunCounters>(defaultCounters);
+  const startTimeRef = useRef<number | null>(null);
+  const endTimeRef = useRef<number | null>(null);
+  const runSettingsRef = useRef<ProcessingSettings | null>(null);
+  const currentFoldersRef = useRef<string[]>([]);
+  const cancelledRef = useRef(false);
+
+  useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { eventsRef.current = allEvents; }, [allEvents]);
+  useEffect(() => { countersRef.current = counters; }, [counters]);
+  useEffect(() => { startTimeRef.current = startTime; }, [startTime]);
+  useEffect(() => { endTimeRef.current = endTime; }, [endTime]);
+  useEffect(() => { currentFoldersRef.current = currentFolders; }, [currentFolders]);
 
   // On mount: load any paths supplied via CLI args
   useEffect(() => {
@@ -65,30 +105,22 @@ export function useProcessing() {
         setFolders(paths);
       }
     }).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     const unlisten = listen<Record<string, unknown>>("pipeline-event", (event) => {
       const payload = event.payload;
       const type = payload.type as string;
+      const workerId = payload.workerId as number;
 
       switch (type) {
-        case "workerStarted": {
-          const workerId = payload.workerId as number;
-          const stage = payload.stage as string | Record<string, unknown>;
-          let stageStr: WorkerStatus["state"] = "converting";
-          if (stage && typeof stage === "object" && "hashing" in stage) {
-            stageStr = "hashing-source";
-          }
+        case "workerStarted":
           setWorkers((prev) => {
             const updated = [...prev];
-            while (updated.length <= workerId) {
-              updated.push({ id: updated.length, state: "idle", file: null, percent: 0, ratio: "" });
-            }
+            while (updated.length <= workerId) updated.push(idleWorker(updated.length));
             updated[workerId] = {
               ...updated[workerId],
-              state: stageStr,
+              state: stageToState(payload.stage),
               file: payload.file as string,
               percent: 0,
               ratio: "",
@@ -101,11 +133,9 @@ export function useProcessing() {
             return updated;
           });
           break;
-        }
 
         case "workerProgress":
           setWorkers((prev) => {
-            const workerId = payload.workerId as number;
             if (workerId >= prev.length) return prev;
             const updated = [...prev];
             updated[workerId] = {
@@ -117,34 +147,16 @@ export function useProcessing() {
           });
           break;
 
-        case "workerStageChanged": {
-          const workerId = payload.workerId as number;
-          const stage = payload.stage as string | Record<string, unknown>;
-          let stageStr: WorkerStatus["state"] = "idle";
-          if (typeof stage === "string") {
-            stageStr = stage as WorkerStatus["state"];
-          } else if (stage && typeof stage === "object") {
-            if ("hashing" in stage) {
-              const phase = (stage as Record<string, unknown>).hashing;
-              stageStr = phase === "output" ? "hashing-output" : "hashing-source";
-            } else if ("converting" in stage) stageStr = "converting";
-            else if ("artwork" in stage) stageStr = "artwork";
-            else if ("finalizing" in stage) stageStr = "finalizing";
-            else if ("complete" in stage) stageStr = "idle";
-          }
+        case "workerStageChanged":
           setWorkers((prev) => {
             const updated = [...prev];
-            while (updated.length <= workerId) {
-              updated.push({ id: updated.length, state: "idle", file: null, percent: 0, ratio: "" });
-            }
-            updated[workerId] = { ...updated[workerId], state: stageStr, percent: 0, ratio: "" };
+            while (updated.length <= workerId) updated.push(idleWorker(updated.length));
+            updated[workerId] = { ...updated[workerId], state: stageToState(payload.stage), percent: 0, ratio: "" };
             return updated;
           });
           break;
-        }
 
         case "workerHashComputed": {
-          const workerId = payload.workerId as number;
           const phase = payload.phase as string;
           const hash = payload.hash as string;
           const embeddedMd5 = payload.embeddedMd5 as string | null | undefined;
@@ -152,16 +164,9 @@ export function useProcessing() {
             if (workerId >= prev.length) return prev;
             const updated = [...prev];
             if (phase === "source") {
-              updated[workerId] = {
-                ...updated[workerId],
-                lastSourceHash: hash,
-                lastEmbeddedMd5: embeddedMd5 ?? undefined,
-              };
+              updated[workerId] = { ...updated[workerId], lastSourceHash: hash, lastEmbeddedMd5: embeddedMd5 ?? undefined };
             } else if (phase === "output") {
-              updated[workerId] = {
-                ...updated[workerId],
-                lastOutputHash: hash,
-              };
+              updated[workerId] = { ...updated[workerId], lastOutputHash: hash };
             }
             return updated;
           });
@@ -170,7 +175,6 @@ export function useProcessing() {
 
         case "workerIdle":
           setWorkers((prev) => {
-            const workerId = payload.workerId as number;
             if (workerId >= prev.length) return prev;
             const updated = [...prev];
             // Keep file so the card still shows the filename next to the hashes.
@@ -181,58 +185,44 @@ export function useProcessing() {
           break;
 
         case "fileCompleted": {
-          const fileEvent = payload.event as FileEvent;
+          const fileEvent = payload.event as FileEvent | undefined;
           const eventCounters = payload.counters as RunCounters | undefined;
-          const workerId = payload.workerId as number;
+          if (eventCounters) setCounters(eventCounters);
+          if (!fileEvent) break;
 
-          if (eventCounters) {
-            setCounters(eventCounters);
-          }
+          setAllEvents((prev) => [...prev, fileEvent]);
 
-          if (fileEvent) {
-            setAllEvents((prev) => [...prev, fileEvent]);
-
-            // Mark worker idle immediately so livePct doesn't double-count
-            // (processed counter just incremented; worker contribution must drop to 0).
-            setWorkers((prev) => {
-              if (workerId >= prev.length) return prev;
-              const updated = [...prev];
-              updated[workerId] = {
-                ...updated[workerId],
-                state: "idle",
-                percent: 0,
-                ratio: "",
-                lastSourceHash: fileEvent.sourceHash,
-                lastOutputHash: fileEvent.outputHash,
-                lastEmbeddedMd5: fileEvent.embeddedMd5,
-                lastVerification: fileEvent.verification,
-                lastCompressionPct: (fileEvent.status === "OK" || fileEvent.status === "WARN") ? fileEvent.compressionPct : undefined,
-              };
-              return updated;
-            });
-
-            if ((fileEvent.status === "OK" || fileEvent.status === "WARN") && fileEvent.savedBytes > 0) {
-              setTopCompression((prev) => {
-                const updated = [...prev, fileEvent];
-                updated.sort((a, b) => b.savedBytes - a.savedBytes);
-                return updated.slice(0, 3);
-              });
-            }
-          }
+          // Mark worker idle immediately so livePct doesn't double-count
+          // (processed counter just incremented; worker contribution must drop to 0).
+          const succeeded = fileEvent.status === "OK" || fileEvent.status === "WARN";
+          setWorkers((prev) => {
+            if (workerId >= prev.length) return prev;
+            const updated = [...prev];
+            updated[workerId] = {
+              ...updated[workerId],
+              state: "idle",
+              percent: 0,
+              ratio: "",
+              lastSourceHash: fileEvent.sourceHash,
+              lastOutputHash: fileEvent.outputHash,
+              lastEmbeddedMd5: fileEvent.embeddedMd5,
+              lastVerification: fileEvent.verification,
+              lastCompressionPct: succeeded ? fileEvent.compressionPct : undefined,
+            };
+            return updated;
+          });
           break;
         }
 
         case "queueGrew": {
           const newCounters = payload.counters as RunCounters | undefined;
-          if (newCounters) {
-            setCounters(newCounters);
-          }
+          if (newCounters) setCounters(newCounters);
           break;
         }
 
         case "runComplete":
+          setEndTime(Date.now());
           setStatus("complete");
-          // Snapshot will be handled via a useEffect watching status + allEvents
           break;
       }
     });
@@ -253,25 +243,19 @@ export function useProcessing() {
         setIsDragOver(false);
       } else if (payload.type === "drop" && payload.paths && payload.paths.length > 0) {
         setIsDragOver(false);
-        const dropped = payload.paths!;
+        const dropped = payload.paths;
         const currentStatus = statusRef.current;
         if (currentStatus === "processing" || currentStatus === "cancelling") {
           // Mid-run: append to the live Rust queue instead of the FE list.
           api.enqueueFiles(dropped).catch(() => {});
           // Reflect the source paths in the run's folder list so the
           // "Show queue" panel can display what's been added mid-run.
-          setCurrentFolders((prev) => [
-            ...prev,
-            ...dropped.filter((p) => !prev.includes(p)),
-          ]);
+          setCurrentFolders((prev) => [...prev, ...dropped.filter((p) => !prev.includes(p))]);
         } else if (currentStatus === "complete") {
           // Run is over and the user dropped more work — auto-start a new run.
           setAutoStartPaths(dropped);
         } else {
-          setFolders((prev) => [
-            ...prev,
-            ...dropped.filter((p) => !prev.includes(p)),
-          ]);
+          setFolders((prev) => [...prev, ...dropped.filter((p) => !prev.includes(p))]);
         }
       }
     });
@@ -280,107 +264,39 @@ export function useProcessing() {
     };
   }, []);
 
-  // When run completes: save to job history and auto-export error log if needed
+  /** Build the EFC log for the current/last run from the latest state. */
+  const getLogText = useCallback((): Promise<string> => {
+    const now = endTimeRef.current ?? Date.now();
+    const startedAt = startTimeRef.current ?? now;
+    const rs = runSettingsRef.current;
+    return api.getEfcLog(
+      eventsRef.current,
+      Math.round((now - startedAt) / 1000),
+      currentFoldersRef.current.join(", "),
+      startedAt,
+      now,
+      rs?.threadCount ?? 1,
+      rs?.maxRetries ?? 3,
+      cancelledRef.current,
+    );
+  }, []);
+
+  // When a run completes with failures, offer to save the error log.
+  // A run the user cancelled is not an error condition.
   useEffect(() => {
     if (status !== "complete") return;
-
-    setAllEvents((events) => {
-      setCounters((c) => {
-        setStartTime((st) => {
-          setRunSettings((rs) => {
-            const now = Date.now();
-            setEndTime(now);
-
-            // Save job record
-            const job: JobRecord = {
-              id: `job-${st ?? now}`,
-              startTime: st ?? now,
-              endTime: now,
-              folders: currentFolders,
-              counters: c,
-              events,
-              topCompression: [],
-            };
-            setJobHistory((prev) => [...prev, job]);
-
-            // Auto-prompt to save error log if there are failures
-            if (c.failed > 0) {
-              const elapsedSecs = Math.round((now - (st ?? now)) / 1000);
-              const ts = new Date(now).toISOString().slice(0, 19).replace(/[T:]/g, "-");
-              const filename = `flaccrunch-errors-${ts}.txt`;
-              api.getEfcLog(
-                events,
-                elapsedSecs,
-                currentFolders.join(", "),
-                st ?? now,
-                now,
-                rs?.threadCount ?? 1,
-                rs?.maxRetries ?? 3,
-                false,
-              ).then((logContent) => {
-                tauriSaveDialog({
-                  title: "Save Error Log",
-                  defaultPath: filename,
-                  filters: [{ name: "Text files", extensions: ["txt"] }],
-                }).then((path) => {
-                  if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
-                }).catch(() => {});
-              }).catch(() => {});
-            }
-
-            return rs;
-          });
-          return st;
-        });
-        return c;
-      });
-      return events;
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
-
-  const getLogText = useCallback(() => {
-    return new Promise<string>((resolve, reject) => {
-      setAllEvents((events) => {
-        setStartTime((st) => {
-          setEndTime((et) => {
-            setRunSettings((rs) => {
-              const now = et ?? Date.now();
-              const startedAt = st ?? now;
-              const elapsedSecs = Math.round((now - startedAt) / 1000);
-              api.getEfcLog(
-                events,
-                elapsedSecs,
-                currentFolders.join(", "),
-                startedAt,
-                now,
-                rs?.threadCount ?? 1,
-                rs?.maxRetries ?? 3,
-                false,
-              ).then(resolve).catch(reject);
-              return rs;
-            });
-            return et;
-          });
-          return st;
-        });
-        return events;
-      });
-    });
-  }, [currentFolders]);
+    const c = countersRef.current;
+    if (c.failed === 0 || cancelledRef.current) return;
+    const finishedAt = endTimeRef.current ?? Date.now();
+    getLogText()
+      .then((log) => saveLogWithDialog("Save Error Log", `flaccrunch-errors-${logTimestamp(finishedAt)}.txt`, log))
+      .catch(() => {});
+  }, [status, getLogText]);
 
   const exportLog = useCallback(() => {
-    void getLogText().then((logContent) => {
-      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-      const filename = `flaccrunch-log-${ts}.txt`;
-      tauriSaveDialog({
-        title: "Save Log",
-        defaultPath: filename,
-        filters: [{ name: "Text files", extensions: ["txt"] }],
-      }).then((path) => {
-        if (path) invoke("write_text_file", { path, content: logContent }).catch(() => {});
-      }).catch(() => {});
-    }).catch(() => {});
+    getLogText()
+      .then((log) => saveLogWithDialog("Save Log", `flaccrunch-log-${logTimestamp(Date.now())}.txt`, log))
+      .catch(() => {});
   }, [getLogText]);
 
   const addFolder = useCallback(async () => {
@@ -418,7 +334,6 @@ export function useProcessing() {
 
       try {
         const scan = await api.scanFolders(targets);
-
         if (scan.files.length === 0) {
           setError("No FLAC files found in the selected folders.");
           return;
@@ -426,30 +341,23 @@ export function useProcessing() {
 
         if (pathsOverride) setFolders(pathsOverride);
         setCurrentFolders(targets);
+        currentFoldersRef.current = targets;
         setStatus("processing");
         const now = Date.now();
         setStartTime(now);
         setEndTime(null);
-        setRunSettings(settings);
-        setCounters(defaultCounters);
+        startTimeRef.current = now;
+        endTimeRef.current = null;
+        runSettingsRef.current = settings;
+        cancelledRef.current = false;
         setAllEvents([]);
-        setTopCompression([]);
+        eventsRef.current = [];
 
         const workerCount = Math.min(settings.threadCount, scan.files.length);
-        setWorkers(
-          Array.from({ length: workerCount }, (_, i) => ({
-            id: i,
-            state: "idle" as const,
-            file: null,
-            percent: 0,
-            ratio: "",
-          }))
-        );
-        setCounters((prev) => ({
-          ...prev,
-          totalFiles: scan.files.length,
-          totalOriginalBytes: scan.totalSize,
-        }));
+        setWorkers(Array.from({ length: workerCount }, (_, i) => idleWorker(i)));
+        const initial = { ...defaultCounters, totalFiles: scan.files.length, totalOriginalBytes: scan.totalSize };
+        setCounters(initial);
+        countersRef.current = initial;
 
         await api.startProcessing(targets, settings);
       } catch (e) {
@@ -462,6 +370,7 @@ export function useProcessing() {
 
   const cancelRun = useCallback(async () => {
     try {
+      cancelledRef.current = true;
       setStatus("cancelling");
       await api.cancelProcessing();
     } catch (e) {
@@ -474,11 +383,12 @@ export function useProcessing() {
     setCounters(defaultCounters);
     setWorkers([]);
     setAllEvents([]);
-    setTopCompression([]);
     setStartTime(null);
+    setEndTime(null);
     setError(null);
     setFolders([]);
     setCurrentFolders([]);
+    cancelledRef.current = false;
   }, []);
 
   const testStorage = useCallback(async () => {
@@ -497,7 +407,6 @@ export function useProcessing() {
         title: "Storage Test — Save Copy",
         defaultPath: testName,
       });
-
       if (!destination) return;
 
       await api.copyFileToPath(source, destination);
@@ -515,10 +424,9 @@ export function useProcessing() {
     workers,
     counters,
     recentEvents: allEvents,
-    topCompression,
     startTime,
+    endTime,
     error,
-    jobHistory,
     isDragOver,
     autoStartPaths,
     clearAutoStartPaths,

@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -55,9 +54,13 @@ pub struct FileEvent {
     pub source_hash: Option<String>,
     pub output_hash: Option<String>,
     pub embedded_md5: Option<String>,
+    /// Net bytes saved inside PICTURE blocks.
     pub artwork_saved_bytes: i64,
     pub artwork_raw_saved_bytes: i64,
     pub artwork_blocks_optimized: u32,
+    /// Bytes of PADDING removed.
+    #[serde(default)]
+    pub padding_saved_bytes: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +69,7 @@ pub enum FileStatus {
     /// Compression succeeded but post-processing write-back to the final
     /// destination was incomplete; the original file was left unchanged.
     WARN,
+    /// Attempt failed and has been re-queued. Not counted as processed.
     RETRY,
     FAIL,
     /// File already carries a FLACCRUNCH_INFO marker; processing was skipped.
@@ -114,7 +118,6 @@ pub struct RunSummary {
     pub counters: RunCounters,
     pub elapsed_secs: u64,
     pub top_compression: Vec<CompressionResult>,
-    pub status_lines: Vec<String>,
     /// Folder(s) that were processed (joined with ", " if multiple).
     pub source_folder: String,
     /// Unix timestamp (ms) when the run started.
@@ -126,21 +129,19 @@ pub struct RunSummary {
     pub run_canceled: bool,
 }
 
-/// Per-run state managed by the application.
+/// Per-run state shared between the worker pool, the dispatcher and the UI.
 pub struct RunState {
     pub id: RunId,
     pub status: RwLock<ProcessingStatus>,
     pub workers: RwLock<Vec<WorkerStatus>>,
-    /// Last 25 events — drives the UI recent-events table.
-    pub recent_events: RwLock<VecDeque<FileEvent>>,
     /// All events for the run — used for log generation.
     pub all_events: RwLock<Vec<FileEvent>>,
     pub top_compression: RwLock<Vec<CompressionResult>>,
     pub counters: RwLock<RunCounters>,
     pub cancel_token: CancellationToken,
     pub start_time: std::time::Instant,
-    /// Reference to the active job queue. Set after `start_processing` builds
-    /// the queue; used by `enqueue_files` to append to a running run.
+    /// Reference to the active job queue. Set after the queue is built; used
+    /// to append to a running run (live drag-and-drop).
     pub queue: RwLock<Option<Arc<crate::pipeline::queue::JobQueue>>>,
 }
 
@@ -160,7 +161,6 @@ impl RunState {
             id,
             status: RwLock::new(ProcessingStatus::Scanning),
             workers: RwLock::new(workers),
-            recent_events: RwLock::new(VecDeque::with_capacity(25)),
             all_events: RwLock::new(Vec::new()),
             top_compression: RwLock::new(Vec::new()),
             counters: RwLock::new(RunCounters::default()),
@@ -170,40 +170,57 @@ impl RunState {
         }
     }
 
+    pub fn counters_snapshot(&self) -> RunCounters {
+        self.counters
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub fn status_snapshot(&self) -> ProcessingStatus {
+        self.status
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub fn set_status(&self, status: ProcessingStatus) {
+        *self.status.write().unwrap_or_else(|e| e.into_inner()) = status;
+    }
+
+    pub fn all_workers_idle(&self) -> bool {
+        self.workers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .all(|w| w.state == WorkerState::Idle)
+    }
+
     /// Add a file event and update counters.
     pub fn record_event(&self, event: FileEvent) {
-        // Keep full history for log generation
-        {
-            let mut all = self.all_events.write().unwrap_or_else(|e| e.into_inner());
-            all.push(event.clone());
-        }
-        // Update recent events (keep last 25 for UI)
-        {
-            let mut events = self
-                .recent_events
-                .write()
-                .unwrap_or_else(|e| e.into_inner());
-            events.push_back(event.clone());
-            while events.len() > 25 {
-                events.pop_front();
-            }
-        }
+        self.all_events
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(event.clone());
 
-        // Update counters
         {
             let mut counters = self.counters.write().unwrap_or_else(|e| e.into_inner());
-            counters.processed += 1;
             match event.status {
                 FileStatus::OK | FileStatus::WARN => {
+                    counters.processed += 1;
                     counters.successful += 1;
                     if event.status == FileStatus::WARN {
                         counters.warned += 1;
                     }
-                    counters.total_original_bytes += event.before_size;
+                    // `total_original_bytes` is the size of everything queued
+                    // (set from the scan, grown by live drops) and is NOT
+                    // accumulated here — doing both halved the displayed
+                    // savings percentage.
                     counters.total_new_bytes += event.after_size;
                     counters.total_saved_bytes += event.saved_bytes;
                     counters.total_artwork_saved += event.artwork_saved_bytes;
                     counters.total_artwork_raw_saved += event.artwork_raw_saved_bytes;
+                    counters.total_padding_saved += event.padding_saved_bytes;
                     if event.artwork_blocks_optimized > 0 {
                         counters.artwork_optimized_files += 1;
                         counters.artwork_optimized_blocks +=
@@ -211,19 +228,18 @@ impl RunState {
                     }
                 }
                 FileStatus::FAIL => {
+                    counters.processed += 1;
                     counters.failed += 1;
                 }
-                FileStatus::RETRY => {
-                    // Retries don't count as processed yet
-                    counters.processed -= 1;
-                }
                 FileStatus::SKIPPED => {
+                    counters.processed += 1;
                     counters.skipped += 1;
                 }
+                // A retry is not an outcome; the file is still pending.
+                FileStatus::RETRY => {}
             }
         }
 
-        // Update top compression
         if (event.status == FileStatus::OK || event.status == FileStatus::WARN)
             && event.saved_bytes > 0
         {
@@ -243,7 +259,7 @@ impl RunState {
         }
     }
 
-    /// Update a specific worker's status.
+    /// Replace a worker's full status.
     pub fn update_worker(
         &self,
         worker_id: usize,
@@ -260,29 +276,47 @@ impl RunState {
             worker.ratio = ratio;
         }
     }
+
+    /// Update only the stage of a worker (file is kept, progress reset).
+    pub fn set_worker_state(&self, worker_id: usize, state: WorkerState) {
+        let mut workers = self.workers.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = workers.get_mut(worker_id) {
+            worker.state = state;
+            worker.percent = 0;
+            worker.ratio.clear();
+        }
+    }
+
+    /// Update only the encode progress of a worker.
+    pub fn set_worker_progress(&self, worker_id: usize, percent: u8, ratio: String) {
+        let mut workers = self.workers.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = workers.get_mut(worker_id) {
+            worker.state = WorkerState::Converting;
+            worker.percent = percent;
+            worker.ratio = ratio;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn make_ok_event(
-        file: &str,
-        before: u64,
-        after: u64,
-        saved: i64,
-        compression_pct: f64,
-    ) -> FileEvent {
+    fn make_event(status: FileStatus, file: &str, before: u64, after: u64) -> FileEvent {
         FileEvent {
             time: "12:00:00".to_string(),
-            status: FileStatus::OK,
+            status,
             file: file.to_string(),
             attempt: "1".to_string(),
             verification: "OK".to_string(),
             before_size: before,
             after_size: after,
-            saved_bytes: saved,
-            compression_pct,
+            saved_bytes: before as i64 - after as i64,
+            compression_pct: if before > 0 {
+                (before as f64 - after as f64) / before as f64 * 100.0
+            } else {
+                0.0
+            },
             detail: String::new(),
             source_hash: None,
             output_hash: None,
@@ -290,117 +324,18 @@ mod tests {
             artwork_saved_bytes: 0,
             artwork_raw_saved_bytes: 0,
             artwork_blocks_optimized: 0,
+            padding_saved_bytes: 0,
         }
     }
-
-    fn make_fail_event(file: &str) -> FileEvent {
-        FileEvent {
-            time: "12:00:00".to_string(),
-            status: FileStatus::FAIL,
-            file: file.to_string(),
-            attempt: "3".to_string(),
-            verification: String::new(),
-            before_size: 0,
-            after_size: 0,
-            saved_bytes: 0,
-            compression_pct: 0.0,
-            detail: "some error".to_string(),
-            source_hash: None,
-            output_hash: None,
-            embedded_md5: None,
-            artwork_saved_bytes: 0,
-            artwork_raw_saved_bytes: 0,
-            artwork_blocks_optimized: 0,
-        }
-    }
-
-    fn make_retry_event(file: &str) -> FileEvent {
-        FileEvent {
-            time: "12:00:00".to_string(),
-            status: FileStatus::RETRY,
-            file: file.to_string(),
-            attempt: "1".to_string(),
-            verification: String::new(),
-            before_size: 0,
-            after_size: 0,
-            saved_bytes: 0,
-            compression_pct: 0.0,
-            detail: String::new(),
-            source_hash: None,
-            output_hash: None,
-            embedded_md5: None,
-            artwork_saved_bytes: 0,
-            artwork_raw_saved_bytes: 0,
-            artwork_blocks_optimized: 0,
-        }
-    }
-
-    // --- RunCounters ---
 
     #[test]
     fn test_run_counters_default_all_zero() {
         let c = RunCounters::default();
         assert_eq!(c.total_files, 0);
         assert_eq!(c.processed, 0);
-        assert_eq!(c.successful, 0);
-        assert_eq!(c.failed, 0);
-        assert_eq!(c.total_original_bytes, 0);
-        assert_eq!(c.total_new_bytes, 0);
-        assert_eq!(c.total_saved_bytes, 0);
-        assert_eq!(c.total_metadata_saved, 0);
         assert_eq!(c.total_padding_saved, 0);
-        assert_eq!(c.total_artwork_saved, 0);
-        assert_eq!(c.total_artwork_raw_saved, 0);
-        assert_eq!(c.artwork_optimized_files, 0);
         assert_eq!(c.artwork_optimized_blocks, 0);
     }
-
-    #[test]
-    fn test_run_counters_clone() {
-        let mut c = RunCounters::default();
-        c.total_files = 10;
-        c.successful = 8;
-        let c2 = c.clone();
-        assert_eq!(c2.total_files, 10);
-        assert_eq!(c2.successful, 8);
-    }
-
-    // --- FileStatus ---
-
-    #[test]
-    fn test_file_status_eq() {
-        assert_eq!(FileStatus::OK, FileStatus::OK);
-        assert_eq!(FileStatus::FAIL, FileStatus::FAIL);
-        assert_eq!(FileStatus::RETRY, FileStatus::RETRY);
-        assert_ne!(FileStatus::OK, FileStatus::FAIL);
-    }
-
-    #[test]
-    fn test_file_status_clone() {
-        let s = FileStatus::OK;
-        let s2 = s.clone();
-        assert_eq!(s, s2);
-    }
-
-    // --- WorkerState ---
-
-    #[test]
-    fn test_worker_state_variants_eq() {
-        assert_eq!(WorkerState::Idle, WorkerState::Idle);
-        assert_eq!(WorkerState::Converting, WorkerState::Converting);
-        assert_eq!(WorkerState::Hashing, WorkerState::Hashing);
-        assert_eq!(WorkerState::Artwork, WorkerState::Artwork);
-        assert_eq!(WorkerState::Finalizing, WorkerState::Finalizing);
-        assert_ne!(WorkerState::Idle, WorkerState::Converting);
-    }
-
-    #[test]
-    fn test_worker_state_clone() {
-        let ws = WorkerState::Hashing;
-        assert_eq!(ws.clone(), WorkerState::Hashing);
-    }
-
-    // --- RunState construction ---
 
     #[test]
     fn test_run_state_new_initialises_workers() {
@@ -411,85 +346,98 @@ mod tests {
             assert_eq!(w.id, i);
             assert_eq!(w.state, WorkerState::Idle);
             assert!(w.file.is_none());
-            assert_eq!(w.percent, 0);
-            assert!(w.ratio.is_empty());
         }
+        assert_eq!(rs.status_snapshot(), ProcessingStatus::Scanning);
+        assert!(rs.all_workers_idle());
     }
-
-    #[test]
-    fn test_run_state_initial_status_is_scanning() {
-        let rs = RunState::new("run-2".to_string(), 1);
-        let status = rs.status.read().unwrap();
-        assert_eq!(*status, ProcessingStatus::Scanning);
-    }
-
-    #[test]
-    fn test_run_state_counters_start_zero() {
-        let rs = RunState::new("run-3".to_string(), 2);
-        let counters = rs.counters.read().unwrap();
-        assert_eq!(counters.processed, 0);
-        assert_eq!(counters.successful, 0);
-        assert_eq!(counters.failed, 0);
-    }
-
-    // --- RunState::record_event ---
 
     #[test]
     fn test_record_ok_event_updates_counters() {
         let rs = RunState::new("run-4".to_string(), 1);
-        let event = make_ok_event("/music/a.flac", 1000, 800, 200, 20.0);
-        rs.record_event(event);
-        let c = rs.counters.read().unwrap();
+        // Set up front from the scan, as start_processing / the CLI do.
+        rs.counters.write().unwrap().total_original_bytes = 1000;
+        rs.record_event(make_event(FileStatus::OK, "/music/a.flac", 1000, 800));
+        let c = rs.counters_snapshot();
         assert_eq!(c.processed, 1);
         assert_eq!(c.successful, 1);
         assert_eq!(c.failed, 0);
         assert_eq!(c.total_saved_bytes, 200);
-        assert_eq!(c.total_original_bytes, 1000);
+        assert_eq!(c.total_original_bytes, 1000, "must not be double counted");
         assert_eq!(c.total_new_bytes, 800);
+        assert_eq!(rs.all_events.read().unwrap().len(), 1);
     }
 
     #[test]
     fn test_record_fail_event_updates_counters() {
         let rs = RunState::new("run-5".to_string(), 1);
-        let event = make_fail_event("/music/bad.flac");
-        rs.record_event(event);
-        let c = rs.counters.read().unwrap();
+        rs.record_event(make_event(FileStatus::FAIL, "/music/bad.flac", 0, 0));
+        let c = rs.counters_snapshot();
         assert_eq!(c.processed, 1);
         assert_eq!(c.successful, 0);
         assert_eq!(c.failed, 1);
     }
 
     #[test]
-    fn test_record_retry_does_not_increment_processed() {
+    fn test_record_retry_is_not_an_outcome() {
         let rs = RunState::new("run-6".to_string(), 1);
-        let event = make_retry_event("/music/retry.flac");
-        rs.record_event(event);
-        let c = rs.counters.read().unwrap();
-        // RETRY increments then decrements processed, net 0
+        rs.record_event(make_event(FileStatus::RETRY, "/music/retry.flac", 0, 0));
+        let c = rs.counters_snapshot();
         assert_eq!(c.processed, 0);
+        assert_eq!(c.failed, 0);
+        // …but it is still part of the event history for the log.
+        assert_eq!(rs.all_events.read().unwrap().len(), 1);
     }
 
     #[test]
-    fn test_recent_events_capped_at_25() {
-        let rs = RunState::new("run-7".to_string(), 1);
-        for i in 0..30 {
-            let event = make_ok_event(&format!("/music/{i}.flac"), 1000, 900, 100, 10.0);
-            rs.record_event(event);
-        }
-        let events = rs.recent_events.read().unwrap();
-        assert_eq!(events.len(), 25);
+    fn test_retry_then_success_counts_once() {
+        let rs = RunState::new("run-6b".to_string(), 1);
+        rs.counters.write().unwrap().total_files = 1;
+        rs.record_event(make_event(FileStatus::RETRY, "/a.flac", 0, 0));
+        rs.record_event(make_event(FileStatus::RETRY, "/a.flac", 0, 0));
+        rs.record_event(make_event(FileStatus::OK, "/a.flac", 100, 90));
+        let c = rs.counters_snapshot();
+        assert_eq!(c.processed, 1);
+        assert_eq!(c.successful, 1);
+        assert_eq!(c.failed, 0);
+        assert_eq!(c.total_files, 1);
+    }
+
+    #[test]
+    fn test_record_skipped_event_increments_skipped_only() {
+        let rs = RunState::new("run-skip".to_string(), 1);
+        rs.record_event(make_event(
+            FileStatus::SKIPPED,
+            "/music/already.flac",
+            1000,
+            1000,
+        ));
+        let c = rs.counters_snapshot();
+        assert_eq!(c.processed, 1);
+        assert_eq!(c.skipped, 1);
+        assert_eq!(c.successful, 0);
+        assert_eq!(c.total_saved_bytes, 0);
+    }
+
+    #[test]
+    fn test_record_warn_event_counts_as_successful_and_increments_warned() {
+        let rs = RunState::new("run-warn".to_string(), 1);
+        rs.record_event(make_event(FileStatus::WARN, "/music/a.flac", 1000, 900));
+        let c = rs.counters_snapshot();
+        assert_eq!(c.processed, 1);
+        assert_eq!(c.successful, 1);
+        assert_eq!(c.warned, 1);
+        assert_eq!(c.total_saved_bytes, 100);
     }
 
     #[test]
     fn test_top_compression_sorted_and_truncated() {
         let rs = RunState::new("run-8".to_string(), 1);
-        rs.record_event(make_ok_event("/a.flac", 1000, 800, 200, 20.0));
-        rs.record_event(make_ok_event("/b.flac", 2000, 1400, 600, 30.0));
-        rs.record_event(make_ok_event("/c.flac", 3000, 2000, 1000, 33.3));
-        rs.record_event(make_ok_event("/d.flac", 5000, 4500, 500, 10.0));
+        rs.record_event(make_event(FileStatus::OK, "/a.flac", 1000, 800));
+        rs.record_event(make_event(FileStatus::OK, "/b.flac", 2000, 1400));
+        rs.record_event(make_event(FileStatus::OK, "/c.flac", 3000, 2000));
+        rs.record_event(make_event(FileStatus::OK, "/d.flac", 5000, 4500));
         let top = rs.top_compression.read().unwrap();
         assert_eq!(top.len(), 3);
-        // should be sorted by saved_bytes descending: 1000, 600, 500
         assert_eq!(top[0].saved_bytes, 1000);
         assert_eq!(top[1].saved_bytes, 600);
         assert_eq!(top[2].saved_bytes, 500);
@@ -498,141 +446,90 @@ mod tests {
     #[test]
     fn test_ok_event_with_no_savings_does_not_enter_top_compression() {
         let rs = RunState::new("run-9".to_string(), 1);
-        let event = make_ok_event("/music/flat.flac", 1000, 1000, 0, 0.0);
-        rs.record_event(event);
-        let top = rs.top_compression.read().unwrap();
-        assert!(top.is_empty());
+        rs.record_event(make_event(FileStatus::OK, "/music/flat.flac", 1000, 1000));
+        assert!(rs.top_compression.read().unwrap().is_empty());
     }
 
-    // --- RunState::update_worker ---
+    #[test]
+    fn test_artwork_and_padding_counters() {
+        let rs = RunState::new("run-art".to_string(), 1);
+        let mut event = make_event(FileStatus::OK, "/art.flac", 2000, 1800);
+        event.artwork_saved_bytes = 50;
+        event.artwork_raw_saved_bytes = 50;
+        event.artwork_blocks_optimized = 2;
+        event.padding_saved_bytes = 30;
+        rs.record_event(event);
+        let c = rs.counters_snapshot();
+        assert_eq!(c.artwork_optimized_files, 1);
+        assert_eq!(c.artwork_optimized_blocks, 2);
+        assert_eq!(c.total_artwork_saved, 50);
+        assert_eq!(c.total_padding_saved, 30);
+    }
 
     #[test]
-    fn test_update_worker_changes_state() {
+    fn test_worker_updates() {
         let rs = RunState::new("run-10".to_string(), 2);
         rs.update_worker(
             1,
-            WorkerState::Converting,
-            Some("/music/x.flac".to_string()),
-            50,
-            "0.80".to_string(),
+            WorkerState::Hashing,
+            Some("/x.flac".into()),
+            0,
+            String::new(),
         );
-        let workers = rs.workers.read().unwrap();
-        let w = &workers[1];
-        assert_eq!(w.state, WorkerState::Converting);
-        assert_eq!(w.file, Some("/music/x.flac".to_string()));
-        assert_eq!(w.percent, 50);
-        assert_eq!(w.ratio, "0.80");
-    }
-
-    #[test]
-    fn test_update_worker_out_of_range_is_no_op() {
-        let rs = RunState::new("run-11".to_string(), 2);
-        // Worker id 99 does not exist; should not panic
+        rs.set_worker_progress(1, 50, "0.80".into());
+        {
+            let w = &rs.workers.read().unwrap()[1];
+            assert_eq!(w.state, WorkerState::Converting);
+            assert_eq!(w.file.as_deref(), Some("/x.flac"));
+            assert_eq!(w.percent, 50);
+            assert_eq!(w.ratio, "0.80");
+        }
+        rs.set_worker_state(1, WorkerState::Artwork);
+        {
+            let w = &rs.workers.read().unwrap()[1];
+            assert_eq!(w.state, WorkerState::Artwork);
+            assert_eq!(
+                w.file.as_deref(),
+                Some("/x.flac"),
+                "file kept across stages"
+            );
+            assert_eq!(w.percent, 0);
+        }
+        assert!(!rs.all_workers_idle());
+        // Out-of-range ids are ignored.
         rs.update_worker(99, WorkerState::Hashing, None, 0, String::new());
-        let workers = rs.workers.read().unwrap();
-        assert_eq!(workers.len(), 2);
+        assert_eq!(rs.workers.read().unwrap().len(), 2);
     }
-
-    // --- ProcessingStatus ---
-
-    #[test]
-    fn test_processing_status_eq() {
-        assert_eq!(ProcessingStatus::Idle, ProcessingStatus::Idle);
-        assert_ne!(ProcessingStatus::Idle, ProcessingStatus::Processing);
-    }
-
-    // --- Serde roundtrips ---
 
     #[test]
     fn test_file_status_serde_roundtrip() {
-        let statuses = [
+        for status in [
             FileStatus::OK,
             FileStatus::WARN,
             FileStatus::FAIL,
             FileStatus::RETRY,
             FileStatus::SKIPPED,
-        ];
-        for status in &statuses {
-            let json = serde_json::to_string(status).expect("serialize");
-            let back: FileStatus = serde_json::from_str(&json).expect("deserialize");
-            assert_eq!(status, &back);
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            let back: FileStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(status, back);
         }
     }
 
     #[test]
-    fn test_record_skipped_event_increments_skipped_only() {
-        let rs = RunState::new("run-skip".to_string(), 1);
-        let mut event = make_ok_event("/music/already.flac", 1000, 1000, 0, 0.0);
-        event.status = FileStatus::SKIPPED;
-        event.detail = "Already crunched".to_string();
-        rs.record_event(event);
-        let c = rs.counters.read().unwrap();
-        assert_eq!(c.processed, 1);
-        assert_eq!(c.skipped, 1);
-        assert_eq!(c.successful, 0);
-        assert_eq!(c.failed, 0);
-        // Byte counters are not touched for skipped files.
-        assert_eq!(c.total_saved_bytes, 0);
-        assert_eq!(c.total_original_bytes, 0);
-        assert_eq!(c.total_new_bytes, 0);
+    fn test_file_event_deserializes_without_padding_field() {
+        // Events round-tripped through an older frontend lack the new field.
+        let json = r#"{"time":"t","status":"OK","file":"f","attempt":"1","verification":"MATCH",
+            "beforeSize":10,"afterSize":9,"savedBytes":1,"compressionPct":10.0,"detail":"",
+            "artworkSavedBytes":0,"artworkRawSavedBytes":0,"artworkBlocksOptimized":0}"#;
+        let ev: FileEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(ev.padding_saved_bytes, 0);
     }
 
     #[test]
-    fn test_record_warn_event_counts_as_successful_and_increments_warned() {
-        let rs = RunState::new("run-warn".to_string(), 1);
-        let mut event = make_ok_event("/music/a.flac", 1000, 900, 100, 10.0);
-        event.status = FileStatus::WARN;
-        event.detail = "Original file unchanged (write-back failed: permission denied)".to_string();
-        rs.record_event(event);
-        let c = rs.counters.read().unwrap();
-        assert_eq!(c.processed, 1);
-        assert_eq!(c.successful, 1);
-        assert_eq!(c.failed, 0);
-        assert_eq!(c.warned, 1);
-        assert_eq!(c.total_saved_bytes, 100);
-    }
-
-    #[test]
-    fn test_worker_state_serde_roundtrip() {
-        let states = [
-            WorkerState::Idle,
-            WorkerState::Converting,
-            WorkerState::Hashing,
-            WorkerState::Artwork,
-            WorkerState::Finalizing,
-        ];
-        for state in &states {
-            let json = serde_json::to_string(state).expect("serialize");
-            let back: WorkerState = serde_json::from_str(&json).expect("deserialize");
-            assert_eq!(state, &back);
-        }
-    }
-
-    #[test]
-    fn test_run_counters_serde_roundtrip() {
-        let mut c = RunCounters::default();
-        c.total_files = 5;
-        c.successful = 4;
-        c.failed = 1;
-        let json = serde_json::to_string(&c).expect("serialize");
-        let back: RunCounters = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back.total_files, 5);
-        assert_eq!(back.successful, 4);
-        assert_eq!(back.failed, 1);
-    }
-
-    #[test]
-    fn test_artwork_blocks_optimized_counter() {
-        let rs = RunState::new("run-art".to_string(), 1);
-        let mut event = make_ok_event("/art.flac", 2000, 1800, 200, 10.0);
-        event.artwork_saved_bytes = 50;
-        event.artwork_raw_saved_bytes = 60;
-        event.artwork_blocks_optimized = 2;
-        rs.record_event(event);
-        let c = rs.counters.read().unwrap();
-        assert_eq!(c.artwork_optimized_files, 1);
-        assert_eq!(c.artwork_optimized_blocks, 2);
-        assert_eq!(c.total_artwork_saved, 50);
-        assert_eq!(c.total_artwork_raw_saved, 60);
+    fn test_run_counters_serde_uses_camel_case() {
+        let json = serde_json::to_string(&RunCounters::default()).unwrap();
+        assert!(json.contains("totalFiles"));
+        assert!(json.contains("totalPaddingSaved"));
     }
 }

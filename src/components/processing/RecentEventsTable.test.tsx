@@ -116,4 +116,16 @@ describe("RecentEventsTable — compression row classes", () => {
     );
     expect(container.querySelector(".comp-none")).toBeInTheDocument();
   });
+
+  it("highlights the whole row of a failed file and exposes the reason", () => {
+    const { container } = render(
+      <RecentEventsTable
+        events={[makeEvent({ status: "FAIL", compressionPct: 0, savedBytes: 0, detail: "decode error" })]}
+      />
+    );
+    const row = container.querySelector("tr.row-fail");
+    expect(row).toBeInTheDocument();
+    expect(row).toHaveAttribute("title", "decode error");
+    expect(container.querySelector(".comp-none")).toBeNull();
+  });
 });

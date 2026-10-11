@@ -11,7 +11,6 @@ import {
   selectFiles,
   isMobile,
   scanFolders,
-  validateFolder,
   startProcessing,
   cancelProcessing,
   getSettings,
@@ -21,6 +20,7 @@ import {
   getEfcLog,
   getStartupPaths,
   copyFileToPath,
+  writeTextFile,
 } from "./tauri";
 
 const mockInvoke = vi.mocked(invoke);
@@ -54,12 +54,6 @@ describe("tauri wrappers — command names", () => {
     expect(mockInvoke).toHaveBeenCalledWith("scan_folders", { folders: ["/music"] });
   });
 
-  it("validateFolder calls 'validate_folder' with path argument", async () => {
-    mockInvoke.mockResolvedValue(true);
-    await validateFolder("/music");
-    expect(mockInvoke).toHaveBeenCalledWith("validate_folder", { path: "/music" });
-  });
-
   it("startProcessing calls 'start_processing' with folders and settings", async () => {
     mockInvoke.mockResolvedValue("ok");
     const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false };
@@ -77,14 +71,14 @@ describe("tauri wrappers — command names", () => {
   });
 
   it("getSettings calls 'get_settings'", async () => {
-    mockInvoke.mockResolvedValue({ maxRetries: 3, recentFolders: [] });
+    mockInvoke.mockResolvedValue({ maxRetries: 3 });
     await getSettings();
     expect(mockInvoke).toHaveBeenCalledWith("get_settings");
   });
 
   it("saveSettings calls 'save_settings' with settings argument", async () => {
     mockInvoke.mockResolvedValue(undefined);
-    const settings = { threadCount: null, logFolder: null, maxRetries: 3, recentFolders: [], verboseLogging: false, markAsCrunched: false, skipCrunched: false };
+    const settings = { threadCount: null, logFolder: null, maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false };
     await saveSettings(settings);
     expect(mockInvoke).toHaveBeenCalledWith("save_settings", { settings });
   });
@@ -146,8 +140,9 @@ describe("tauri wrappers — return values are forwarded", () => {
     expect(await getCpuCount()).toBe(16);
   });
 
-  it("validateFolder returns boolean", async () => {
-    mockInvoke.mockResolvedValue(true);
-    expect(await validateFolder("/music")).toBe(true);
+  it("writeTextFile calls 'write_text_file' with path and content", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    await writeTextFile("/tmp/log.txt", "hello");
+    expect(mockInvoke).toHaveBeenCalledWith("write_text_file", { path: "/tmp/log.txt", content: "hello" });
   });
 });

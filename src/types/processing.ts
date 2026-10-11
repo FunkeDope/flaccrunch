@@ -46,17 +46,12 @@ export interface FileEvent {
   sourceHash?: string;
   outputHash?: string;
   embeddedMd5?: string;
+  /** Net bytes saved inside PICTURE blocks. */
   artworkSavedBytes: number;
   artworkRawSavedBytes: number;
   artworkBlocksOptimized: number;
-}
-
-export interface CompressionResult {
-  path: string;
-  savedBytes: number;
-  savedPct: number;
-  beforeSize: number;
-  afterSize: number;
+  /** Bytes of PADDING removed. Optional for events produced by older backends. */
+  paddingSavedBytes?: number;
 }
 
 export interface ScanResult {
@@ -72,14 +67,4 @@ export interface ProcessingSettings {
   verboseLogging: boolean;
   markAsCrunched: boolean;
   skipCrunched: boolean;
-}
-
-export interface JobRecord {
-  id: string;
-  startTime: number;
-  endTime: number;
-  folders: string[];
-  counters: RunCounters;
-  events: FileEvent[];
-  topCompression: CompressionResult[];
 }

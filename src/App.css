@@ -754,6 +754,42 @@ body {
   text-align: center;
 }
 
+/* Failed files: the whole row lights up, not just the status cell. */
+.events-table tr.row-fail td {
+  background: #ffd6d6;
+  color: var(--fail);
+  font-weight: 700;
+}
+
+.events-table tr.row-fail:hover td {
+  background: #ffbdbd;
+}
+
+.bad-files-kicker {
+  color: var(--fail);
+  font-weight: 700;
+  margin-left: 10px;
+}
+
+.bad-folders-panel {
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  background: #fff4f4;
+}
+
+.bad-folders-panel .queue-section-label {
+  color: var(--fail);
+}
+
+.bad-folder-count {
+  color: var(--fail);
+  font-weight: 700;
+  margin-left: 8px;
+  flex: none;
+}
+
 @media (max-width: 640px) {
   .win98-shell {
     padding: 4px;

@@ -1,5 +1,59 @@
 # Changelog
 
+## v1.2.0 — 2026-10-11
+
+Full repass and refactor of the Rust core and the React hooks.
+
+### New: headless `flaccrunch-cli`
+
+- Separate binary with **no Tauri / WebKit / GTK dependency** — runs on a Linux box with no X server. Built with `cargo build --release --no-default-features --bin flaccrunch-cli` (≈1.7 MB on Windows). Published for Linux x86_64, Windows x86_64 and macOS arm64 by the release workflow.
+- Options: `--threads`, `--retries`, `--mark`, `--skip-crunched`, `--log <file>`, `--logdir <dir>`, `--dry-run`, `--quiet`, `--version`; `-flag` and `--flag` spellings both accepted; `--` ends options. Unknown options are errors instead of being treated as paths.
+- Writes a real EFC log when asked (`-logdir` previously created an empty `run_*/scratch` directory and no log).
+- Ctrl+C cancels cleanly: in-flight temp files are removed, originals untouched, summary printed, exit code 130.
+- Exit codes: 0 success, 1 failures, 2 usage error / no FLAC files.
+- The GUI binary still honours `-silent` and shares the same code.
+
+### New: bad-file reporting
+
+- A file that cannot be decoded or does not verify is the most useful thing a run can tell you. Failed rows are now highlighted as a whole (with the reason as a tooltip), the Files pane shows a **Folders with bad files** panel (deduplicated parent folders — usually one album each — with counts), and the same list appears in the EFC log and at the end of the CLI output together with each failure and its reason. Bad files are never modified.
+
+### Fixed (behaviour)
+
+- **Retries were counted as failures.** A file that failed once and succeeded on retry showed up as both FAIL and OK, inflated `processed` past `totalFiles`, and gave exit code 1 in CLI mode. First attempts are now reported as `RETRY` (not counted as processed) and only the final attempt counts.
+- **Cancelling no longer schedules retries** for the files that were aborted.
+- **Artwork could be swapped between files.** Pictures were exported to a shared scratch directory as `art_block_<index>`, so two workers in the artwork stage at the same time overwrote each other's export before re-import. Artwork is now optimized in memory on the metadata chain — no scratch files at all.
+- **Savings percentage in the status bar was roughly halved**: `totalOriginalBytes` was set from the scan *and* accumulated per file.
+- **Exported logs never said "Processing canceled by user"**: the frontend always passed `runCanceled: false`.
+- Elapsed time shown after completion no longer keeps growing on re-render.
+- ID3v2 prefix detection read the entire file into memory to inspect the first four bytes; it now reads only the header (or at most 1 MiB).
+- Settings slider updates no longer race each other (merge against the latest value).
+
+### Changed: JPEG artwork is now actually lossless
+
+- The previous "Huffman reoptimization" decoded the JPEG to pixels and re-encoded it with the original quantization tables. That is **not** lossless (chroma subsampling, colour conversion and the DCT are recomputed), so the earlier "pixel data is bit-identical" claim was wrong. It is replaced by a coefficient-level transcode with mozjpeg — the same transform as `jpegtran -optimize`: the quantized DCT coefficients are read and written back unchanged with optimal Huffman tables (baseline and progressive scan layouts tried, smaller kept). Every result is additionally verified to decode to identical pixels before it replaces the original. On the test fixture this saves 10% of the cover art.
+
+### Changed (pipeline)
+
+- **Streaming encoder**: audio is decoded frame by frame straight into the encoder instead of materialising the whole track as `Vec<i32>` (4× the PCM size per worker).
+- Tags, pictures, application and cuesheet blocks are attached to the encoder up front, so the output is written once; previously the file was rewritten for the metadata copy, again per picture removal/import, again for padding removal and again for the marker. The Vorbis vendor string now reflects the actual encoder (`reference libFLAC 1.5.0`), as `flac` itself does.
+- Decoded-audio MD5 is hashed per frame instead of per sample.
+- Padding savings are reported separately from artwork savings (new `paddingSavedBytes` on file events, `Meta` chip in the status bar, `Audio delta` / `Artwork delta` / `Padding removed` lines and an `EFC Savings` block in the log).
+- libFLAC error states are reported by name (`FLAC__STREAM_ENCODER_VERIFY_MISMATCH_IN_AUDIO_DATA`) instead of a number.
+
+### Removed / trimmed
+
+- Unused Tauri plugins `shell` (including the broad `shell:allow-execute` capability), `store`, `notification`; unused crates `uuid`, `num_cpus`, `log`, `env_logger`, `jpeg-encoder` (now a dev-dependency only); oxipng's `binary`/`zopfli` features; tokio `full`.
+- Dead code: sidecar-era `flac/progress.rs`, `RunLog`, `failed_log.rs`, metaflac listing parser, `build_flac_args`, `art_temp_path`, unused IPC commands (`get_processing_status`, `get_worker_statuses`, `get_recent_events`, `get_top_compression`, `validate_folder`, `select_output_folder`), `useWorkerStatus` hook, `jobHistory`/`topCompression` frontend state, `recentFolders` setting (never populated).
+
+### Build / CI
+
+- `gui` cargo feature (default) gates everything Tauri; the core is Tauri-free.
+- The `cmake` crate drops every `/O` flag on MSVC and left libFLAC unoptimized in the dev/test profile (release was unaffected); `cmake/msvc-flags.cmake` forces `/O2` back on and dependencies are compiled optimized in dev builds, so fixture-based tests run ~5× faster.
+- `strip = true` in the release profile.
+- CI: clippy with `-D warnings` for both feature sets, frontend unit tests, a GTK-free `check-core` job on Ubuntu and Windows that builds and smoke-tests the CLI. Release workflow publishes CLI binaries (built with `target-cpu=x86-64-v3` for portability).
+
+---
+
 ## v1.0.6 — 2026-03-15
 
 ### Fixed

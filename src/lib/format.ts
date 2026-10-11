@@ -57,6 +57,29 @@ export function getStatusColor(status: string): string {
   }
 }
 
+/** Parent folder of a path (handles both separators); the path itself if it has none. */
+export function parentFolder(path: string): string {
+  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return idx > 0 ? path.slice(0, idx) : path;
+}
+
+/**
+ * Folders containing files that failed, deduplicated, with failure counts,
+ * sorted by folder name. Each folder is usually one album, so this is the
+ * list of albums that need a replacement rip.
+ */
+export function failedFolders(events: { status: string; file: string }[]): { folder: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const e of events) {
+    if (e.status !== "FAIL") continue;
+    const folder = parentFolder(e.file);
+    counts.set(folder, (counts.get(folder) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([folder, count]) => ({ folder, count }))
+    .sort((a, b) => a.folder.localeCompare(b.folder));
+}
+
 /** Returns a CSS class for color-coding a row by compression ratio. */
 export function compressionRowClass(pct: number): string {
   if (pct >= 20) return "comp-excellent";
@@ -64,17 +87,4 @@ export function compressionRowClass(pct: number): string {
   if (pct >= 5) return "comp-fair";
   if (pct > 0) return "comp-poor";
   return "comp-none";
-}
-
-/** Download text content as a file in the browser / Tauri webview. */
-export function downloadTextFile(content: string, filename: string): void {
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }

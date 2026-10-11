@@ -20,7 +20,6 @@ vi.mock("../lib/tauri", () => ({
     threadCount: null,
     logFolder: null,
     maxRetries: 3,
-    recentFolders: [],
     verboseLogging: false,
   }),
   saveSettings: vi.fn().mockResolvedValue(undefined),

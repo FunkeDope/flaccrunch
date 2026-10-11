@@ -4,9 +4,13 @@ use std::{fs, io, thread, time::Duration};
 /// Test whether the given directory is writable by creating and immediately
 /// deleting a probe file. Mirrors PowerShell's `Test-DirectoryWriteAccess`.
 pub fn test_directory_write_access(dir: &Path) -> bool {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     let probe = dir.join(format!(
-        ".efc-write-test-{}.tmp",
-        uuid::Uuid::new_v4().simple()
+        ".efc-write-test-{}-{nonce}.tmp",
+        std::process::id()
     ));
     match fs::write(&probe, b"") {
         Ok(_) => {
@@ -20,11 +24,6 @@ pub fn test_directory_write_access(dir: &Path) -> bool {
 /// Generate the temp file path for a FLAC file (.flac → .tmp).
 pub fn temp_path_for(original: &Path) -> PathBuf {
     original.with_extension("tmp")
-}
-
-/// Generate the artwork temp file path (.flac → .arttmp).
-pub fn art_temp_path(original: &Path) -> PathBuf {
-    original.with_extension("arttmp")
 }
 
 /// Safely remove a file, ignoring errors if it doesn't exist.
@@ -76,14 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn test_art_temp_path() {
-        let path = Path::new("/music/track.flac");
-        assert_eq!(art_temp_path(path), PathBuf::from("/music/track.arttmp"));
-    }
-
-    #[test]
     fn test_safe_remove_nonexistent() {
-        // Should not panic
         safe_remove(Path::new("/nonexistent/file.tmp"));
     }
 
@@ -92,7 +84,6 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("test.tmp");
         fs::write(&path, b"data").unwrap();
-        assert!(path.exists());
         safe_remove(&path);
         assert!(!path.exists());
     }
@@ -105,7 +96,14 @@ mod tests {
         fs::write(&src, b"flac data").unwrap();
         safe_move(&src, &dst).unwrap();
         assert!(!src.exists());
-        assert!(dst.exists());
         assert_eq!(fs::read(&dst).unwrap(), b"flac data");
+    }
+
+    #[test]
+    fn test_write_access_probe_leaves_no_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(test_directory_write_access(dir.path()));
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        assert!(!test_directory_write_access(Path::new("/nonexistent/dir")));
     }
 }

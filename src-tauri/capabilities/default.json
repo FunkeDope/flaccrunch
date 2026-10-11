@@ -4,13 +4,9 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:allow-open",
-    "shell:allow-execute",
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:default",
-    "notification:default",
-    "store:default",
     "core:window:allow-set-title"
   ]
 }
