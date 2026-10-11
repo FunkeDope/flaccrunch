@@ -56,7 +56,7 @@ describe("tauri wrappers — command names", () => {
 
   it("startProcessing calls 'start_processing' with folders and settings", async () => {
     mockInvoke.mockResolvedValue("ok");
-    const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false };
+    const settings = { threadCount: 2, logFolder: "/logs", maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false, maxCompression: false };
     await startProcessing(["/music"], settings);
     expect(mockInvoke).toHaveBeenCalledWith("start_processing", {
       folders: ["/music"],
@@ -78,7 +78,7 @@ describe("tauri wrappers — command names", () => {
 
   it("saveSettings calls 'save_settings' with settings argument", async () => {
     mockInvoke.mockResolvedValue(undefined);
-    const settings = { threadCount: null, logFolder: null, maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false };
+    const settings = { threadCount: null, logFolder: null, maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false, maxCompression: false };
     await saveSettings(settings);
     expect(mockInvoke).toHaveBeenCalledWith("save_settings", { settings });
   });

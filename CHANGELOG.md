@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3.1 — 2026-10-11
+
+### New: maximum (non-subset) compression mode
+
+- `--max` (CLI) / **Settings → Maximum compression** (GUI): `flac -8 -e -p --lax -l 32 -r 8`. Prediction order 32 is what release-group WEBFLACs typically use, which is why the subset default could not shrink them. Measured on such a track: 1.1 % smaller than the source at ~13× the encode time (5.5 min vs 26 s for 2:15 of 24-bit audio). Off by default: non-subset streams are refused by some older hardware players. Audio and metadata verification apply exactly as before.
+- Advanced CLI knobs: `--lpc-order`, `--blocksize`, `--apodization`, `--rice-order`, `--encoder-threads`. Block size 8192 and `subdivide_tukey(5)` were benchmarked and are *not* in the preset (the former loses, the latter costs 4× the time for 0.1 %).
+- libFLAC 1.5 per-file multithreading: each worker gets `cores ÷ workers` encoder threads so short queues still use the whole CPU (Linux/macOS builds; the MSVC build of libFLAC has no pthreads and stays single-threaded per file).
+
+---
+
 ## v1.3.0 — 2026-10-11
 
 Strictly lossless, and proven per file. Supersedes v1.2.0, which rejected files whose tags libFLAC's encoder considered malformed.

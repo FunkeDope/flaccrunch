@@ -41,6 +41,22 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
           <fieldset className="settings-section">
             <legend>Processing</legend>
             <div className="settings-group">
+              <div className="field-row">
+                <input
+                  id="max-compression"
+                  type="checkbox"
+                  checked={settings.maxCompression}
+                  onChange={() => onUpdate({ maxCompression: !settings.maxCompression })}
+                />
+                <label htmlFor="max-compression">Maximum compression (non-subset)</label>
+              </div>
+              <div className="settings-hint">
+                Uses prediction order 32 and a denser window search (like flac --lax). Smaller
+                files, slower encode. Still lossless and verified, but some older hardware
+                players cannot play non-subset FLAC.
+              </div>
+            </div>
+            <div className="settings-group">
               <label className="field-row-stacked">
                 <span>
                 Max Retries Per File

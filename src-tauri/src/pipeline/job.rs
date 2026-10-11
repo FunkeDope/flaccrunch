@@ -5,7 +5,9 @@
 #![allow(clippy::result_large_err)]
 
 use crate::artwork::optimize::optimize_album_art;
-use crate::flac::encoder::{encode_flac, EncodeError, EncodeOptions, EncodeProgress};
+use crate::flac::encoder::{
+    encode_flac, CompressionProfile, EncodeError, EncodeOptions, EncodeProgress,
+};
 use crate::flac::hasher::hash_decoded_audio;
 use crate::flac::marker;
 use crate::flac::metadata::{extract_non_flac_prefix, get_md5sum, prepend_bytes_to_file};
@@ -30,6 +32,11 @@ pub struct ProcessingContext {
     pub mark_as_crunched: bool,
     /// Skip files that already carry a FLACCRUNCH_INFO marker.
     pub skip_crunched: bool,
+    /// Encoder tuning (subset by default).
+    pub profile: CompressionProfile,
+    /// libFLAC threads per file (1 = plain; >1 fills idle cores when the
+    /// queue is shorter than the worker count).
+    pub encoder_threads: u32,
 }
 
 /// How often encoder progress is sampled and forwarded as an event.
@@ -218,6 +225,8 @@ impl Job<'_> {
             &self.temp_path,
             EncodeOptions {
                 mark_as_crunched: self.context.mark_as_crunched,
+                profile: self.context.profile.clone(),
+                threads: self.context.encoder_threads.max(1),
             },
             Some(progress),
             Some(self.cancel_flag.clone()),
@@ -481,6 +490,8 @@ mod tests {
             max_retries: 0,
             mark_as_crunched: true,
             skip_crunched: true,
+            profile: CompressionProfile::default(),
+            encoder_threads: 1,
         };
         let (tx, mut rx) = mpsc::channel(1024);
         let result = execute_job(&item, 0, &ctx, &tx, CancellationToken::new()).await;
@@ -532,6 +543,8 @@ mod tests {
             max_retries: 0,
             mark_as_crunched: false,
             skip_crunched: false,
+            profile: CompressionProfile::default(),
+            encoder_threads: 1,
         };
         let (tx, _rx) = mpsc::channel(64);
         let again = execute_job(&item_again, 0, &ctx_no_skip, &tx, CancellationToken::new()).await;
@@ -577,6 +590,8 @@ mod tests {
             max_retries: 0,
             mark_as_crunched: false,
             skip_crunched: false,
+            profile: CompressionProfile::default(),
+            encoder_threads: 1,
         };
         let (tx, _rx) = mpsc::channel(64);
         let result = execute_job(&item, 0, &ctx, &tx, CancellationToken::new()).await;

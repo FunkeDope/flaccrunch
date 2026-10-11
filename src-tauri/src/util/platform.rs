@@ -13,6 +13,12 @@ pub fn default_thread_count() -> usize {
     (get_cpu_count().saturating_sub(1)).max(1)
 }
 
+/// libFLAC threads to give each worker so that `workers × threads` fills
+/// the machine: 1 when there are at least as many workers as cores.
+pub fn encoder_threads_for(worker_count: usize) -> u32 {
+    (get_cpu_count() / worker_count.max(1)).clamp(1, 128) as u32
+}
+
 /// Get the platform-specific default log folder.
 pub fn default_log_folder() -> PathBuf {
     if let Some(dirs) = directories::UserDirs::new() {
@@ -45,6 +51,15 @@ mod tests {
         } else {
             assert_eq!(threads, 1);
         }
+    }
+
+    #[test]
+    fn test_encoder_threads_for() {
+        let cpus = get_cpu_count();
+        assert_eq!(encoder_threads_for(cpus), 1);
+        assert_eq!(encoder_threads_for(cpus * 2), 1);
+        assert_eq!(encoder_threads_for(1), cpus.min(128) as u32);
+        assert_eq!(encoder_threads_for(0), cpus.min(128) as u32);
     }
 
     #[test]

@@ -26,7 +26,8 @@ The Linux CLI binary needs glibc 2.35+ (Ubuntu 22.04, Debian 12, Fedora 36 or ne
 
 ## Features
 
-- **Maximum FLAC compression** — re-encodes at level 8 with exhaustive model search and exhaustive QLP coefficient precision search (equivalent to `flac -8 -e -p`)
+- **Maximum FLAC compression** — re-encodes at level 8 with exhaustive model search and exhaustive QLP coefficient precision search (equivalent to `flac -8 -e -p`). An optional **non-subset** mode (`--max` / Settings → Maximum compression) goes beyond the FLAC subset like `flac --lax -l 32`: prediction order 32, Rice order 8 and a denser window search. It beats sources that were themselves encoded non-subset, at a large encode-time cost; see [Compression modes](#compression-modes)
+- **Never makes a file worse** — if the re-encode is not smaller than the source, the original is left untouched (`MATCH|KEPT`)
 - **Audio integrity verification** — MD5 of decoded PCM computed before and after re-encoding; original file replaced only on hash match
 - **Lossless album art optimization** — PNG re-compressed by oxipng with every chunk and the exact stored pixel values kept; JPEG re-optimized at the DCT-coefficient level (the same transform as `jpegtran -optimize`, done with mozjpeg: the quantized coefficients are rewritten with optimal Huffman tables and never decoded) with every EXIF/XMP/ICC/comment segment carried over. A picture is only replaced if it decodes to identical pixels and carries identical metadata
 - **Verified data equivalence** — after encoding, the output is compared with the source: tags byte-for-byte (vendor string included), pictures (header fields, decoded pixels, embedded metadata), application and cuesheet blocks, stream parameters and any ID3v2 prefix. Any difference fails the file and the original is kept. The only bytes that change are the audio frames, picture entropy coding, PADDING (removed) and the SEEKTABLE (regenerated)
@@ -55,6 +56,13 @@ Options:
   -r, --retries <N>     Max retries per file (default: 3)
       --mark            Stamp output with a FLACCRUNCH_INFO marker tag
       --skip-crunched   Skip files that already carry the marker
+      --max             Maximum compression: non-subset (--lax -l 32 -r 8,
+                        denser window search). Smaller files, much slower, and
+                        some older hardware players reject non-subset FLAC
+      --lpc-order <N>   Max LPC order 1-32 (12 = subset limit)
+      --blocksize <N>   Block size in samples (default 4096; >4608 = non-subset)
+      --apodization <S> libFLAC window spec, e.g. subdivide_tukey(5)
+      --rice-order <N>  Max Rice partition order 0-8 (default 6)
       --log <file>      Write an EFC-format log to <file>
       --logdir <dir>    Write a timestamped EFC-format log into <dir>
   -n, --dry-run         Scan only: list what would be processed
@@ -91,6 +99,26 @@ Each file passes through five stages in order:
 Files are only replaced when verification passes. The live progress bar blends completed files with fractional in-flight worker progress so it never jumps backward.
 
 ---
+
+## Compression modes
+
+| Mode | Settings | Plays on | When it wins |
+|---|---|---|---|
+| Default (subset) | `flac -8 -e -p` | everything | Sources encoded by ordinary tools at any level |
+| `--max` / Settings → Maximum compression | `-8 -e -p --lax -l 32 -r 8` (non-subset) | software players, modern hardware; some older DAPs/car units refuse non-subset streams | Sources already encoded non-subset (release-group WEBFLACs often use prediction order 32) |
+
+Measured on a 2:15 24-bit/44.1 kHz track whose source had been encoded with order 32, one thread, Ryzen-class desktop:
+
+| Variant | Encode time | Result vs source |
+|---|---|---|
+| subset `-8 -e -p` | 26 s | 0.5 % larger → original kept |
+| `--max` (order 32, Rice 8) | 5.5 min | 1.1 % smaller |
+| order 32 + block size 8192 | 6.2 min | larger → original kept |
+| order 32 + `subdivide_tukey(5)` | 21 min | 1.2 % smaller |
+
+FLAC is close to its floor; beyond the subset you are buying tenths of a percent with minutes of CPU. Whatever the mode, a re-encode that is not smaller never replaces the original (`MATCH|KEPT`).
+
+**CPU use.** Files are processed in parallel, one encoder per worker (default: cores − 1), which keeps every core busy as long as the queue is longer than the worker count. On Linux/macOS builds libFLAC 1.5's own multithreading is used on top of that: each worker gets `cores ÷ workers` encoder threads (`--encoder-threads` to override), so a short queue, or the tail of a run, still fills the machine. The Windows build of libFLAC is compiled without pthreads and therefore encodes each file on one thread; parallelism there comes from the worker count only.
 
 ## Verification Result Codes
 

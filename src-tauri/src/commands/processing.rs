@@ -195,6 +195,12 @@ pub async fn start_processing(
         max_retries: settings.max_retries,
         mark_as_crunched: settings.mark_as_crunched,
         skip_crunched: settings.skip_crunched,
+        profile: if settings.max_compression {
+            crate::flac::encoder::CompressionProfile::max()
+        } else {
+            crate::flac::encoder::CompressionProfile::subset()
+        },
+        encoder_threads: crate::util::platform::encoder_threads_for(worker_count),
     });
 
     let queue = Arc::new(JobQueue::new(scan_result.files));

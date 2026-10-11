@@ -3,6 +3,7 @@
 //! Used by the standalone `flaccrunch-cli` binary and by the GUI binary's
 //! legacy `-silent` mode. Everything here is plain core code.
 
+use crate::flac::encoder::CompressionProfile;
 use crate::fs::scanner::{cleanup_stale_temps, scan_for_flac_files};
 use crate::logging::efc_log::generate_efc_log;
 use crate::pipeline::job::ProcessingContext;
@@ -38,6 +39,15 @@ pub struct CliArgs {
     pub log_file: Option<String>,
     pub mark_as_crunched: bool,
     pub skip_crunched: bool,
+    /// `--max`: non-subset maximum compression preset.
+    pub max_compression: bool,
+    /// Advanced encoder knobs (each implies lax when beyond the subset).
+    pub lpc_order: Option<u32>,
+    pub blocksize: Option<u32>,
+    pub apodization: Option<String>,
+    pub rice_order: Option<u32>,
+    /// libFLAC threads per file; None = auto (cores ÷ workers).
+    pub encoder_threads: Option<u32>,
     /// Suppress per-file output; only print the final summary.
     pub quiet: bool,
     /// Scan and report what would be processed, then exit.
@@ -59,6 +69,12 @@ impl Default for CliArgs {
             log_file: None,
             mark_as_crunched: false,
             skip_crunched: false,
+            max_compression: false,
+            lpc_order: None,
+            blocksize: None,
+            apodization: None,
+            rice_order: None,
+            encoder_threads: None,
             quiet: false,
             dry_run: false,
             help: false,
@@ -113,6 +129,50 @@ pub fn parse_cli_args(args: &[String]) -> CliArgs {
             "dry-run" | "dryrun" | "n" => result.dry_run = true,
             "mark" | "mark-crunched" => result.mark_as_crunched = true,
             "skip-crunched" | "skip" => result.skip_crunched = true,
+            "max" | "lax" => result.max_compression = true,
+            "lpc-order" | "l" => {
+                if let Some(v) = take_value(&mut i, "lpc-order") {
+                    match v.parse::<u32>() {
+                        Ok(n) if (1..=32).contains(&n) => result.lpc_order = Some(n),
+                        _ => result.errors.push(format!("Invalid LPC order (1-32): {v}")),
+                    }
+                }
+            }
+            "blocksize" | "b" => {
+                if let Some(v) = take_value(&mut i, "blocksize") {
+                    match v.parse::<u32>() {
+                        Ok(n) if (16..=65535).contains(&n) => result.blocksize = Some(n),
+                        _ => result
+                            .errors
+                            .push(format!("Invalid block size (16-65535): {v}")),
+                    }
+                }
+            }
+            "apodization" | "A" => {
+                if let Some(v) = take_value(&mut i, "apodization") {
+                    result.apodization = Some(v);
+                }
+            }
+            "encoder-threads" => {
+                if let Some(v) = take_value(&mut i, "encoder-threads") {
+                    match v.parse::<u32>() {
+                        Ok(n) if (1..=128).contains(&n) => result.encoder_threads = Some(n),
+                        _ => result
+                            .errors
+                            .push(format!("Invalid encoder thread count (1-128): {v}")),
+                    }
+                }
+            }
+            "rice-order" => {
+                if let Some(v) = take_value(&mut i, "rice-order") {
+                    match v.parse::<u32>() {
+                        Ok(n) if n <= 8 => result.rice_order = Some(n),
+                        _ => result
+                            .errors
+                            .push(format!("Invalid Rice partition order (0-8): {v}")),
+                    }
+                }
+            }
             "threads" | "t" | "j" => {
                 if let Some(v) = take_value(&mut i, "threads") {
                     match v.parse::<usize>() {
@@ -179,6 +239,17 @@ pub fn print_help(bin_name: &str) {
     println!("  -r, --retries <N>     Max retries per file (default: 3)");
     println!("      --mark            Stamp output with a FLACCRUNCH_INFO marker tag");
     println!("      --skip-crunched   Skip files that already carry the marker");
+    println!("      --max             Maximum compression: non-subset (--lax -l 32 -r 8,");
+    println!("                        denser window search). Smaller files, slower, and");
+    println!("                        some older hardware players reject non-subset FLAC");
+    println!("      --lpc-order <N>   Max LPC order 1-32 (12 = subset limit)");
+    println!("      --blocksize <N>   Block size in samples (default 4096; >4608 = non-subset)");
+    println!("      --apodization <S> libFLAC window spec, e.g. subdivide_tukey(5)");
+    println!("      --rice-order <N>  Max Rice partition order 0-8 (default 6)");
+    println!("      --encoder-threads <N>  libFLAC threads per file (default: cores / workers;");
+    println!(
+        "                        Linux/macOS builds only, Windows libFLAC is single-threaded)"
+    );
     println!("      --log <file>      Write an EFC-format log to <file>");
     println!("      --logdir <dir>    Write a timestamped EFC-format log into <dir>");
     println!("  -n, --dry-run         Scan only: list what would be processed");
@@ -198,6 +269,29 @@ pub fn print_help(bin_name: &str) {
     println!("  {bin_name} ~/Music");
     println!("  {bin_name} --threads 4 --mark --skip-crunched ~/Music /mnt/nas/More");
     println!("  {bin_name} --log run.log \"D:\\Music\\Album\"");
+}
+
+/// Build the encoder profile from `--max` and the advanced knobs.
+pub fn compression_profile(args: &CliArgs) -> CompressionProfile {
+    let mut p = if args.max_compression {
+        CompressionProfile::max()
+    } else {
+        CompressionProfile::subset()
+    };
+    if let Some(n) = args.lpc_order {
+        p.max_lpc_order = n;
+    }
+    if let Some(n) = args.blocksize {
+        p.blocksize = n;
+    }
+    if let Some(a) = &args.apodization {
+        p.apodization = Some(a.clone());
+    }
+    if let Some(n) = args.rice_order {
+        p.rice_partition_order = n;
+    }
+    p.lax = p.is_non_subset();
+    p
 }
 
 /// Prints pipeline events to the terminal.
@@ -396,12 +490,34 @@ async fn run_cli_async(args: CliArgs) -> i32 {
             ""
         },
     );
+    let profile = compression_profile(&args);
+    if profile.is_non_subset() {
+        println!(
+            "Maximum compression: non-subset stream (LPC order {}, block size {}, Rice order {}{})",
+            profile.max_lpc_order,
+            if profile.blocksize == 0 {
+                4096
+            } else {
+                profile.blocksize
+            },
+            profile.rice_partition_order,
+            profile
+                .apodization
+                .as_deref()
+                .map(|a| format!(", apodization {a}"))
+                .unwrap_or_default()
+        );
+    }
     println!("{}", "-".repeat(72));
 
     let context = Arc::new(ProcessingContext {
         max_retries: args.retries,
         mark_as_crunched: args.mark_as_crunched,
         skip_crunched: args.skip_crunched,
+        profile: compression_profile(&args),
+        encoder_threads: args
+            .encoder_threads
+            .unwrap_or_else(|| crate::util::platform::encoder_threads_for(thread_count)),
     });
     let queue = Arc::new(JobQueue::new(scan.files));
     // No live appends in CLI mode: close now so workers exit once drained.
@@ -572,6 +688,27 @@ mod tests {
         assert!(parse_cli_args(&args(&["--dry-run"])).dry_run);
         assert!(parse_cli_args(&args(&["--mark"])).mark_as_crunched);
         assert!(parse_cli_args(&args(&["--skip-crunched"])).skip_crunched);
+        assert!(parse_cli_args(&args(&["--max"])).max_compression);
+        let adv = parse_cli_args(&args(&[
+            "--lpc-order",
+            "32",
+            "-b",
+            "8192",
+            "-A",
+            "tukey(0.5)",
+            "--rice-order",
+            "8",
+        ]));
+        assert!(adv.errors.is_empty(), "{:?}", adv.errors);
+        let p = compression_profile(&adv);
+        assert!(
+            p.lax && p.max_lpc_order == 32 && p.blocksize == 8192 && p.rice_partition_order == 8
+        );
+        assert_eq!(p.apodization.as_deref(), Some("tukey(0.5)"));
+        assert!(!compression_profile(&parse_cli_args(&args(&["-l", "12"]))).lax);
+        assert!(!parse_cli_args(&args(&["--lpc-order", "40"]))
+            .errors
+            .is_empty());
     }
 
     #[test]

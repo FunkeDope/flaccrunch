@@ -11,6 +11,7 @@ const defaultSettings: AppSettings = {
   verboseLogging: false,
   markAsCrunched: false,
   skipCrunched: false,
+  maxCompression: false,
 };
 
 export function useSettings() {
@@ -50,6 +51,7 @@ export function useSettings() {
     verboseLogging: settings.verboseLogging,
     markAsCrunched: settings.markAsCrunched,
     skipCrunched: settings.skipCrunched,
+    maxCompression: settings.maxCompression,
   };
 
   return { settings, cpuCount, defaultLogFolder, appVersion, processingSettings, updateSettings };

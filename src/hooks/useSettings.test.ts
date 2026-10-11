@@ -28,6 +28,7 @@ beforeEach(() => {
     verboseLogging: false,
     markAsCrunched: false,
     skipCrunched: false,
+    maxCompression: false,
   });
   mockSaveSettings.mockResolvedValue(undefined);
 });
@@ -63,6 +64,7 @@ describe("useSettings — processingSettings derivation", () => {
       verboseLogging: false,
     markAsCrunched: false,
     skipCrunched: false,
+    maxCompression: false,
     });
     const { result } = renderHook(() => useSettings());
     await waitFor(() => expect(result.current.settings.threadCount).toBe(4));
@@ -82,6 +84,7 @@ describe("useSettings — processingSettings derivation", () => {
       verboseLogging: false,
     markAsCrunched: false,
     skipCrunched: false,
+    maxCompression: false,
     });
     const { result } = renderHook(() => useSettings());
     await waitFor(() =>
@@ -97,6 +100,7 @@ describe("useSettings — processingSettings derivation", () => {
       verboseLogging: false,
     markAsCrunched: false,
     skipCrunched: false,
+    maxCompression: false,
     });
     const { result } = renderHook(() => useSettings());
     await waitFor(() => expect(result.current.processingSettings.maxRetries).toBe(5));

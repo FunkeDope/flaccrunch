@@ -19,6 +19,10 @@ pub struct AppSettings {
     /// Skip files that already carry a FLACCRUNCH_INFO marker.
     #[serde(default)]
     pub skip_crunched: bool,
+    /// Non-subset maximum compression (`--lax -l 32`, denser window search).
+    /// Smaller files; some older hardware players cannot play non-subset FLAC.
+    #[serde(default)]
+    pub max_compression: bool,
 }
 
 impl Default for AppSettings {
@@ -30,6 +34,7 @@ impl Default for AppSettings {
             verbose_logging: false,
             mark_as_crunched: false,
             skip_crunched: false,
+            max_compression: false,
         }
     }
 }
@@ -46,6 +51,8 @@ pub struct ProcessingSettings {
     pub mark_as_crunched: bool,
     #[serde(default)]
     pub skip_crunched: bool,
+    #[serde(default)]
+    pub max_compression: bool,
 }
 
 #[cfg(test)]
@@ -72,6 +79,7 @@ mod tests {
             verbose_logging: true,
             mark_as_crunched: true,
             skip_crunched: false,
+            max_compression: true,
         };
         let json = serde_json::to_string(&original).expect("serialize");
         assert!(json.contains("threadCount"), "{json}");

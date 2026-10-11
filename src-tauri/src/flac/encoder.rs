@@ -78,10 +78,86 @@ impl std::fmt::Display for EncodeError {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+/// Encoder tuning on top of `-8 -e -p`.
+///
+/// The FLAC *subset* (what every decoder must support) limits the LPC order
+/// to 12 and the block size to 4608 at 44.1/48 kHz. Going beyond that
+/// (`flac --lax`) compresses measurably better on 24-bit material but
+/// produces streams some older hardware players refuse, so it is opt-in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompressionProfile {
+    /// Allow non-subset streams.
+    pub lax: bool,
+    /// Maximum LPC predictor order (12 = subset limit, 32 = libFLAC maximum).
+    pub max_lpc_order: u32,
+    /// Block size in samples; 0 = libFLAC's default for `-8` (4096).
+    pub blocksize: u32,
+    /// Apodization window spec (libFLAC `-A` syntax); None = the `-8` default.
+    pub apodization: Option<String>,
+    /// Maximum Rice partition order (`-8` uses 6; 8 is the maximum).
+    pub rice_partition_order: u32,
+}
+
+impl CompressionProfile {
+    /// Plain `flac -8 -e -p`: subset-compliant, plays anywhere.
+    pub fn subset() -> Self {
+        Self {
+            lax: false,
+            max_lpc_order: 12,
+            blocksize: 0,
+            apodization: None,
+            rice_partition_order: 6,
+        }
+    }
+
+    /// Maximum compression: `flac -8 -e -p --lax -l 32 -r 8`. Non-subset.
+    ///
+    /// Measured on a 2:15 24-bit/44.1 kHz track (single thread): subset
+    /// 26 s; order 32 → 331 s and 1.1 % smaller than a source that was itself
+    /// encoded with order 32; adding `subdivide_tukey(5)` → 21 min for a
+    /// further 0.1 %; block size 8192 → slower *and* larger. So: order 32,
+    /// default windows, default block size.
+    pub fn max() -> Self {
+        Self {
+            lax: true,
+            max_lpc_order: 32,
+            blocksize: 0,
+            apodization: None,
+            rice_partition_order: 8,
+        }
+    }
+
+    /// True when any setting leaves the FLAC subset.
+    pub fn is_non_subset(&self) -> bool {
+        self.lax || self.max_lpc_order > 12 || self.blocksize > 4608
+    }
+}
+
+impl Default for CompressionProfile {
+    fn default() -> Self {
+        Self::subset()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncodeOptions {
     /// Stamp the output with a FLACCRUNCH_INFO Vorbis comment.
     pub mark_as_crunched: bool,
+    pub profile: CompressionProfile,
+    /// libFLAC encoder threads for this one file (libFLAC ≥ 1.5, pthreads
+    /// builds only — silently 1 on MSVC builds). Useful when there are fewer
+    /// files than cores; otherwise one thread per file saturates the CPU.
+    pub threads: u32,
+}
+
+impl Default for EncodeOptions {
+    fn default() -> Self {
+        Self {
+            mark_as_crunched: false,
+            profile: CompressionProfile::default(),
+            threads: 1,
+        }
+    }
 }
 
 /// Re-encode `input` to `output` at maximum compression using libFLAC.
@@ -355,6 +431,26 @@ fn encode_flac_native(
         FLAC__stream_encoder_set_do_exhaustive_model_search(enc, 1);
         FLAC__stream_encoder_set_do_qlp_coeff_prec_search(enc, 1);
         FLAC__stream_encoder_set_verify(enc, 1);
+        // Profile overrides (must come after set_compression_level).
+        let profile = &options.profile;
+        if profile.is_non_subset() {
+            FLAC__stream_encoder_set_streamable_subset(enc, 0);
+        }
+        FLAC__stream_encoder_set_max_lpc_order(enc, profile.max_lpc_order);
+        if profile.blocksize > 0 {
+            FLAC__stream_encoder_set_blocksize(enc, profile.blocksize);
+        }
+        if let Some(spec) = &profile.apodization {
+            let spec_c = std::ffi::CString::new(spec.as_str())
+                .map_err(|_| fail("Invalid apodization spec".to_string()))?;
+            FLAC__stream_encoder_set_apodization(enc, spec_c.as_ptr());
+        }
+        FLAC__stream_encoder_set_max_residual_partition_order(enc, profile.rice_partition_order);
+        if options.threads > 1 {
+            // NOT_COMPILED_WITH_MULTITHREADING (MSVC builds) and TOO_MANY are
+            // not errors: the encoder just runs single-threaded.
+            let _ = FLAC__stream_encoder_set_num_threads(enc, options.threads.min(128));
+        }
         if state.total_samples > 0 {
             FLAC__stream_encoder_set_total_samples_estimate(enc, state.total_samples);
         }
@@ -521,6 +617,7 @@ mod tests {
             &out,
             EncodeOptions {
                 mark_as_crunched: true,
+                ..Default::default()
             },
             Some(progress.clone()),
             None,
@@ -609,6 +706,32 @@ mod tests {
             rt().block_on(hash_decoded_audio(&src)).unwrap(),
             rt().block_on(hash_decoded_audio(&out)).unwrap()
         );
+    }
+
+    /// Non-subset profile: still bit-identical audio, metadata verified.
+    #[test]
+    fn test_encode_max_profile_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = small_flac(dir.path(), "src.flac", 2);
+        let out = dir.path().join("out.flac");
+        let opts = EncodeOptions {
+            mark_as_crunched: false,
+            profile: CompressionProfile::max(),
+            threads: 4,
+        };
+        rt().block_on(encode_flac(&src, &out, opts, None, None))
+            .expect("encode");
+        assert_eq!(
+            rt().block_on(hash_decoded_audio(&src)).unwrap(),
+            rt().block_on(hash_decoded_audio(&out)).unwrap()
+        );
+        assert_eq!(
+            read_vorbis_comments(&src).unwrap(),
+            read_vorbis_comments(&out).unwrap()
+        );
+        assert!(crate::flac::verify::verify_metadata_equivalent(&src, &out, false).is_ok());
+        assert!(CompressionProfile::max().is_non_subset());
+        assert!(!CompressionProfile::subset().is_non_subset());
     }
 
     /// Full-size fixture: the real cover art and tags survive the trip.

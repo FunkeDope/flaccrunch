@@ -224,6 +224,8 @@ mod tests {
             max_retries: 3,
             mark_as_crunched: false,
             skip_crunched: false,
+            profile: Default::default(),
+            encoder_threads: 1,
         });
 
         run_worker_pool(1, queue, ctx, Arc::clone(&run_state), sink.clone()).await;
@@ -277,6 +279,8 @@ mod tests {
             max_retries: 3,
             mark_as_crunched: false,
             skip_crunched: false,
+            profile: Default::default(),
+            encoder_threads: 1,
         });
 
         run_worker_pool(1, queue.clone(), ctx, run_state, sink.clone()).await;
