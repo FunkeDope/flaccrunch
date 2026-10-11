@@ -4,6 +4,8 @@ version = "1.2.0"
 description = "Lossless FLAC recompression with album art optimization"
 authors = ["FlacCrunch Contributors"]
 edition = "2021"
+# Two [[bin]] targets: tell cargo (and the Tauri CLI) which one is the app.
+default-run = "flaccrunch"
 
 [lib]
 name = "flaccrunch_lib"
