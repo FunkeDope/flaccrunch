@@ -28,7 +28,8 @@ The Linux CLI binary needs glibc 2.35+ (Ubuntu 22.04, Debian 12, Fedora 36 or ne
 
 - **Maximum FLAC compression** — re-encodes at level 8 with exhaustive model search and exhaustive QLP coefficient precision search (equivalent to `flac -8 -e -p`)
 - **Audio integrity verification** — MD5 of decoded PCM computed before and after re-encoding; original file replaced only on hash match
-- **Lossless album art optimization** — PNG via oxipng; JPEG via metadata stripping plus coefficient-level Huffman re-optimization (the same transform as `jpegtran -optimize`, done with mozjpeg: the quantized DCT coefficients are rewritten with optimal Huffman tables and never decoded). Every result is verified to decode to identical pixels before it replaces the original
+- **Lossless album art optimization** — PNG re-compressed by oxipng with every chunk and the exact stored pixel values kept; JPEG re-optimized at the DCT-coefficient level (the same transform as `jpegtran -optimize`, done with mozjpeg: the quantized coefficients are rewritten with optimal Huffman tables and never decoded) with every EXIF/XMP/ICC/comment segment carried over. A picture is only replaced if it decodes to identical pixels and carries identical metadata
+- **Verified data equivalence** — after encoding, the output is compared with the source: tags byte-for-byte (vendor string included), pictures (header fields, decoded pixels, embedded metadata), application and cuesheet blocks, stream parameters and any ID3v2 prefix. Any difference fails the file and the original is kept. The only bytes that change are the audio frames, picture entropy coding, PADDING (removed) and the SEEKTABLE (regenerated)
 - **PADDING removal** — all PADDING metadata blocks stripped; savings tracked separately from artwork
 - **Bad-file reporting** — a file that fails to decode or verify is left untouched and highlighted; the run summary lists the folders (albums) that contain bad files so they can be re-ripped
 - **Full metadata preservation** — all Vorbis comments, PICTURE blocks, cue sheets, and application metadata copied to re-encoded output
@@ -82,9 +83,9 @@ Each file passes through five stages in order:
 | Stage | What happens |
 |-------|-------------|
 | **1. Hashing source** | Reads the embedded MD5 from FLAC STREAMINFO. Decodes the original audio and computes a PRE hash (MD5 of raw PCM). Result emitted to UI immediately. |
-| **2. Converting** | Streams the decoded audio straight into a libFLAC encoder at level 8 with exhaustive model search and exhaustive QLP precision search (memory use is bounded by one block, not the track length). Tags, pictures, application and cuesheet blocks are attached to the encoder up front, so the output is written in one pass. Live progress % and compression ratio emitted every ~100 ms. Non-FLAC prefix bytes (e.g. ID3v2 tags prepended by some tools) are preserved and re-attached. |
-| **3. Artwork** | Done in memory on the metadata chain in a single pass. PNG images optimized with oxipng preset 4 (lossless). JPEG images: non-essential APP markers stripped (EXIF, ICC, XMP, COM), then the quantized DCT coefficients are rewritten with optimal Huffman tables by mozjpeg (`jpegtran -optimize`; baseline and progressive layouts tried, smaller kept). The result is only accepted if it decodes to exactly the same pixels. PADDING blocks removed. |
-| **4. Hashing output** | Decodes the fully assembled output file and computes an OUT hash. Verified against PRE. On mismatch: temp file deleted, file marked FAIL. |
+| **2. Converting** | Streams the decoded audio straight into a libFLAC encoder at level 8 with exhaustive model search and exhaustive QLP precision search (memory use is bounded by one block, not the track length). A fresh 10-second SEEKTABLE is generated. Tags, pictures, application and cuesheet blocks are then cloned from the source with the metadata-chain API, which validates nothing, so anything a tagger wrote is carried over byte-for-byte (vendor string included; non-UTF-8 values and odd tag names are fine). Non-FLAC prefix bytes (e.g. ID3v2 tags prepended by some tools) are preserved and re-attached. Live progress % and compression ratio emitted every ~100 ms. |
+| **3. Artwork** | Done in memory on the metadata chain in a single pass. PNG: oxipng preset 4 recompression only (no colour/bit-depth/palette/alpha reductions, all chunks kept). JPEG: quantized DCT coefficients rewritten with optimal Huffman tables by mozjpeg (`jpegtran -optimize`; baseline and progressive layouts tried, smaller kept); every APP/COM segment copied over. A picture is replaced only if it is smaller, decodes to the same pixels and carries the same metadata segments. PADDING blocks removed. |
+| **4. Hashing output** | Decodes the fully assembled output file and computes an OUT hash. Verified against PRE. Then every non-audio block of the output is compared with the source (tags, pictures as decoded images plus their metadata, application/cuesheet blocks, stream parameters, ID3v2 prefix). On any mismatch: temp file deleted, file marked FAIL (`FAIL\|METADATA` with the reason). |
 | **5. Finalizing** | Atomically replaces the original file. Restores original filesystem timestamps. |
 
 Files are only replaced when verification passes. The live progress bar blends completed files with fractional in-flight worker progress so it never jumps backward.
@@ -101,6 +102,8 @@ Files are only replaced when verification passes. The live progress bar blends c
 | `FAIL\|MISMATCH` | PRE ≠ OUT — audio changed during re-encode (first 8 hex chars shown) |
 | `FAIL\|NO_SRC` | PRE hash unavailable and no embedded MD5 to fall back on |
 | `FAIL\|NO_HASH` | Hash computation failed entirely |
+| `FAIL\|METADATA` | Audio matched but a tag, picture, application/cuesheet block or the ID3 prefix of the output differs from the source (reason in the log) |
+| `MATCH\|KEPT` | Everything verified, but the re-encode was not smaller (e.g. the source used non-subset LPC order 32), so the original was left untouched |
 
 ---
 

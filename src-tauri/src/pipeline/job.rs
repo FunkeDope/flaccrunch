@@ -273,6 +273,23 @@ impl Job<'_> {
                 ..self.fail("Hash verification failed")
             });
         }
+
+        // Everything that is not audio must be byte-for-byte the same data
+        // (tags, pictures as decoded images + their metadata, application
+        // and cuesheet blocks, ID3 prefix). Proven, not assumed.
+        if let Err(what) = crate::flac::verify::verify_metadata_equivalent(
+            file_path,
+            &self.temp_path,
+            self.context.mark_as_crunched,
+        ) {
+            return Err(JobResult {
+                source_hash,
+                output_hash: Some(output_hash),
+                embedded_md5,
+                verification: "FAIL|METADATA".to_string(),
+                ..self.fail(format!("Metadata verification failed: {what}"))
+            });
+        }
         self.check_cancel()?;
 
         // ── STAGE 5: FINALIZING ──────────────────────────────────────────
@@ -280,6 +297,34 @@ impl Job<'_> {
         let after_size = std::fs::metadata(&self.temp_path)
             .map(|m| m.len())
             .unwrap_or(0);
+
+        // A re-encode that is not smaller is not an improvement: keep the
+        // original byte-for-byte (sources already at maximum compression, or
+        // encoded by a newer libFLAC, routinely come out a little larger).
+        if after_size >= before_size {
+            safe_remove(&self.temp_path);
+            return Ok(JobResult {
+                status: FileStatus::OK,
+                file_path: file_path.to_string_lossy().to_string(),
+                attempt: self.item.attempt,
+                before_size,
+                after_size: before_size,
+                saved_bytes: 0,
+                compression_pct: 0.0,
+                source_hash,
+                output_hash: Some(output_hash),
+                embedded_md5,
+                verification: format!("{}|KEPT", verification.description),
+                artwork_result: None,
+                error: Some(format!(
+                    "Re-encode would be {} larger; original kept",
+                    crate::util::format::format_bytes(
+                        after_size as i64 - before_size as i64,
+                        false
+                    )
+                )),
+            });
+        }
 
         safe_move(&self.temp_path, file_path)
             .map_err(|e| self.fail(format!("Failed to replace original file: {e}")))?;
@@ -418,19 +463,10 @@ mod tests {
     /// Full pipeline on a copy of the fixture: must succeed, shrink the file,
     /// verify, and leave no temp file behind.
     #[tokio::test]
-    async fn test_execute_job_on_fixture() {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("Tests")
-            .join("un-optimized.flac");
-        if !src.exists() {
-            eprintln!("fixture missing — skipping");
-            return;
-        }
+    async fn test_execute_job_end_to_end() {
         let dir = tempfile::tempdir().unwrap();
-        let copy = dir.path().join("job.flac");
-        std::fs::copy(&src, &copy).unwrap();
+        let copy = crate::test_util::small_flac(dir.path(), "job.flac", 2);
+        crate::test_util::plant_illegal_comment(&copy, b"COMMENT=\xff not utf-8");
         let size = std::fs::metadata(&copy).unwrap().len();
 
         let item = QueueItem {
@@ -480,6 +516,38 @@ mod tests {
                 PipelineStage::Finalizing,
             ]
         );
+
+        // Second run without skip: the re-encode cannot beat the first pass,
+        // so the original must be kept byte-for-byte and still count as OK.
+        let bytes_after_first = std::fs::read(&copy).unwrap();
+        let item_again = QueueItem {
+            file: crate::fs::scanner::ScannedFile {
+                path: copy.clone(),
+                name: "job.flac".into(),
+                size: result.after_size,
+            },
+            attempt: 1,
+        };
+        let ctx_no_skip = ProcessingContext {
+            max_retries: 0,
+            mark_as_crunched: false,
+            skip_crunched: false,
+        };
+        let (tx, _rx) = mpsc::channel(64);
+        let again = execute_job(&item_again, 0, &ctx_no_skip, &tx, CancellationToken::new()).await;
+        assert_eq!(again.status, FileStatus::OK, "{:?}", again.error);
+        assert!(
+            again.verification.ends_with("|KEPT"),
+            "{}",
+            again.verification
+        );
+        assert_eq!(again.saved_bytes, 0);
+        assert_eq!(
+            std::fs::read(&copy).unwrap(),
+            bytes_after_first,
+            "original untouched"
+        );
+        assert!(!temp_path_for(&copy).exists());
 
         // Second run with skip_crunched: the marker short-circuits the job.
         let item2 = QueueItem {

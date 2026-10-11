@@ -22,3 +22,6 @@ TestResults.xml
 
 # Tauri
 src-tauri/gen/
+
+# Local test albums (large, untracked)
+Tests/*/

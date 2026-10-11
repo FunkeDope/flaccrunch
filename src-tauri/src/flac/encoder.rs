@@ -2,24 +2,33 @@
 //!
 //! The source file is decoded frame by frame and each frame is fed straight
 //! into the encoder, so memory use is bounded by one block regardless of
-//! track length (the previous implementation materialised the whole track as
-//! `Vec<i32>`: ~4× the PCM size per worker).
+//! track length.
 //!
-//! Tags, artwork, application and cuesheet blocks are cloned from the source
-//! and handed to the encoder up front, so the output is written in a single
-//! pass with its metadata in place — no second rewrite of the file.
+//! Metadata handling is deliberately split in two:
+//!
+//! * The encoder itself only gets a SEEKTABLE template (it fills in the byte
+//!   offsets while encoding). Nothing else is attached, because libFLAC
+//!   *validates* attached VORBIS_COMMENT / PICTURE blocks at init and rejects
+//!   files whose tags were written by sloppy taggers (non-UTF-8 values, odd
+//!   names, duplicate blocks…). It would also overwrite the vendor string.
+//! * Tags, pictures, application and cuesheet blocks are cloned from the
+//!   source and spliced into the output afterwards with the chain API, which
+//!   validates nothing and keeps every byte as it was.
 
 use crate::flac::ffi::{
     decoder_error_status_string, decoder_init_status_string, decoder_state_string,
     encoder_init_status_string, encoder_state_string, path_cstring,
 };
 use crate::flac::marker;
-use crate::flac::metadata::{clone_metadata_blocks, MetadataBlocks};
+use crate::flac::metadata::{apply_metadata_blocks, clone_metadata_blocks, MetadataBlocks};
 use libflac_sys::*;
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
+
+/// Seek point spacing, in seconds (the `flac` CLI default of `-S 10s`).
+const SEEKPOINT_SPACING_SECS: u32 = 10;
 
 /// Shared, lock-free progress state updated by the encoder thread and polled
 /// by whoever reports progress.
@@ -77,7 +86,8 @@ pub struct EncodeOptions {
 
 /// Re-encode `input` to `output` at maximum compression using libFLAC.
 /// Equivalent to: `flac -8 -e -p -V -o <output> -- <input>` with all tags,
-/// pictures, application and cuesheet blocks carried over.
+/// pictures, application and cuesheet blocks carried over verbatim and a
+/// fresh 10-second seek table.
 pub async fn encode_flac(
     input: &Path,
     output: &Path,
@@ -216,19 +226,48 @@ unsafe extern "C" fn error_callback(
 struct Handles {
     decoder: *mut FLAC__StreamDecoder,
     encoder: *mut FLAC__StreamEncoder,
+    seektable: *mut FLAC__StreamMetadata,
 }
 
 impl Drop for Handles {
     fn drop(&mut self) {
         unsafe {
+            // Encoder first: it may still reference the seek table.
             if !self.encoder.is_null() {
                 FLAC__stream_encoder_delete(self.encoder);
             }
             if !self.decoder.is_null() {
                 FLAC__stream_decoder_delete(self.decoder);
             }
+            if !self.seektable.is_null() {
+                FLAC__metadata_object_delete(self.seektable);
+            }
         }
     }
+}
+
+/// Build a SEEKTABLE template with one point every `SEEKPOINT_SPACING_SECS`.
+/// The encoder fills in the offsets. Returns null when the length is unknown.
+unsafe fn seektable_template(sample_rate: u32, total_samples: u64) -> *mut FLAC__StreamMetadata {
+    if total_samples == 0 || sample_rate == 0 {
+        return std::ptr::null_mut();
+    }
+    let block = FLAC__metadata_object_new(FLAC__METADATA_TYPE_SEEKTABLE);
+    if block.is_null() {
+        return block;
+    }
+    let spacing = sample_rate.saturating_mul(SEEKPOINT_SPACING_SECS);
+    if FLAC__metadata_object_seektable_template_append_spaced_points_by_samples(
+        block,
+        spacing,
+        total_samples,
+    ) == 0
+        || FLAC__metadata_object_seektable_template_sort(block, 1) == 0
+    {
+        FLAC__metadata_object_delete(block);
+        return std::ptr::null_mut();
+    }
+    block
 }
 
 fn encode_flac_native(
@@ -268,6 +307,7 @@ fn encode_flac_native(
         let mut handles = Handles {
             decoder: FLAC__stream_decoder_new(),
             encoder: std::ptr::null_mut(),
+            seektable: std::ptr::null_mut(),
         };
         if handles.decoder.is_null() {
             return Err(fail("Failed to create FLAC decoder".to_string()));
@@ -318,10 +358,14 @@ fn encode_flac_native(
         if state.total_samples > 0 {
             FLAC__stream_encoder_set_total_samples_estimate(enc, state.total_samples);
         }
-        if !blocks.is_empty()
-            && FLAC__stream_encoder_set_metadata(enc, blocks.as_mut_ptr(), blocks.len() as u32) == 0
-        {
-            return Err(fail("Failed to attach metadata to encoder".to_string()));
+
+        // Only a seek table is attached (see module docs for why not the rest).
+        handles.seektable = seektable_template(state.sample_rate, state.total_samples);
+        if !handles.seektable.is_null() {
+            let mut list = [handles.seektable];
+            if FLAC__stream_encoder_set_metadata(enc, list.as_mut_ptr(), 1) == 0 {
+                return Err(fail("Failed to attach seek table to encoder".to_string()));
+            }
         }
 
         let init =
@@ -359,7 +403,8 @@ fn encode_flac_native(
         }
 
         // finish() flushes the last frame, back-patches STREAMINFO (incl. the
-        // MD5 of the decoded audio) and completes verification.
+        // MD5 of the decoded audio) and the seek table, and completes
+        // verification.
         if FLAC__stream_encoder_finish(enc) == 0 {
             return Err(fail(format!(
                 "FLAC encoder finish failed: {}",
@@ -367,9 +412,11 @@ fn encode_flac_native(
             )));
         }
         FLAC__stream_decoder_finish(handles.decoder);
-        // `handles` and `blocks` drop here; the encoder has already written
-        // the metadata so freeing the block objects is safe.
     }
+
+    // Tags / pictures / application / cuesheet: spliced in verbatim.
+    apply_metadata_blocks(output, blocks)
+        .map_err(|e| fail(format!("Failed to copy metadata to output: {e}")))?;
 
     if let Some(p) = &state.progress {
         p.set(100, p.ratio());
@@ -382,7 +429,8 @@ mod tests {
     use super::*;
     use crate::flac::hasher::hash_decoded_audio;
     use crate::flac::marker::read_crunched_marker;
-    use crate::flac::metadata::get_md5sum;
+    use crate::flac::metadata::{get_md5sum, read_vorbis_comments, MetadataChain};
+    use crate::test_util::{block_types, plant_illegal_comment, small_flac};
 
     fn fixture() -> Option<PathBuf> {
         let p = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -391,6 +439,10 @@ mod tests {
             .join("Tests")
             .join("un-optimized.flac");
         p.exists().then_some(p)
+    }
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Runtime::new().unwrap()
     }
 
     #[test]
@@ -407,8 +459,7 @@ mod tests {
     fn test_encode_missing_input_fails() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("out.flac");
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let err = rt
+        let err = rt()
             .block_on(encode_flac(
                 Path::new("/nope/missing.flac"),
                 &out,
@@ -426,8 +477,7 @@ mod tests {
         let input = dir.path().join("junk.flac");
         std::fs::write(&input, b"definitely not a flac file").unwrap();
         let out = dir.path().join("out.flac");
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let err = rt
+        let err = rt()
             .block_on(encode_flac(
                 &input,
                 &out,
@@ -441,14 +491,11 @@ mod tests {
 
     #[test]
     fn test_encode_cancel_flag_aborts() {
-        let Some(src) = fixture() else {
-            return;
-        };
         let dir = tempfile::tempdir().unwrap();
+        let src = small_flac(dir.path(), "src.flac", 3);
         let out = dir.path().join("out.flac");
         let cancel = Arc::new(AtomicBool::new(true));
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let err = rt
+        let err = rt()
             .block_on(encode_flac(
                 &src,
                 &out,
@@ -460,20 +507,16 @@ mod tests {
         assert_eq!(err, EncodeError::Cancelled);
     }
 
-    /// End-to-end: re-encode the fixture, verify decoded audio is identical,
-    /// metadata was carried over and the marker was written.
+    /// Small synthetic file: audio identical, tags byte-identical (vendor
+    /// string included), exactly one VORBIS_COMMENT, pictures in place, seek
+    /// table added, no padding, marker written.
     #[test]
-    fn test_encode_fixture_roundtrip_preserves_audio_and_metadata() {
-        let Some(src) = fixture() else {
-            eprintln!("fixture missing — skipping");
-            return;
-        };
+    fn test_encode_small_roundtrip_is_byte_exact_for_metadata() {
         let dir = tempfile::tempdir().unwrap();
+        let src = small_flac(dir.path(), "src.flac", 2);
         let out = dir.path().join("out.flac");
         let progress = Arc::new(EncodeProgress::new());
-        let rt = tokio::runtime::Runtime::new().unwrap();
-
-        rt.block_on(encode_flac(
+        rt().block_on(encode_flac(
             &src,
             &out,
             EncodeOptions {
@@ -483,30 +526,126 @@ mod tests {
             None,
         ))
         .expect("encode");
-
         assert_eq!(progress.percent(), 100);
-        assert!(
-            progress.ratio() > 0.0 && progress.ratio() < 1.0,
-            "{}",
-            progress.ratio()
+
+        let src_hash = rt().block_on(hash_decoded_audio(&src)).unwrap();
+        let out_hash = rt().block_on(hash_decoded_audio(&out)).unwrap();
+        assert_eq!(src_hash, out_hash);
+        assert_eq!(rt().block_on(get_md5sum(&out)).unwrap(), out_hash);
+
+        let src_vc = read_vorbis_comments(&src).unwrap();
+        let mut out_vc = read_vorbis_comments(&out).unwrap();
+        assert_eq!(out_vc.len(), 1, "exactly one VORBIS_COMMENT in the output");
+        assert_eq!(
+            out_vc[0].vendor, src_vc[0].vendor,
+            "vendor string preserved"
         );
-
-        let src_hash = rt.block_on(hash_decoded_audio(&src)).unwrap();
-        let out_hash = rt.block_on(hash_decoded_audio(&out)).unwrap();
-        assert_eq!(src_hash, out_hash, "decoded audio must be bit-identical");
-        assert_eq!(rt.block_on(get_md5sum(&out)).unwrap(), out_hash);
-
-        // Metadata carried over in a single pass.
-        let src_blocks = clone_metadata_blocks(&src).unwrap();
-        let out_blocks = clone_metadata_blocks(&out).unwrap();
-        assert_eq!(src_blocks.len(), out_blocks.len());
-        assert!(out_blocks.find(FLAC__METADATA_TYPE_PICTURE).is_some());
+        // Only the marker entry was added, at the end.
+        let marker_entry = out_vc[0].entries.pop().unwrap();
+        assert!(marker_entry.starts_with(b"FLACCRUNCH_INFO="));
+        assert_eq!(out_vc[0].entries, src_vc[0].entries, "tags byte-identical");
         assert!(read_crunched_marker(&out).unwrap());
-        assert!(!read_crunched_marker(&src).unwrap());
 
-        // Output carries no PADDING at all.
-        let chain = crate::flac::metadata::MetadataChain::read(&out).unwrap();
-        let iter = chain.iter().unwrap();
-        assert!(iter.find(FLAC__METADATA_TYPE_PADDING).is_none());
+        let types = block_types(&out);
+        assert_eq!(types[0], FLAC__METADATA_TYPE_STREAMINFO);
+        assert!(types.contains(&FLAC__METADATA_TYPE_SEEKTABLE), "{types:?}");
+        assert_eq!(
+            types
+                .iter()
+                .filter(|&&t| t == FLAC__METADATA_TYPE_PICTURE)
+                .count(),
+            types.len()
+                - types
+                    .iter()
+                    .filter(|&&t| t != FLAC__METADATA_TYPE_PICTURE)
+                    .count()
+        );
+        assert!(!types.contains(&FLAC__METADATA_TYPE_PADDING));
+        // VORBIS_COMMENT sits before the pictures, as in the source.
+        let vc_pos = types
+            .iter()
+            .position(|&t| t == FLAC__METADATA_TYPE_VORBIS_COMMENT)
+            .unwrap();
+        let pic_pos = types
+            .iter()
+            .position(|&t| t == FLAC__METADATA_TYPE_PICTURE)
+            .unwrap();
+        assert!(vc_pos < pic_pos);
+
+        // Seek table is well-formed.
+        let chain = MetadataChain::read(&out).unwrap();
+        let it = chain.iter().unwrap();
+        let st = it.find(FLAC__METADATA_TYPE_SEEKTABLE).unwrap();
+        assert_ne!(unsafe { FLAC__metadata_object_seektable_is_legal(st) }, 0);
+    }
+
+    /// The regression that broke v1.2.0: tags libFLAC's encoder would reject
+    /// (non-UTF-8 value, name with a space) must be carried over verbatim.
+    #[test]
+    fn test_encode_tolerates_illegal_tags() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = small_flac(dir.path(), "src.flac", 1);
+        plant_illegal_comment(&src, b"ARTIST=\xff\xfe latin-1 \xe9");
+        plant_illegal_comment(&src, b"BAD NAME=value");
+        plant_illegal_comment(&src, b"noequalsign");
+        let src_vc = read_vorbis_comments(&src).unwrap();
+        assert!(src_vc[0]
+            .entries
+            .iter()
+            .any(|e| e.starts_with(b"ARTIST=\xff")));
+
+        let out = dir.path().join("out.flac");
+        rt().block_on(encode_flac(
+            &src,
+            &out,
+            EncodeOptions::default(),
+            None,
+            None,
+        ))
+        .expect("encode must succeed despite illegal tags");
+        let out_vc = read_vorbis_comments(&out).unwrap();
+        assert_eq!(out_vc, src_vc, "every tag byte must survive");
+        assert_eq!(
+            rt().block_on(hash_decoded_audio(&src)).unwrap(),
+            rt().block_on(hash_decoded_audio(&out)).unwrap()
+        );
+    }
+
+    /// Full-size fixture: the real cover art and tags survive the trip.
+    #[test]
+    fn test_encode_fixture_roundtrip_preserves_audio_and_metadata() {
+        let Some(src) = fixture() else {
+            eprintln!("fixture missing — skipping");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out.flac");
+        rt().block_on(encode_flac(
+            &src,
+            &out,
+            EncodeOptions::default(),
+            None,
+            None,
+        ))
+        .expect("encode");
+
+        assert_eq!(
+            rt().block_on(hash_decoded_audio(&src)).unwrap(),
+            rt().block_on(hash_decoded_audio(&out)).unwrap()
+        );
+        assert_eq!(
+            read_vorbis_comments(&src).unwrap(),
+            read_vorbis_comments(&out).unwrap()
+        );
+        let src_pics = block_types(&src)
+            .iter()
+            .filter(|&&t| t == FLAC__METADATA_TYPE_PICTURE)
+            .count();
+        let out_pics = block_types(&out)
+            .iter()
+            .filter(|&&t| t == FLAC__METADATA_TYPE_PICTURE)
+            .count();
+        assert_eq!(src_pics, out_pics);
+        assert!(crate::flac::verify::verify_metadata_equivalent(&src, &out, false).is_ok());
     }
 }

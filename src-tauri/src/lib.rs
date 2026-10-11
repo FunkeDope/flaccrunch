@@ -19,6 +19,9 @@ pub mod pipeline;
 pub mod state;
 pub mod util;
 
+#[cfg(test)]
+pub mod test_util;
+
 #[cfg(feature = "gui")]
 pub mod android_bridge;
 #[cfg(feature = "gui")]

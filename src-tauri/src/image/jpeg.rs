@@ -1,15 +1,12 @@
 //! Lossless JPEG optimization for embedded artwork.
 //!
-//! Two passes, both bit-exact for the decoded image:
-//!
-//! 1. **Segment stripping** — drop APP1–APP15 and COM segments (EXIF, XMP,
-//!    ICC, comments). Pure byte surgery; the entropy-coded data is untouched.
-//! 2. **Coefficient-level Huffman re-optimization** — the same transform as
-//!    `jpegtran -optimize`: libjpeg (mozjpeg) reads the quantized DCT
-//!    coefficients, builds optimal Huffman tables for this image and writes
-//!    the *same* coefficients back. Both a baseline and a progressive scan
-//!    layout are tried and the smaller one kept. No pixels are ever decoded
-//!    or re-quantized.
+//! The same transform as `jpegtran -optimize`: libjpeg (mozjpeg) reads the
+//! quantized DCT coefficients, builds optimal Huffman tables for this image
+//! and writes the *same* coefficients back. Both a baseline and a progressive
+//! scan layout are tried and the smaller one kept. No pixels are ever decoded
+//! or re-quantized, and every APP/COM segment (EXIF, XMP, ICC, comments…) is
+//! carried over verbatim, so the only bytes that change are the entropy-coded
+//! data and the Huffman tables.
 //!
 //! As a belt-and-braces check, the result is only accepted if it decodes
 //! (via zune-jpeg) to exactly the same pixels as the input.
@@ -19,80 +16,8 @@ use std::ffi::CStr;
 use std::os::raw::{c_int, c_ulong};
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
-// ─── Pass 1: Segment stripping ───────────────────────────────────────────────
-
-/// Losslessly strip non-essential APP markers from a JPEG.
-///
-/// Removes APP1 (EXIF/XMP), APP2 (ICC profile), APP3–APP15, COM.
-/// Keeps APP0 (JFIF) and all image-critical markers (SOF, DHT, DQT, SOS, RST, EOI).
-/// Returns `Some(bytes)` only if the stripped version is smaller.
-fn strip_jpeg_metadata(data: &[u8]) -> Option<Vec<u8>> {
-    if data.len() < 4 || data[0] != 0xFF || data[1] != 0xD8 {
-        return None;
-    }
-    let mut out: Vec<u8> = Vec::with_capacity(data.len());
-    let mut pos = 0usize;
-
-    while pos + 1 < data.len() {
-        if data[pos] != 0xFF {
-            return None;
-        }
-        let marker = data[pos + 1];
-        match marker {
-            0xD8 => {
-                out.push(0xFF);
-                out.push(0xD8);
-                pos += 2;
-                continue;
-            }
-            0xD9 => {
-                out.push(0xFF);
-                out.push(0xD9);
-                break;
-            }
-            0xD0..=0xD7 => {
-                out.push(0xFF);
-                out.push(marker);
-                pos += 2;
-                continue;
-            }
-            _ => {}
-        }
-        if pos + 4 > data.len() {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        }
-        let seg_len = ((data[pos + 2] as usize) << 8) | (data[pos + 3] as usize);
-        let seg_end = pos + 2 + seg_len;
-        if seg_end > data.len() {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        }
-        if marker == 0xDA {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        } // SOS → copy rest
-        let keep = match marker {
-            0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF // SOF
-            | 0xC4 | 0xDB | 0xDC | 0xDD | 0xDE | 0xDF               // DHT, DQT, misc
-            | 0xE0                                                     // APP0 (JFIF)
-            => true,
-            0xE1..=0xEF | 0xFE => false, // APP1-15 + COM — strip
-            _ => true,
-        };
-        if keep {
-            out.extend_from_slice(&data[pos..seg_end]);
-        }
-        pos = seg_end;
-    }
-    if out.len() < data.len() {
-        Some(out)
-    } else {
-        None
-    }
-}
-
-// ─── Pass 2: Coefficient-level Huffman re-optimization (mozjpeg) ─────────────
+const JPEG_APP0: c_int = 0xE0;
+const JPEG_COM: c_int = 0xFE;
 
 /// Payload carried through the unwind when libjpeg reports an error.
 struct JpegError(String);
@@ -151,8 +76,38 @@ impl Drop for Codecs {
     }
 }
 
+/// Copy every saved APP/COM segment from the decoder to the encoder, except
+/// the ones libjpeg regenerates itself (JFIF APP0 and Adobe APP14), exactly
+/// like jpegtran's `jcopy_markers_execute`.
+unsafe fn copy_markers(src: &jpeg_decompress_struct, dst: &mut jpeg_compress_struct) {
+    let mut marker = src.marker_list;
+    while !marker.is_null() {
+        let m = &*marker;
+        let data = if m.data.is_null() || m.data_length == 0 {
+            &[][..]
+        } else {
+            std::slice::from_raw_parts(m.data, m.data_length as usize)
+        };
+        let is_jfif = m.marker as c_int == JPEG_APP0
+            && dst.write_JFIF_header != 0
+            && data.len() >= 5
+            && &data[..5] == b"JFIF\0";
+        let is_adobe = m.marker as c_int == JPEG_APP0 + 14
+            && dst.write_Adobe_marker != 0
+            && data.len() >= 5
+            && &data[..5] == b"Adobe";
+        if !is_jfif && !is_adobe {
+            jpeg_write_marker(dst, m.marker as c_int, data.as_ptr(), data.len() as c_uint);
+        }
+        marker = m.next;
+    }
+}
+
+use std::os::raw::c_uint;
+
 /// Re-write `data` with optimal Huffman tables, keeping every DCT
-/// coefficient as-is. `progressive` selects the scan layout.
+/// coefficient and every metadata segment as-is. `progressive` selects the
+/// scan layout.
 fn transcode(data: &[u8], progressive: bool) -> Result<Vec<u8>, String> {
     // The error managers must outlive the codecs that point at them.
     let mut src_err = quiet_error_mgr();
@@ -180,6 +135,11 @@ fn transcode(data: &[u8], progressive: bool) -> Result<Vec<u8>, String> {
         } = &mut codecs;
 
         jpeg_mem_src(src, data.as_ptr(), data.len() as c_ulong);
+        // Keep every APPn and COM segment so they can be written back.
+        for n in 0..16 {
+            jpeg_save_markers(src, JPEG_APP0 + n, 0xFFFF);
+        }
+        jpeg_save_markers(src, JPEG_COM, 0xFFFF);
         jpeg_read_header(src, 1);
         let coefficients = jpeg_read_coefficients(src);
         if coefficients.is_null() {
@@ -188,8 +148,8 @@ fn transcode(data: &[u8], progressive: bool) -> Result<Vec<u8>, String> {
 
         jpeg_mem_dest(dst, out_buf, out_size);
         // Copies colour space, sampling factors, quantization tables, JFIF
-        // flags… and applies mozjpeg's defaults (progressive scan script,
-        // scan optimization). We then dial the scan layout explicitly.
+        // flags/density… and applies mozjpeg's defaults (progressive scan
+        // script, scan optimization). We then dial the scan layout explicitly.
         jpeg_copy_critical_parameters(src, dst);
         dst.optimize_coding = 1;
         if progressive {
@@ -202,6 +162,7 @@ fn transcode(data: &[u8], progressive: bool) -> Result<Vec<u8>, String> {
         }
 
         jpeg_write_coefficients(dst, coefficients);
+        copy_markers(src, dst);
         jpeg_finish_compress(dst);
         jpeg_finish_decompress(src);
 
@@ -222,7 +183,7 @@ fn transcode(data: &[u8], progressive: bool) -> Result<Vec<u8>, String> {
 
 /// Decode to RGB for the equality check. `None` if zune-jpeg can't decode
 /// (e.g. CMYK, 12-bit) — in which case we refuse to replace the picture.
-fn decode_pixels(data: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
+pub(crate) fn decode_pixels(data: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
     let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
@@ -232,9 +193,37 @@ fn decode_pixels(data: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
     Some((info.width as usize, info.height as usize, pixels))
 }
 
-/// Smallest of the baseline/progressive re-optimizations of `data`, verified
-/// to decode identically. `None` if nothing smaller (or verifiable) came out.
-fn optimize_jpeg_huffman(data: &[u8]) -> Option<Vec<u8>> {
+/// Every APPn/COM segment of a JPEG, in order, as (marker, payload).
+pub(crate) fn metadata_segments(data: &[u8]) -> Vec<(u8, Vec<u8>)> {
+    let mut out = Vec::new();
+    if data.len() < 4 || data[0] != 0xFF || data[1] != 0xD8 {
+        return out;
+    }
+    let mut pos = 2usize;
+    while pos + 4 <= data.len() && data[pos] == 0xFF {
+        let marker = data[pos + 1];
+        if matches!(marker, 0xD0..=0xD9) {
+            pos += 2;
+            continue;
+        }
+        let seg_len = ((data[pos + 2] as usize) << 8) | (data[pos + 3] as usize);
+        let seg_end = pos + 2 + seg_len;
+        if seg_end > data.len() || marker == 0xDA {
+            break;
+        }
+        if matches!(marker, 0xE0..=0xEF | 0xFE) {
+            out.push((marker, data[pos + 4..seg_end].to_vec()));
+        }
+        pos = seg_end;
+    }
+    out
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/// Optimize a JPEG in memory, losslessly. Returns `Some(bytes)` if a smaller,
+/// pixel-identical, metadata-identical encoding was found, `None` otherwise.
+pub fn optimize_jpeg(data: &[u8]) -> Option<Vec<u8>> {
     let candidates = [transcode(data, false), transcode(data, true)];
     let best = candidates
         .into_iter()
@@ -243,43 +232,33 @@ fn optimize_jpeg_huffman(data: &[u8]) -> Option<Vec<u8>> {
         .min_by_key(Vec::len)?;
 
     // Lossless by construction; verified anyway before touching the file.
-    let original = decode_pixels(data)?;
-    let rewritten = decode_pixels(&best)?;
-    (original == rewritten).then_some(best)
-}
-
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/// Optimize a JPEG in memory, losslessly. Returns `Some(bytes)` if the result
-/// is smaller than the input, `None` otherwise.
-pub fn optimize_jpeg(data: &[u8]) -> Option<Vec<u8>> {
-    let stripped = strip_jpeg_metadata(data);
-    let source = stripped.as_deref().unwrap_or(data);
-    match (stripped.as_ref(), optimize_jpeg_huffman(source)) {
-        (_, Some(reoptimized)) => Some(reoptimized),
-        (Some(_), None) => stripped,
-        (None, None) => None,
+    if decode_pixels(data)? != decode_pixels(&best)? {
+        return None;
     }
+    // JFIF APP0 is regenerated by libjpeg (same version/density, so normally
+    // identical); everything else must match byte for byte.
+    let non_jfif = |segs: Vec<(u8, Vec<u8>)>| -> Vec<(u8, Vec<u8>)> {
+        segs.into_iter()
+            .filter(|(m, d)| !(*m == 0xE0 && d.starts_with(b"JFIF\0")))
+            .collect()
+    };
+    if non_jfif(metadata_segments(data)) != non_jfif(metadata_segments(&best)) {
+        return None;
+    }
+    Some(best)
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn make_jpeg_with_exif() -> Vec<u8> {
-        vec![
-            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x00,
-            0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xE1, 0x00, 0x08, b'E', b'x', b'i', b'f',
-            0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0xAB, 0xCD,
-            0xFF, 0xD9,
-        ]
-    }
-
     /// A real 96×64 JPEG encoded with libjpeg's *default* (non-optimized)
-    /// Huffman tables, so there is something for pass 2 to gain.
-    fn make_unoptimized_jpeg() -> Vec<u8> {
+    /// Huffman tables, carrying an APP1 "Exif" blob, an APP2 ICC-ish blob and
+    /// a COM segment, so there is something for pass 2 to gain and markers to
+    /// preserve.
+    pub(crate) fn make_unoptimized_jpeg_with_markers() -> Vec<u8> {
         use jpeg_encoder::{ColorType, Encoder};
         let (w, h) = (96u16, 64u16);
         let mut pixels = Vec::with_capacity(w as usize * h as usize * 3);
@@ -295,47 +274,25 @@ mod tests {
         let mut out = Vec::new();
         let mut enc = Encoder::new(&mut out, 80);
         enc.set_optimized_huffman_tables(false);
+        enc.add_app_segment(1, b"Exif\0\0fake exif payload 1234")
+            .unwrap();
+        enc.add_app_segment(2, b"ICC_PROFILE\0\x01\x01not really a profile")
+            .unwrap();
+        enc.add_app_segment(13, b"Photoshop 3.0\0some 8BIM")
+            .unwrap();
         enc.encode(&pixels, w, h, ColorType::Rgb).expect("encode");
         out
     }
 
     #[test]
-    fn test_strip_removes_exif_keeps_app0() {
-        let jpeg = make_jpeg_with_exif();
-        let result = strip_jpeg_metadata(&jpeg).expect("should strip EXIF");
-        assert!(result.len() < jpeg.len());
-        assert!(
-            result.windows(2).any(|w| w == [0xFF, 0xE0]),
-            "APP0 must remain"
-        );
-        assert!(
-            !result.windows(2).any(|w| w == [0xFF, 0xE1]),
-            "APP1 must be gone"
-        );
-    }
-
-    #[test]
-    fn test_strip_invalid_returns_none() {
-        assert!(strip_jpeg_metadata(&[0x00, 0x01, 0x02]).is_none());
-        assert!(strip_jpeg_metadata(&[]).is_none());
-    }
-
-    #[test]
     fn test_transcode_rejects_garbage_without_crashing() {
         assert!(transcode(b"definitely not a jpeg", false).is_err());
-        assert!(
-            transcode(&make_jpeg_with_exif(), true).is_err(),
-            "truncated scan data"
-        );
-        // The strip-only fallback still applies to such inputs.
-        let jpeg = make_jpeg_with_exif();
-        let out = optimize_jpeg(&jpeg).expect("stripping still saves bytes");
-        assert_eq!(out, strip_jpeg_metadata(&jpeg).unwrap());
+        assert!(optimize_jpeg(b"\xFF\xD8\xFF\xD9").is_none());
     }
 
     #[test]
     fn test_huffman_reoptimization_is_smaller_and_pixel_identical() {
-        let jpeg = make_unoptimized_jpeg();
+        let jpeg = make_unoptimized_jpeg_with_markers();
         let out = optimize_jpeg(&jpeg).expect("non-optimized tables leave room to gain");
         assert!(out.len() < jpeg.len(), "{} vs {}", out.len(), jpeg.len());
         assert_eq!(decode_pixels(&jpeg).unwrap(), decode_pixels(&out).unwrap());
@@ -345,8 +302,28 @@ mod tests {
     }
 
     #[test]
+    fn test_every_metadata_segment_survives() {
+        let jpeg = make_unoptimized_jpeg_with_markers();
+        let before = metadata_segments(&jpeg);
+        let markers: Vec<u8> = before.iter().map(|(m, _)| *m).collect();
+        for m in [0xE1u8, 0xE2, 0xED] {
+            assert!(
+                markers.contains(&m),
+                "missing APP{}: {markers:x?}",
+                m - 0xE0
+            );
+        }
+        let out = optimize_jpeg(&jpeg).expect("optimizes");
+        let after = metadata_segments(&out);
+        assert_eq!(
+            before, after,
+            "all APP/COM segments byte-identical and in order"
+        );
+    }
+
+    #[test]
     fn test_both_scan_layouts_are_lossless() {
-        let jpeg = make_unoptimized_jpeg();
+        let jpeg = make_unoptimized_jpeg_with_markers();
         let reference = decode_pixels(&jpeg).unwrap();
         for progressive in [false, true] {
             let out = transcode(&jpeg, progressive).expect("transcode");
@@ -388,6 +365,7 @@ mod tests {
                         Some(out) => {
                             assert!(out.len() < orig);
                             assert_eq!(decode_pixels(data).unwrap(), decode_pixels(&out).unwrap());
+                            assert_eq!(metadata_segments(data), metadata_segments(&out));
                             assert!(optimize_jpeg(&out).is_none(), "second pass must be a no-op");
                             println!(
                                 "[JPEG] original={orig} optimized={} saved={} ({:.1}%)",

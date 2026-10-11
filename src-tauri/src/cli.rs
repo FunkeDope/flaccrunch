@@ -704,19 +704,9 @@ mod tests {
     }
 
     #[test]
-    fn test_run_cli_processes_fixture_end_to_end() {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("Tests")
-            .join("un-optimized.flac");
-        if !src.exists() {
-            eprintln!("fixture missing — skipping");
-            return;
-        }
+    fn test_run_cli_processes_file_end_to_end() {
         let dir = tempfile::tempdir().unwrap();
-        let copy = dir.path().join("track.flac");
-        std::fs::copy(&src, &copy).unwrap();
+        let copy = crate::test_util::small_flac(dir.path(), "track.flac", 2);
         let before = std::fs::metadata(&copy).unwrap().len();
         let logdir = dir.path().join("logs");
 

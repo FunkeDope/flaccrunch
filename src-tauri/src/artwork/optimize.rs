@@ -173,16 +173,24 @@ mod tests {
     }
 
     #[test]
-    fn test_optimize_picture_bytes_strips_jpeg_exif() {
-        // JPEG with an APP1 segment: pass 1 removes it, so the result shrinks.
+    fn test_optimize_picture_bytes_never_strips_metadata() {
+        // A JPEG whose only "content" is an APP1 segment and a stub scan:
+        // nothing lossless can be gained, so it must be left untouched.
         let jpeg = vec![
             0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x00,
             0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xE1, 0x00, 0x08, b'E', b'x', b'i', b'f',
             0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0xAB, 0xCD,
             0xFF, 0xD9,
         ];
-        let out = optimize_picture_bytes(&jpeg).expect("should shrink");
-        assert!(out.len() < jpeg.len());
+        assert!(optimize_picture_bytes(&jpeg).is_none());
+
+        // A real JPEG with markers shrinks and keeps every segment.
+        let real = crate::image::jpeg::tests::make_unoptimized_jpeg_with_markers();
+        let out = optimize_picture_bytes(&real).expect("shrinks");
+        assert_eq!(
+            crate::image::jpeg::metadata_segments(&real),
+            crate::image::jpeg::metadata_segments(&out)
+        );
     }
 
     #[test]

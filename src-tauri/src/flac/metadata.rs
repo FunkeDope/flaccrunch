@@ -203,6 +203,112 @@ impl MetadataBlocks {
     pub fn as_mut_ptr(&mut self) -> *mut *mut FLAC__StreamMetadata {
         self.ptrs.as_mut_ptr()
     }
+
+    /// Give up ownership of every block (the caller must free them or hand
+    /// them to a chain).
+    pub fn take_all(&mut self) -> Vec<*mut FLAC__StreamMetadata> {
+        std::mem::take(&mut self.ptrs)
+    }
+}
+
+/// Splice cloned source blocks into a freshly encoded file.
+///
+/// Uses the chain API, which — unlike attaching blocks to the encoder — does
+/// not validate comment names, UTF-8, picture headers or the number of
+/// VORBIS_COMMENT blocks, so whatever a tagger wrote is carried over
+/// byte-for-byte. The encoder's own (empty) VORBIS_COMMENT is replaced in
+/// place by the source's first VORBIS_COMMENT, vendor string included; every
+/// other block is appended in source order.
+pub fn apply_metadata_blocks(dst: &Path, mut blocks: MetadataBlocks) -> Result<(), String> {
+    let chain = MetadataChain::read(dst)?;
+    let iter = chain.iter()?;
+    let mut pending = std::collections::VecDeque::from(blocks.take_all());
+
+    // Frees whatever has not been handed to the chain yet.
+    let free_rest = |pending: &mut std::collections::VecDeque<*mut FLAC__StreamMetadata>| {
+        for b in pending.drain(..) {
+            unsafe { FLAC__metadata_object_delete(b) }
+        }
+    };
+
+    let first_vc = pending
+        .iter()
+        .position(|&b| unsafe { (*b).type_ } == FLAC__METADATA_TYPE_VORBIS_COMMENT);
+    if let Some(idx) = first_vc {
+        let src_vc = pending.remove(idx).expect("index from position");
+        iter.reset();
+        let inserted = match iter.find(FLAC__METADATA_TYPE_VORBIS_COMMENT) {
+            // delete_block parks the iterator on the previous block, so the
+            // insert lands exactly where the encoder's block was.
+            Some(_) => iter.delete_block(false) && unsafe { iter.insert_block_after(src_vc) },
+            None => {
+                iter.reset();
+                unsafe { iter.insert_block_after(src_vc) }
+            }
+        };
+        if !inserted {
+            unsafe { FLAC__metadata_object_delete(src_vc) };
+            free_rest(&mut pending);
+            return Err("Failed to insert VORBIS_COMMENT block".to_string());
+        }
+    }
+
+    iter.seek_end();
+    while let Some(block) = pending.pop_front() {
+        if !unsafe { iter.insert_block_after(block) } {
+            unsafe { FLAC__metadata_object_delete(block) };
+            free_rest(&mut pending);
+            return Err("Failed to insert metadata block".to_string());
+        }
+    }
+    drop(iter);
+
+    chain.sort_padding();
+    chain.write(false)
+}
+
+/// Raw view of every block of a given type, in file order. Used by the
+/// post-encode equivalence check and by tests.
+pub fn read_vorbis_comments(path: &Path) -> Result<Vec<VorbisCommentBlock>, String> {
+    let chain = MetadataChain::read(path)?;
+    let iter = chain.iter()?;
+    let mut out = Vec::new();
+    loop {
+        if iter.block_type() == FLAC__METADATA_TYPE_VORBIS_COMMENT {
+            out.push(unsafe { VorbisCommentBlock::from_raw(iter.block()) });
+        }
+        if !iter.next() {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Byte-exact copy of a VORBIS_COMMENT block's contents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VorbisCommentBlock {
+    pub vendor: Vec<u8>,
+    pub entries: Vec<Vec<u8>>,
+}
+
+impl VorbisCommentBlock {
+    /// # Safety
+    /// `block` must be a valid VORBIS_COMMENT metadata object.
+    pub unsafe fn from_raw(block: *mut FLAC__StreamMetadata) -> Self {
+        let vc = &(*block).data.vorbis_comment;
+        let entry_bytes = |e: &FLAC__StreamMetadata_VorbisComment_Entry| -> Vec<u8> {
+            if e.entry.is_null() || e.length == 0 {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(e.entry, e.length as usize).to_vec()
+            }
+        };
+        let vendor = entry_bytes(&vc.vendor_string);
+        let entries = (0..vc.num_comments as usize)
+            .map(|i| entry_bytes(&*vc.comments.add(i)))
+            .collect();
+        Self { vendor, entries }
+    }
 }
 
 impl Default for MetadataBlocks {

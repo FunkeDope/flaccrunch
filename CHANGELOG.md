@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.3.0 — 2026-10-11
+
+Strictly lossless, and proven per file. Supersedes v1.2.0, which rejected files whose tags libFLAC's encoder considered malformed.
+
+### Fixed
+
+- **v1.2.0 regression: `FLAC__STREAM_ENCODER_INIT_STATUS_INVALID_METADATA` on whole albums.** v1.2.0 handed tags and pictures to the libFLAC encoder at init; libFLAC validates them (UTF-8 values, tag-name characters, one VORBIS_COMMENT block, picture header fields) and refused anything a careless tagger had written. Tags, pictures, application and cuesheet blocks are again cloned into the output with the metadata-chain API, which validates nothing and keeps every byte. A test plants deliberately illegal tags and checks they survive.
+- The encoder-attached path also overwrote the Vorbis **vendor string**; it is now preserved verbatim. The encoder's own empty VORBIS_COMMENT is replaced in place, so the output has exactly one comment block in the same position as the source.
+
+### Changed: everything non-audio is byte-identical and verified
+
+- **JPEG artwork keeps all metadata.** The APP/COM-segment stripping (EXIF, XMP, ICC, comments) that both the original app and v1.2.0 performed is gone: only the Huffman coding is rebuilt (mozjpeg, `jpegtran -optimize`), and every segment is copied over. ICC profiles are therefore never discarded.
+- **PNG artwork keeps its stored pixel values.** oxipng's colour-type / bit-depth / palette reductions and alpha optimization are disabled (they are visually lossless but change stored values); all ancillary chunks are kept. Only the compression changes.
+- **Post-encode equivalence check** (`FAIL|METADATA` on mismatch, original kept): tags byte-for-byte incl. vendor string, pictures (header fields, decoded pixels, embedded segments), application and cuesheet blocks, stream parameters, ID3v2 prefix. Audio is covered by the existing PRE/OUT MD5 check.
+- **SEEKTABLE is regenerated** (one point per 10 s, as the `flac` tool does) instead of silently dropped as since v1.0.0. The source table cannot be copied because its byte offsets refer to the old encoding.
+- PADDING is still removed (zero bytes, no information).
+- **A re-encode that is not smaller no longer replaces the original.** Sources encoded non-subset (LPC order up to 32, e.g. `flac --lax -l 32` or ffmpeg's top level) beat subset `-8 -e -p`; such files are reported `MATCH|KEPT` with the size difference and left byte-for-byte untouched.
+
+### Tests
+
+- A synthetic FLAC fixture (tags, vendor string, PNG + JPEG pictures with metadata segments, application block, padding) generated in milliseconds now drives the pipeline, CLI, verifier and encoder tests; the 45 MB fixture is used by one roundtrip test only. The core suite runs in under two minutes.
+
+---
+
 ## v1.2.0 — 2026-10-11
 
 Full repass and refactor of the Rust core and the React hooks.
