@@ -6,11 +6,13 @@ interface SettingsModalProps {
   cpuCount: number;
   defaultLogFolder: string;
   appVersion?: string;
+  settingsPath?: string;
+  saveError?: string | null;
   onUpdate: (partial: Partial<AppSettings>) => void;
   onClose: () => void;
 }
 
-export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion, onUpdate, onClose }: SettingsModalProps) {
+export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion, settingsPath, saveError, onUpdate, onClose }: SettingsModalProps) {
   const threadCount = settings.threadCount ?? Math.max(1, cpuCount - 1);
 
   return (
@@ -140,6 +142,15 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
               </div>
             </div>
           </fieldset>
+          {saveError ? (
+            <div className="error-banner">{saveError}</div>
+          ) : (
+            settingsPath && (
+              <div className="settings-hint settings-path" title={settingsPath}>
+                Settings are saved automatically to {settingsPath}
+              </div>
+            )
+          )}
           <div className="field-row settings-actions">
             <button className="default" onClick={onClose}>OK</button>
             <button onClick={onClose}>Cancel</button>

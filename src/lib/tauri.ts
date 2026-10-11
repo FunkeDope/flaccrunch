@@ -44,6 +44,10 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   return invoke<void>("save_settings", { settings });
 }
 
+export async function getSettingsPath(): Promise<string> {
+  return invoke<string>("get_settings_path");
+}
+
 export async function getCpuCount(): Promise<number> {
   return invoke<number>("get_cpu_count");
 }

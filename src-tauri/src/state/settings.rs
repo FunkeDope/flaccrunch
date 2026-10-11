@@ -39,6 +39,30 @@ impl Default for AppSettings {
     }
 }
 
+impl AppSettings {
+    /// File name of the persisted settings inside the app config directory.
+    pub const FILE_NAME: &'static str = "settings.json";
+
+    /// Load settings from `path`. Missing file or unreadable JSON → `None`
+    /// (callers fall back to defaults); unknown/missing fields are tolerated.
+    pub fn load(path: &std::path::Path) -> Option<Self> {
+        let text = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    /// Persist to `path` (creating parent directories), atomically via a
+    /// temp file so a crash mid-write cannot leave a truncated file.
+    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, path)
+    }
+}
+
 /// Settings used for a specific processing run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,6 +114,29 @@ mod tests {
         assert_eq!(back.max_retries, 5);
         assert!(back.verbose_logging);
         assert!(back.mark_as_crunched);
+    }
+
+    #[test]
+    fn test_settings_save_and_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join(AppSettings::FILE_NAME);
+        assert!(AppSettings::load(&path).is_none(), "missing file → None");
+
+        let s = AppSettings {
+            thread_count: Some(3),
+            max_compression: true,
+            mark_as_crunched: true,
+            ..AppSettings::default()
+        };
+        s.save(&path).unwrap();
+        let back = AppSettings::load(&path).unwrap();
+        assert_eq!(back.thread_count, Some(3));
+        assert!(back.max_compression);
+        assert!(back.mark_as_crunched);
+        assert!(!path.with_extension("json.tmp").exists());
+
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(AppSettings::load(&path).is_none(), "corrupt file → None");
     }
 
     #[test]

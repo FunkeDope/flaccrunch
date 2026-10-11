@@ -23,6 +23,8 @@ export function useSettings() {
   const [cpuCount, setCpuCount] = useState(1);
   const [defaultLogFolder, setDefaultLogFolder] = useState("");
   const [appVersion, setAppVersion] = useState("");
+  const [settingsPath, setSettingsPath] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     api.getCpuCount().then(setCpuCount).catch(() => {});
@@ -31,6 +33,7 @@ export function useSettings() {
       setSettings({ ...defaultSettings, ...s });
     }).catch(() => {});
     getVersion().then(setAppVersion).catch(() => {});
+    api.getSettingsPath().then(setSettingsPath).catch(() => {});
   }, []);
 
   const updateSettings = useCallback(async (partial: Partial<AppSettings>) => {
@@ -39,8 +42,10 @@ export function useSettings() {
     setSettings(updated);
     try {
       await api.saveSettings(updated);
+      setSaveError(null);
     } catch (e) {
       console.error("Failed to save settings:", e);
+      setSaveError(String(e));
     }
   }, []);
 
@@ -54,5 +59,5 @@ export function useSettings() {
     maxCompression: settings.maxCompression,
   };
 
-  return { settings, cpuCount, defaultLogFolder, appVersion, processingSettings, updateSettings };
+  return { settings, cpuCount, defaultLogFolder, appVersion, settingsPath, saveError, processingSettings, updateSettings };
 }

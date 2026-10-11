@@ -23,6 +23,7 @@ vi.mock("../lib/tauri", () => ({
     verboseLogging: false,
   }),
   saveSettings: vi.fn().mockResolvedValue(undefined),
+  getSettingsPath: vi.fn().mockResolvedValue("C:/cfg/settings.json"),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));

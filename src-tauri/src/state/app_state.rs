@@ -11,6 +11,8 @@ pub struct AppState {
     pub startup_paths: RwLock<Vec<String>>,
     /// Android only: maps cache file path → original content URI for write-back after processing.
     pub content_uri_map: RwLock<HashMap<String, String>>,
+    /// Where settings are persisted (set once the Tauri path resolver is up).
+    pub settings_path: RwLock<Option<std::path::PathBuf>>,
 }
 
 impl Default for AppState {
@@ -26,6 +28,7 @@ impl AppState {
             settings: RwLock::new(AppSettings::default()),
             startup_paths: RwLock::new(paths),
             content_uri_map: RwLock::new(HashMap::new()),
+            settings_path: RwLock::new(None),
         }
     }
 

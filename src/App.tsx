@@ -149,6 +149,8 @@ function App() {
           cpuCount={settings.cpuCount}
           defaultLogFolder={settings.defaultLogFolder}
           appVersion={settings.appVersion}
+          settingsPath={settings.settingsPath}
+          saveError={settings.saveError}
           onUpdate={settings.updateSettings}
           onClose={() => setSettingsOpen(false)}
         />

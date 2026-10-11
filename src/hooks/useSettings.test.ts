@@ -7,6 +7,7 @@ vi.mock("../lib/tauri", () => ({
   getDefaultLogFolder: vi.fn(),
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
+  getSettingsPath: vi.fn().mockResolvedValue("C:/cfg/settings.json"),
 }));
 
 import * as api from "../lib/tauri";

@@ -180,7 +180,7 @@ Opens as a modal on "Show Full Log". Displays the full EFC summary log text. Max
 - Permission errors from scan reported inline
 
 ### Settings
-Thread count, log output folder, max retries per file, verbose logging toggle.
+Thread count, maximum compression (non-subset), log output folder, max retries per file, verbose logging, crunched-marker options. Saved automatically to `settings.json` in the app config directory (`%APPDATA%\com.flaccrunch.app\` on Windows, `~/.config/com.flaccrunch.app/` on Linux, `~/Library/Application Support/com.flaccrunch.app/` on macOS) and restored at startup; the dialog shows the path.
 
 ---
 

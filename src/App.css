@@ -811,3 +811,10 @@ body {
     flex: 1;
   }
 }
+
+.settings-path {
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.2 — 2026-10-11
+
+### New: settings are remembered
+
+- Thread count, retries, logging, marker, skip and **Maximum compression** are saved automatically to `settings.json` in the app's config directory (`%APPDATA%\com.flaccrunch.app\` on Windows, `~/.config/com.flaccrunch.app/` on Linux, `~/Library/Application Support/com.flaccrunch.app/` on macOS, app data on Android) and loaded at startup. Previously every launch reset them. The Settings dialog shows where the file lives; a write failure is shown there too and the session still uses the new values.
+
+---
+
 ## v1.3.1 — 2026-10-11
 
 ### New: maximum (non-subset) compression mode

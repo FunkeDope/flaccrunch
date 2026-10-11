@@ -10,6 +10,22 @@ pub fn run_with_startup_paths(startup_paths: Vec<String>) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(AppState::with_startup_paths(startup_paths))
+        .setup(|app| {
+            // Persisted settings: <app config dir>/settings.json.
+            use tauri::Manager;
+            if let Ok(dir) = app.path().app_config_dir() {
+                let path = dir.join(crate::state::settings::AppSettings::FILE_NAME);
+                let state = app.state::<AppState>();
+                if let Some(saved) = crate::state::settings::AppSettings::load(&path) {
+                    *state.settings.write().unwrap_or_else(|e| e.into_inner()) = saved;
+                }
+                *state
+                    .settings_path
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(path);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::processing::start_processing,
             commands::processing::cancel_processing,
@@ -21,6 +37,7 @@ pub fn run_with_startup_paths(startup_paths: Vec<String>) {
             commands::folders::get_startup_paths,
             commands::settings::get_settings,
             commands::settings::save_settings,
+            commands::settings::get_settings_path,
             commands::settings::get_cpu_count,
             commands::settings::get_default_log_folder,
             commands::logs::get_efc_log,
