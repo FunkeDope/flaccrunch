@@ -50,7 +50,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          prefix-key: v2-rust-core-${{ matrix.os }}
+          prefix-key: v3-rust-core-${{ matrix.os }}
 
       - name: Clippy (core)
         working-directory: src-tauri
@@ -91,7 +91,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          prefix-key: v2-rust-gui
+          prefix-key: v3-rust-gui
 
       - name: Install Linux dependencies
         run: |

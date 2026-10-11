@@ -1,24 +1,23 @@
-# Build optimizations for maximum CPU performance on native hardware.
-# These flags affect both the Rust compiler and the C compiler used to build
-# libflac-sys (via the `cmake` crate), enabling SIMD/AVX2 vectorization that
-# matches what a pre-built flac.exe typically has.
+# CPU baseline for the Rust side.
 #
-# NOTE: `target-cpu=native` means a binary built on one machine may use
-# instructions (e.g. AVX-512) that an older CPU lacks and crash with SIGILL.
-# That is fine for local builds; for binaries published from CI consider
-# `target-cpu=x86-64-v3` instead.
+# This used to be `target-cpu=native`. That is fine for a one-off local build,
+# but binaries built in CI are cached between runners with different CPUs and
+# published to users, and `native` made them crash with SIGILL (illegal
+# instruction) whenever the consuming machine lacked an instruction set the
+# building machine had. x86-64-v3 (AVX2/FMA/BMI, every x86 CPU since ~2013)
+# is the portable choice and matches the /arch:AVX2 already required of
+# libFLAC below. Apple Silicon needs no override: its default target is M1+.
+#
+# For a personal max-performance build: `RUSTFLAGS="-C target-cpu=native" cargo build --release`.
 
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=x86-64-v3"]
 
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=native"]
-
-[target.aarch64-apple-darwin]
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=x86-64-v3"]
 
 [target.x86_64-apple-darwin]
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=x86-64-v3"]
 
 [env]
 # CFLAGS is picked up by the `cc` crate (used by libflac-sys's build script)

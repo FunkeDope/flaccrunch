@@ -254,7 +254,7 @@ impl RunState {
                 before_size: event.before_size,
                 after_size: event.after_size,
             });
-            top.sort_by(|a, b| b.saved_bytes.cmp(&a.saved_bytes));
+            top.sort_by_key(|entry| std::cmp::Reverse(entry.saved_bytes));
             top.truncate(3);
         }
     }

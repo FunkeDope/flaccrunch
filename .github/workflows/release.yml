@@ -46,14 +46,10 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          prefix-key: v2-rust-cli-${{ matrix.target }}
+          prefix-key: v3-rust-cli-${{ matrix.target }}
 
       - name: Build CLI
         working-directory: src-tauri
-        # Portable baseline instead of target-cpu=native so the published
-        # binary runs on any x86-64-v3 (2013+) CPU.
-        env:
-          CARGO_BUILD_RUSTFLAGS: ${{ startsWith(matrix.target, 'x86_64') && '-C target-cpu=x86-64-v3' || '' }}
         run: cargo build --release --no-default-features --bin flaccrunch-cli --target ${{ matrix.target }}
 
       - name: Smoke test
@@ -110,6 +106,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          prefix-key: v3-rust-desktop
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -212,6 +209,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          prefix-key: v3-rust-desktop
 
       - name: Install Node.js
         uses: actions/setup-node@v4
