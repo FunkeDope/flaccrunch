@@ -17,7 +17,7 @@ import { LogViewerModal } from "../components/processing/LogViewerModal";
 import { SettingsModal } from "../components/settings/SettingsPanel";
 import { ThemeMenu } from "../components/layout/ThemeMenu";
 import { useTheme } from "../hooks/useTheme";
-import { isThemeId, applyTheme, storeTheme } from "../themes";
+import { DEFAULT_THEME, isThemeId, type ThemeId } from "../themes";
 import type { AppSettings } from "../types/settings";
 import type { FileEvent, RunCounters, WorkerStatus } from "../types/processing";
 
@@ -26,11 +26,7 @@ type View = "idle" | "running" | "complete" | "settings" | "log";
 const params = new URLSearchParams(window.location.search);
 const initialView = (params.get("view") as View | null) ?? "idle";
 const queryTheme = params.get("theme");
-if (isThemeId(queryTheme)) {
-  // The query parameter wins over the stored theme so each URL is deterministic.
-  storeTheme(queryTheme);
-  applyTheme(queryTheme);
-}
+const initialTheme: ThemeId = isThemeId(queryTheme) ? queryTheme : DEFAULT_THEME;
 
 const FOLDERS = [
   "D:\\Music\\Boards of Canada\\Music Has the Right to Children",
@@ -105,7 +101,6 @@ function counters(complete: boolean): RunCounters {
 }
 
 function Preview() {
-  const display = useTheme();
   const [view, setView] = useState<View>(initialView);
   const [folders, setFolders] = useState<string[]>(FOLDERS);
   const [settings, setSettings] = useState<AppSettings>({
@@ -116,7 +111,11 @@ function Preview() {
     markAsCrunched: false,
     skipCrunched: false,
     maxCompression: true,
+    theme: initialTheme,
+    showThemeQuickSwitch: true,
   });
+  const themeInfo = useTheme(settings.theme);
+  const setTheme = (id: ThemeId) => setSettings((s) => ({ ...s, theme: id }));
 
   const running = view === "running";
   const complete = view === "complete";
@@ -131,7 +130,7 @@ function Preview() {
         onAddFolder={() => setFolders((f) => [...f, `D:\\Music\\New Folder ${f.length + 1}`])}
         onAddFiles={() => setFolders((f) => [...f, `D:\\Music\\loose-${f.length + 1}.flac`])}
         showQueueActions={!active}
-        theme={display.theme}
+        theme={settings.theme}
       >
         <div className="app-stack">
           {!active && (
@@ -167,10 +166,10 @@ function Preview() {
             error={null}
           />
           {active && (
-            <ProcessingDashboard workers={workers(running)} recentEvents={events(complete ? 148 : 61)} runFolders={FOLDERS} workerLayout={display.info.workers} />
+            <ProcessingDashboard workers={workers(running)} recentEvents={events(complete ? 148 : 61)} runFolders={FOLDERS} workerLayout={themeInfo.workers} />
           )}
         </div>
-        <ThemeMenu theme={display.theme} onSelect={display.setTheme} />
+        {settings.showThemeQuickSwitch && <ThemeMenu theme={settings.theme} onSelect={setTheme} />}
         {view === "settings" && (
           <SettingsModal
             settings={settings}
@@ -179,8 +178,8 @@ function Preview() {
             appVersion="1.3.2"
             settingsPath="C:\\Users\\MediaPC\\AppData\\Roaming\\com.flaccrunch.app\\settings.json"
             onUpdate={(p) => setSettings((s) => ({ ...s, ...p }))}
-            theme={display.theme}
-            onThemeChange={display.setTheme}
+            theme={settings.theme}
+            onThemeChange={setTheme}
             onClose={() => setView("idle")}
           />
         )}

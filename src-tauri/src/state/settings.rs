@@ -23,6 +23,16 @@ pub struct AppSettings {
     /// Smaller files; some older hardware players cannot play non-subset FLAC.
     #[serde(default)]
     pub max_compression: bool,
+    /// Display theme id (GUI only; validated by the frontend).
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    /// Show the floating quick-switch theme menu (GUI only).
+    #[serde(default)]
+    pub show_theme_quick_switch: bool,
+}
+
+fn default_theme() -> String {
+    "basic-dark".to_string()
 }
 
 impl Default for AppSettings {
@@ -35,6 +45,8 @@ impl Default for AppSettings {
             mark_as_crunched: false,
             skip_crunched: false,
             max_compression: false,
+            theme: default_theme(),
+            show_theme_quick_switch: false,
         }
     }
 }
@@ -92,6 +104,8 @@ mod tests {
         assert!(!s.verbose_logging);
         assert!(!s.mark_as_crunched);
         assert!(!s.skip_crunched);
+        assert_eq!(s.theme, "basic-dark");
+        assert!(!s.show_theme_quick_switch);
     }
 
     #[test]
@@ -104,6 +118,8 @@ mod tests {
             mark_as_crunched: true,
             skip_crunched: false,
             max_compression: true,
+            theme: "winamp".to_string(),
+            show_theme_quick_switch: true,
         };
         let json = serde_json::to_string(&original).expect("serialize");
         assert!(json.contains("threadCount"), "{json}");
@@ -114,6 +130,8 @@ mod tests {
         assert_eq!(back.max_retries, 5);
         assert!(back.verbose_logging);
         assert!(back.mark_as_crunched);
+        assert_eq!(back.theme, "winamp");
+        assert!(back.show_theme_quick_switch);
     }
 
     #[test]
@@ -145,5 +163,6 @@ mod tests {
         let s: AppSettings = serde_json::from_str(json).unwrap();
         assert_eq!(s.max_retries, 2);
         assert!(!s.verbose_logging);
+        assert_eq!(s.theme, "basic-dark", "missing theme → default");
     }
 }

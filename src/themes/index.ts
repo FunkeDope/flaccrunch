@@ -1,7 +1,7 @@
 /**
  * Display themes. The active theme is stored as `data-theme` on <html>; each
  * theme is a CSS file under src/themes that scopes itself to that attribute.
- * Keep the id list in sync with the inline scripts in index.html/preview.html.
+' * The chosen theme is saved with the other app settings (settings.json).
  */
 export type ThemeId =
   | "win95"
@@ -46,8 +46,6 @@ export const THEMES: readonly ThemeInfo[] = [
 
 export const DEFAULT_THEME: ThemeId = "basic-dark";
 
-const STORAGE_KEY = "flaccrunch.theme";
-
 export function isThemeId(value: unknown): value is ThemeId {
   return typeof value === "string" && THEMES.some((t) => t.id === value);
 }
@@ -59,23 +57,6 @@ export function themeInfo(id: ThemeId): ThemeInfo {
 export function nextTheme(id: ThemeId): ThemeId {
   const index = THEMES.findIndex((t) => t.id === id);
   return THEMES[(index + 1) % THEMES.length].id;
-}
-
-export function readStoredTheme(): ThemeId {
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    return isThemeId(stored) ? stored : DEFAULT_THEME;
-  } catch {
-    return DEFAULT_THEME;
-  }
-}
-
-export function storeTheme(id: ThemeId): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, id);
-  } catch {
-    // Storage can be unavailable (private mode, quota); the theme still applies for this session.
-  }
 }
 
 export function applyTheme(id: ThemeId): void {

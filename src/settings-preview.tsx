@@ -7,7 +7,7 @@ import type { AppSettings } from "./types/settings";
 function Preview() {
   const [settings, setSettings] = useState<AppSettings>({
     threadCount: 19, logFolder: null, maxRetries: 3, verboseLogging: true,
-    markAsCrunched: false, skipCrunched: false, maxCompression: true,
+    markAsCrunched: false, skipCrunched: false, maxCompression: true, theme: "basic-dark", showThemeQuickSwitch: false,
   });
   return (
     <SettingsModal

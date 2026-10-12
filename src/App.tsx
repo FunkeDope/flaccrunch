@@ -10,6 +10,7 @@ import { ThemeMenu } from "./components/layout/ThemeMenu";
 import { useProcessing } from "./hooks/useProcessing";
 import { useSettings } from "./hooks/useSettings";
 import { useTheme } from "./hooks/useTheme";
+import type { ThemeId } from "./themes";
 
 function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -20,7 +21,9 @@ function App() {
   const logRequestIdRef = useRef(0);
   const processing = useProcessing();
   const settings = useSettings();
-  const display = useTheme();
+  const theme = settings.settings.theme;
+  const themeInfo = useTheme(theme);
+  const setTheme = (id: ThemeId) => settings.updateSettings({ theme: id });
 
   const isActive = processing.status !== "idle";
   const queueCount = processing.folders.length;
@@ -97,7 +100,7 @@ function App() {
       onAddFolder={processing.addFolder}
       onAddFiles={processing.addFiles}
       showQueueActions={!isActive}
-      theme={display.theme}
+      theme={theme}
     >
       <div className="app-stack">
         {!isActive && (
@@ -143,12 +146,12 @@ function App() {
             workers={processing.workers}
             recentEvents={processing.recentEvents}
             runFolders={processing.runFolders}
-            workerLayout={display.info.workers}
+            workerLayout={themeInfo.workers}
           />
         )}
       </div>
 
-      <ThemeMenu theme={display.theme} onSelect={display.setTheme} />
+      {settings.settings.showThemeQuickSwitch && <ThemeMenu theme={theme} onSelect={setTheme} />}
 
       {settingsOpen && (
         <SettingsModal
@@ -159,8 +162,8 @@ function App() {
           settingsPath={settings.settingsPath}
           saveError={settings.saveError}
           onUpdate={settings.updateSettings}
-          theme={display.theme}
-          onThemeChange={display.setTheme}
+          theme={theme}
+          onThemeChange={setTheme}
           onClose={() => setSettingsOpen(false)}
         />
       )}

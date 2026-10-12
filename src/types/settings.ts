@@ -1,3 +1,5 @@
+import type { ThemeId } from "../themes";
+
 export interface AppSettings {
   threadCount: number | null;
   logFolder: string | null;
@@ -7,4 +9,8 @@ export interface AppSettings {
   skipCrunched: boolean;
   /** Non-subset maximum compression (smaller; some old hardware players reject it). */
   maxCompression: boolean;
+  /** Display theme. */
+  theme: ThemeId;
+  /** Show the floating quick-switch theme menu. */
+  showThemeQuickSwitch: boolean;
 }

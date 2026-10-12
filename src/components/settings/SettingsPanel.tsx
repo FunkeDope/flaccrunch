@@ -52,8 +52,22 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
                     ))}
                   </select>
                   <div className="settings-hint">
-                    {THEMES.find((t) => t.id === theme)?.tagline} The floating theme button
-                    (or Ctrl+Shift+T) switches these from anywhere.
+                    {THEMES.find((t) => t.id === theme)?.tagline}
+                  </div>
+                </div>
+                <div className="settings-group settings-check">
+                  <div className="field-row">
+                    <input
+                      id="show-quick-switch"
+                      type="checkbox"
+                      checked={settings.showThemeQuickSwitch}
+                      onChange={() => onUpdate({ showThemeQuickSwitch: !settings.showThemeQuickSwitch })}
+                    />
+                    <label htmlFor="show-quick-switch">Show quick switch menu</label>
+                  </div>
+                  <div className="settings-hint">
+                    A small button in the bottom-left corner (or Ctrl+Shift+T) that switches
+                    themes from anywhere.
                   </div>
                 </div>
               </fieldset>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import * as api from "../lib/tauri";
 import type { AppSettings } from "../types/settings";
+import { DEFAULT_THEME, isThemeId } from "../themes";
 import type { ProcessingSettings } from "../types/processing";
 
 const defaultSettings: AppSettings = {
@@ -12,6 +13,8 @@ const defaultSettings: AppSettings = {
   markAsCrunched: false,
   skipCrunched: false,
   maxCompression: false,
+  theme: DEFAULT_THEME,
+  showThemeQuickSwitch: false,
 };
 
 export function useSettings() {
@@ -30,7 +33,9 @@ export function useSettings() {
     api.getCpuCount().then(setCpuCount).catch(() => {});
     api.getDefaultLogFolder().then(setDefaultLogFolder).catch(() => {});
     api.getSettings().then((s) => {
-      setSettings({ ...defaultSettings, ...s });
+      const loaded = { ...defaultSettings, ...s };
+      if (!isThemeId(loaded.theme)) loaded.theme = DEFAULT_THEME;
+      setSettings(loaded);
     }).catch(() => {});
     getVersion().then(setAppVersion).catch(() => {});
     api.getSettingsPath().then(setSettingsPath).catch(() => {});
