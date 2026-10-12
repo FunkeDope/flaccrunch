@@ -6,11 +6,14 @@
  * cyan #35f0ff, magenta #ff2bd6, green #39ff14 (ok), red #ff3b3b (fail),
  * orange #ff9f1c (warn).
  *
- * Layout differs from base: the title bar is gone (the marquee replaces it),
- * the toolbar is a HUD strip of blinking START buttons with HI-SCORE at the
- * right, the run status is a score bar with a giant centred percentage over a
- * segmented energy bar, workers are one horizontal row of player cards, and
- * the files table is the high score table.
+ * Layout differs from base: the title bar is the cabinet marquee (a backlit
+ * header with the title centred in Impact, round arcade push buttons for the
+ * window controls), the menu bar sits on the bezel strip under it and its
+ * menus are an operator test menu (black, white items, blinking yellow cursor
+ * on the selected line). The window body is the CRT. The run status is a score
+ * bar with a giant centred percentage over a segmented energy bar, workers are
+ * one horizontal row of player cards, and the files table is the high score
+ * table.
  */
 
 [data-theme="arcade"] {
@@ -101,50 +104,43 @@
 [data-theme="arcade"] .app-shell {
   display: flex;
   flex-direction: column;
-  padding: 18px 22px 26px;
+  padding: 0;
   background: #0b0b0f;
 }
 
-/* Lit marquee above the screen. */
-[data-theme="arcade"] .app-shell::before {
-  content: "FLACCRUNCH";
-  display: block;
-  flex-shrink: 0;
-  margin: 0 0 14px;
-  padding: 9px 0 8px;
-  text-align: center;
-  font: 400 22px / 1 Impact, "Arial Black", "Arial Narrow", sans-serif;
-  letter-spacing: 0.25em;
-  text-indent: 0.25em;
-  color: #ffe600;
-  text-shadow: 3px 3px 0 #ff2bd6, 0 0 18px rgba(255, 230, 0, 0.45);
-  background: #1a1030;
-  border-bottom: 2px solid #ff2bd6;
-  border-radius: 6px 6px 0 0;
-  box-shadow: 0 0 26px rgba(255, 43, 214, 0.25);
-}
-
-/* The CRT. */
+/* The cabinet: black bezel holding the marquee, the menu strip and the CRT. */
 [data-theme="arcade"] .app-window {
   flex: 1;
   min-height: 0;
   height: auto;
   border: none;
+  border-radius: 0;
+  background: #0b0b0f;
+  box-shadow: none;
+  text-shadow: 0 0 4px currentColor;
+}
+
+/* The CRT. */
+[data-theme="arcade"] .app-window-body {
+  position: relative;
+  gap: 8px;
+  margin: 12px 22px 24px;
+  padding: 12px 14px 14px;
   border-radius: 18px;
   background: #06060a;
   box-shadow:
     inset 0 0 60px rgba(0, 0, 0, 0.9),
     0 0 0 6px #22222a,
     0 0 0 8px #0b0b0f;
-  text-shadow: 0 0 4px currentColor;
 }
 
-/* Scanlines over the whole tube, never over the bezel. */
-[data-theme="arcade"] .app-window::after {
+/* Scanlines over the whole tube, never over the bezel. Under the title bar
+   (z-index 50) so the open menus stay crisp. */
+[data-theme="arcade"] .app-window-body::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 50;
+  z-index: 40;
   border-radius: inherit;
   background: repeating-linear-gradient(
     0deg,
@@ -152,15 +148,6 @@
     transparent 1px 3px
   );
   pointer-events: none;
-}
-
-[data-theme="arcade"] .app-title-bar {
-  display: none;
-}
-
-[data-theme="arcade"] .app-window-body {
-  gap: 8px;
-  padding: 12px 14px 14px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,7 +170,6 @@
 [data-theme="arcade"] .queue-section-label,
 [data-theme="arcade"] .events-table-footer,
 [data-theme="arcade"] .title-bar-text,
-[data-theme="arcade"] .app-toolbar-brand,
 [data-theme="arcade"] .start-screen-copy,
 [data-theme="arcade"] .error-banner,
 [data-theme="arcade"] .settings-version {
@@ -365,47 +351,385 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Top HUD strip: 1P START / 2P START buttons left, HI-SCORE right      */
+/* Title bar: the cabinet marquee + the menu strip on the bezel         */
 /* ------------------------------------------------------------------ */
 
-[data-theme="arcade"] .app-toolbar {
-  flex-shrink: 0;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 2px solid #35f0ff;
-  background: #0a0a12;
-}
-
-[data-theme="arcade"] .app-toolbar-actions {
-  gap: 8px;
-}
-
-[data-theme="arcade"] .app-toolbar button {
-  min-height: 28px;
-  padding: 2px 14px;
-  border-color: #ffe600;
+/* Row 1 is the backlit marquee (title centred, push buttons right), row 2
+   the menu strip on the black bezel between the marquee and the screen. */
+[data-theme="arcade"] .app-title-bar {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: 46px auto;
+  grid-template-areas:
+    "icon drag controls"
+    "menu menu menu";
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: #0b0b0f;
   color: #ffe600;
-  animation: arcade-border-blink 1.6s steps(1) infinite;
 }
 
-[data-theme="arcade"] .app-toolbar button:hover:not(:disabled) {
-  border-color: #ffe600;
-  background: #ffe600;
+[data-platform="mac"][data-theme="arcade"] .app-title-bar {
+  padding-left: 78px;
+}
+
+/* The lit marquee panel behind row 1. */
+[data-theme="arcade"] .app-title-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: -1;
+  box-sizing: border-box;
+  height: 46px;
+  background: #1a1030;
+  border-bottom: 2px solid #ff2bd6;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 0 26px rgba(255, 43, 214, 0.25);
+  pointer-events: none;
+}
+
+[data-theme="arcade"] .app-title-icon {
+  margin: 0 10px 2px 12px;
+  width: 20px;
+  height: 20px;
+  filter: drop-shadow(0 0 4px rgba(255, 230, 0, 0.45));
+}
+
+/* Marquee lettering, centred across the whole cabinet. It shares row 1 with
+   the drag handle (which sits on top of it and keeps dragging). */
+[data-theme="arcade"] .app-title-bar > .title-bar-text {
+  grid-area: 1 / 1 / 2 / -1;
+  justify-self: center;
+  max-width: calc(100% - 260px);
+  margin: 0 0 2px;
+  padding-left: 0.25em;
+  font: 400 22px / 1 Impact, "Arial Black", "Arial Narrow", sans-serif;
+  letter-spacing: 0.25em;
+  color: #ffe600;
+  text-shadow: 3px 3px 0 #ff2bd6, 0 0 18px rgba(255, 230, 0, 0.45);
+}
+
+[data-theme="arcade"] .app-title-drag {
+  grid-row: 1;
+  min-height: 44px;
+}
+
+/* Window controls: round coin-op push buttons (yellow, green, red) with
+   dark glyphs on the plunger. */
+[data-theme="arcade"] .app-window-controls {
+  grid-row: 1;
+  align-self: center;
+  gap: 2px;
+  margin: 0 8px 2px 0;
+}
+
+[data-theme="arcade"] .app-window-controls button {
+  --arc-btn: #ffe600;
+  --arc-btn-rim: #8a7c00;
+  position: relative;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 40% 34%, rgba(255, 255, 255, 0.7) 0 1.5px, transparent 4px),
+    radial-gradient(circle, var(--arc-btn) 0 9px, var(--arc-btn-rim) 9.5px 10.5px, #22222a 11px 12.5px, transparent 13px);
   color: #06060a;
+  text-shadow: none;
+  filter: drop-shadow(0 0 3px var(--arc-btn));
   animation: none;
 }
 
-[data-theme="arcade"] .app-toolbar-right {
-  gap: 10px;
+[data-theme="arcade"] .app-window-controls button[aria-label="Maximize"],
+[data-theme="arcade"] .app-window-controls button[aria-label="Restore"] {
+  --arc-btn: #39ff14;
+  --arc-btn-rim: #1d7f0a;
 }
 
-[data-theme="arcade"] .app-toolbar-brand {
+[data-theme="arcade"] .app-window-controls button[aria-label="Close"] {
+  --arc-btn: #ff3b3b;
+  --arc-btn-rim: #8a1c1c;
+}
+
+[data-theme="arcade"] .app-window-controls button:hover:not(:disabled),
+[data-theme="arcade"] .app-window-controls button[aria-label="Close"]:hover:not(:disabled) {
+  border: none;
+  background:
+    radial-gradient(circle at 40% 34%, rgba(255, 255, 255, 0.85) 0 1.5px, transparent 4px),
+    radial-gradient(circle, #ffffff 0 2px, var(--arc-btn) 6px 9px, var(--arc-btn-rim) 9.5px 10.5px, #22222a 11px 12.5px, transparent 13px);
+  color: #06060a;
+  filter: drop-shadow(0 0 7px var(--arc-btn));
+}
+
+/* Pressed: the plunger sinks into the rim. */
+[data-theme="arcade"] .app-window-controls button:active:not(:disabled),
+[data-theme="arcade"] .app-window-controls button[aria-label="Close"]:active:not(:disabled) {
+  background: radial-gradient(circle, var(--arc-btn) 0 8px, var(--arc-btn-rim) 8.5px 10.5px, #22222a 11px 12.5px, transparent 13px);
+  filter: drop-shadow(0 0 2px var(--arc-btn)) brightness(0.85);
+}
+
+[data-theme="arcade"] .app-window-controls button:focus-visible {
+  outline: 2px solid #ffe600;
+  outline-offset: -2px;
+}
+
+/* Glyphs: 2px lines so they read on the small plunger. */
+[data-theme="arcade"] .app-window-controls button[aria-label]::before,
+[data-theme="arcade"] .app-window-controls button[aria-label]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  box-sizing: border-box;
+  font-size: 0;
+  background: none;
+  border: none;
+  transform: none;
+}
+
+[data-theme="arcade"] .app-window-controls button[aria-label="Minimize"]::before {
+  width: 8px;
+  height: 2px;
+  margin: -1px 0 0 -4px;
+  background: currentColor;
+}
+
+[data-theme="arcade"] .app-window-controls button[aria-label="Maximize"]::before {
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border: 2px solid currentColor;
+}
+
+[data-theme="arcade"] .app-window-controls button[aria-label="Restore"]::before {
+  width: 7px;
+  height: 7px;
+  margin: -2px 0 0 -5px;
+  border: 2px solid currentColor;
+}
+
+[data-theme="arcade"] .app-window-controls button[aria-label="Restore"]::after {
+  width: 7px;
+  height: 7px;
+  margin: -5px 0 0 -2px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+}
+
+[data-theme="arcade"] .app-window-controls button[aria-label="Close"]::before,
+[data-theme="arcade"] .app-window-controls button[aria-label="Close"]::after {
+  width: 11px;
+  height: 2px;
+  margin: -1px 0 0 -5.5px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+
+[data-theme="arcade"] .app-window-controls button[aria-label="Close"]::after {
+  transform: rotate(-45deg);
+}
+
+/* Menu strip on the bezel: white labels, the hot one turns yellow and gets
+   the test-menu cursor, the open one is a lit yellow block. */
+[data-theme="arcade"] .app-title-bar > .menubar {
+  align-self: stretch;
+  padding: 4px 16px 0;
+}
+
+[data-theme="arcade"] .menubar .menubar-item {
+  min-width: 0;
+  min-height: 22px;
+  margin: 0;
+  padding: 0 10px 0 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #f4f4f4;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  line-height: 22px;
+  text-shadow: 0 0 4px currentColor;
+  animation: none;
+}
+
+[data-theme="arcade"] .menubar .menubar-item::before {
+  content: "\25ba";
+  margin-right: 4px;
+  font-size: 10px;
+  visibility: hidden;
+}
+
+[data-theme="arcade"] .menubar .menubar-item:hover:not(:disabled),
+[data-theme="arcade"] .menubar .menubar-item.is-focused:not(:disabled) {
+  border: none;
+  background: transparent;
+  color: #ffe600;
+  text-shadow: 0 0 6px rgba(255, 230, 0, 0.6);
+}
+
+[data-theme="arcade"] .menubar .menubar-item:hover:not(:disabled)::before,
+[data-theme="arcade"] .menubar .menubar-item.is-focused::before {
+  visibility: visible;
+}
+
+[data-theme="arcade"] .menubar .menubar-item.is-open:not(:disabled) {
+  border: none;
+  background: #ffe600;
+  color: #06060a;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] .menubar .menubar-item.is-open::before {
+  visibility: visible;
+  animation: arcade-blink 0.8s steps(1) infinite;
+}
+
+[data-theme="arcade"] .menubar .menubar-item:active:not(:disabled) {
+  filter: none;
+}
+
+[data-theme="arcade"] .menubar .menubar-item:focus-visible {
+  outline: none;
+}
+
+/* Menus: an operator test menu. Black screen, cyan frame, white items; the
+   selected line turns yellow with a blinking cursor, ON marks are green. */
+[data-theme="arcade"] .menubar .menu {
+  min-width: 250px;
+  padding: 6px 0;
+  border: 2px solid #35f0ff;
+  border-radius: 0;
+  background: #000000;
+  color: #f4f4f4;
+  box-shadow: 4px 4px 0 #000000, 0 0 14px rgba(53, 240, 255, 0.25);
+  font-size: 12px;
+}
+
+[data-theme="arcade"] .menubar .menu-submenu {
+  top: -8px;
+}
+
+[data-theme="arcade"] .menubar .menu-item {
+  grid-template-columns: 18px 16px minmax(0, 1fr) auto 16px;
+  min-width: 0;
+  min-height: 22px;
+  padding: 0 6px 0 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #f4f4f4;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 4px currentColor;
+  animation: none;
+}
+
+/* Cursor column. */
+[data-theme="arcade"] .menubar .menu-item::before {
+  content: "";
+  color: #ffe600;
+  font-size: 10px;
+  text-align: center;
+}
+
+[data-theme="arcade"] .menubar .menu-item:hover:not(:disabled),
+[data-theme="arcade"] .menubar .menu-item.is-active:not(:disabled) {
+  border: none;
+  background: transparent;
+  color: #ffe600;
+  text-shadow: 0 0 6px rgba(255, 230, 0, 0.6);
+}
+
+[data-theme="arcade"] .menubar .menu-item:hover:not(:disabled)::before,
+[data-theme="arcade"] .menubar .menu-item.is-active:not(:disabled)::before {
+  content: "\25ba";
+  animation: arcade-blink 0.8s steps(1) infinite;
+}
+
+[data-theme="arcade"] .menubar .menu-item:active:not(:disabled) {
+  filter: none;
+}
+
+[data-theme="arcade"] .menubar .menu-item:focus-visible {
+  outline: none;
+}
+
+[data-theme="arcade"] .menubar .menu-item:disabled {
+  opacity: 1;
+  border: none;
+  background: transparent;
+  color: #4a4a5a;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] .menubar .menu-check {
+  color: #39ff14;
+  text-shadow: 0 0 4px rgba(57, 255, 20, 0.6);
+}
+
+[data-theme="arcade"] .menubar .menu-item:disabled .menu-check {
+  color: inherit;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] .menubar .menu-shortcut {
+  padding-left: 24px;
+  color: #1fb6c4;
+  opacity: 1;
+  letter-spacing: 0.04em;
+}
+
+[data-theme="arcade"] .menubar .menu-item:disabled .menu-shortcut {
+  color: inherit;
+}
+
+[data-theme="arcade"] .menubar .menu-arrow {
+  color: #ff2bd6;
+}
+
+[data-theme="arcade"] .menubar .menu-separator {
+  height: 0;
+  margin: 5px 12px;
+  border-top: 2px dotted #1b7f88;
+  background: none;
+}
+
+/* Narrow windows: one overflow button, groups headed like test-menu pages. */
+[data-theme="arcade"] .menubar .menubar-overflow {
+  min-width: 32px;
+  padding: 0 8px;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+[data-theme="arcade"] .menubar .menubar-overflow::before {
+  display: none;
+}
+
+[data-theme="arcade"] .menubar .menubar-menu.is-open > .menubar-overflow:not(:disabled) {
+  background: #ffe600;
+  color: #06060a;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] .menubar .menu-group-label {
+  padding: 8px 12px 3px;
   font-size: 11px;
   font-weight: 400;
-  letter-spacing: 0.22em;
-  color: #ffe600;
-  text-shadow: 1px 1px 0 #ff2bd6, 0 0 6px rgba(255, 230, 0, 0.5);
+  letter-spacing: 0.2em;
+  color: #ff2bd6;
+  opacity: 1;
+  text-shadow: 0 0 4px currentColor;
+}
+
+[data-theme="arcade"] .menubar .menu-group-label:first-child {
+  padding-top: 2px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -944,6 +1268,55 @@
   padding: 12px;
 }
 
+/* About: the attract-mode title card. */
+[data-theme="arcade"] .about-head {
+  gap: 14px;
+}
+
+[data-theme="arcade"] .about-icon {
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 8px rgba(255, 230, 0, 0.35));
+}
+
+[data-theme="arcade"] .about-name {
+  font: 400 30px / 1 Impact, "Arial Black", "Arial Narrow", sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #ffe600;
+  text-shadow: 3px 3px 0 #ff2bd6, 0 0 14px rgba(255, 230, 0, 0.45);
+}
+
+[data-theme="arcade"] .about-version {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #35f0ff;
+}
+
+[data-theme="arcade"] .about-detail {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #9a9aa8;
+}
+
+[data-theme="arcade"] .about-text {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #f4f4f4;
+}
+
+[data-theme="arcade"] .about-text::after {
+  content: "INSERT COIN";
+  display: block;
+  margin-top: 12px;
+  text-align: center;
+  letter-spacing: 0.25em;
+  color: #ffe600;
+  animation: arcade-blink 1s steps(1) infinite;
+}
+
 [data-theme="arcade"] .settings-section {
   border-color: #35f0ff;
 }
@@ -994,18 +1367,9 @@
 /* ------------------------------------------------------------------ */
 
 @media (max-width: 640px) {
-  [data-theme="arcade"] .app-shell {
+  [data-theme="arcade"] .app-window-body {
+    margin: 8px 8px 10px;
     padding: 8px;
-  }
-
-  [data-theme="arcade"] .app-shell::before {
-    margin-bottom: 8px;
-    padding: 6px 0 5px;
-    font-size: 16px;
-    text-shadow: 2px 2px 0 #ff2bd6;
-  }
-
-  [data-theme="arcade"] .app-window {
     border-radius: 10px;
     box-shadow:
       inset 0 0 40px rgba(0, 0, 0, 0.9),
@@ -1013,16 +1377,22 @@
       0 0 0 5px #0b0b0f;
   }
 
-  [data-theme="arcade"] .app-window-body {
-    padding: 8px;
+  [data-theme="arcade"] .app-title-bar {
+    grid-template-rows: 38px auto;
   }
 
-  [data-theme="arcade"] .app-toolbar {
-    padding: 4px 6px;
+  [data-theme="arcade"] .app-title-bar::before {
+    height: 38px;
   }
 
-  [data-theme="arcade"] .app-toolbar button {
-    padding: 2px 8px;
+  [data-theme="arcade"] .app-title-bar > .title-bar-text {
+    font-size: 16px;
+    letter-spacing: 0.18em;
+    text-shadow: 2px 2px 0 #ff2bd6;
+  }
+
+  [data-theme="arcade"] .app-title-bar > .menubar {
+    padding: 2px 4px;
   }
 
   [data-theme="arcade"] .run-status-main {
@@ -1062,5 +1432,40 @@
   [data-theme="arcade"] .start-next-button {
     min-width: 0;
     font-size: 18px;
+  }
+}
+
+/* The menu bar collapses to one button at this width (MenuBar.tsx): the
+   marquee becomes a single row, title left, the button before the controls. */
+@media (max-width: 600px) {
+  [data-theme="arcade"] .app-title-bar {
+    grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto auto;
+    grid-template-rows: 38px;
+    grid-template-areas: "icon title drag menu controls";
+  }
+
+  [data-theme="arcade"] .app-title-bar > .title-bar-text {
+    grid-area: title;
+    justify-self: start;
+    max-width: none;
+    padding-left: 0;
+  }
+
+  [data-theme="arcade"] .app-title-icon {
+    margin-left: 10px;
+  }
+
+  [data-theme="arcade"] .app-title-bar > .menubar {
+    align-self: center;
+    padding: 0 4px 2px;
+  }
+
+  [data-theme="arcade"] .app-title-bar > .menubar .menubar-overflow {
+    color: #ffe600;
+  }
+
+  [data-theme="arcade"] .app-window-controls button {
+    width: 30px;
+    min-width: 30px;
   }
 }

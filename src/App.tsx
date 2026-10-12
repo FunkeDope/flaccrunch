@@ -1,16 +1,20 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { AppShell } from "./components/layout/AppShell";
+import { AboutModal } from "./components/layout/AboutModal";
+import { buildMenus } from "./components/layout/appMenus";
 import { FolderSelector } from "./components/folders/FolderSelector";
 import { ProcessingDashboard } from "./components/processing/ProcessingDashboard";
 import { RunStatusBar } from "./components/processing/RunStatusBar";
 import { LogViewerModal } from "./components/processing/LogViewerModal";
 import { SettingsModal } from "./components/settings/SettingsPanel";
-import { ThemeMenu } from "./components/layout/ThemeMenu";
 import { useProcessing } from "./hooks/useProcessing";
 import { useSettings } from "./hooks/useSettings";
 import { useTheme } from "./hooks/useTheme";
-import type { ThemeId } from "./themes";
+import { nextTheme, type ThemeId } from "./themes";
+import * as api from "./lib/tauri";
+import { isAndroid } from "./lib/android";
+import { drawWindowControls } from "./lib/platform";
 
 function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -19,6 +23,8 @@ function App() {
   const [logViewerText, setLogViewerText] = useState("");
   const [logViewerError, setLogViewerError] = useState<string | null>(null);
   const logRequestIdRef = useRef(0);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [libflacVersion, setLibflacVersion] = useState("");
   const processing = useProcessing();
   const settings = useSettings();
   const theme = settings.settings.theme;
@@ -27,6 +33,12 @@ function App() {
 
   const isActive = processing.status !== "idle";
   const queueCount = processing.folders.length;
+  const canStart = processing.folders.length > 0 && processing.status === "idle";
+  const title = settings.appVersion ? `FlacCrunch v${settings.appVersion}` : "FlacCrunch";
+
+  useEffect(() => {
+    if (aboutOpen && !libflacVersion) api.getLibflacVersion().then(setLibflacVersion).catch(() => {});
+  }, [aboutOpen, libflacVersion]);
 
   useEffect(() => {
     if (settings.appVersion) {
@@ -94,12 +106,39 @@ function App() {
     setLogViewerLoading(false);
   }
 
+  const openExternal = (target: api.ExternalTarget) => {
+    api.openExternal(target).catch((e) => console.error(e));
+  };
+
+  const menus = buildMenus({
+    status: processing.status,
+    canStart,
+    desktop: !isAndroid,
+    settings: settings.settings,
+    onUpdate: settings.updateSettings,
+    onAddFolder: processing.addFolder,
+    onAddFiles: processing.addFiles,
+    onStart: () => processing.startRun(settings.processingSettings),
+    onCancel: processing.cancelRun,
+    onNewRun: processing.resetRun,
+    onShowLog: handleShowFullLog,
+    onExportLog: processing.exportLog,
+    onPreferences: () => setSettingsOpen(true),
+    onTheme: setTheme,
+    onNextTheme: () => setTheme(nextTheme(theme)),
+    onAbout: () => setAboutOpen(true),
+    onOpen: openExternal,
+    onReload: () => window.location.reload(),
+    onToggleDevtools: () => api.toggleDevtools().catch(() => {}),
+    onExit: () => getCurrentWebviewWindow().close().catch(() => {}),
+  });
+
   return (
     <AppShell
-      onSettingsClick={() => setSettingsOpen(true)}
-      onAddFolder={processing.addFolder}
-      onAddFiles={processing.addFiles}
-      showQueueActions={!isActive}
+      title={title}
+      menus={menus}
+      windowControls={drawWindowControls}
+      busy={isActive}
       theme={theme}
     >
       <div className="app-stack">
@@ -135,7 +174,7 @@ function App() {
           onRemoveFolder={processing.removeFolder}
           onStart={() => processing.startRun(settings.processingSettings)}
           onTestStorage={processing.testStorage}
-          canStart={processing.folders.length > 0 && processing.status === "idle"}
+          canStart={canStart}
           status={processing.status}
           error={processing.error}
           isDragOver={processing.isDragOver}
@@ -151,7 +190,14 @@ function App() {
         )}
       </div>
 
-      {settings.settings.showThemeQuickSwitch && <ThemeMenu theme={theme} onSelect={setTheme} />}
+      {aboutOpen && (
+        <AboutModal
+          appVersion={settings.appVersion}
+          libflacVersion={libflacVersion}
+          onOpen={isAndroid ? undefined : openExternal}
+          onClose={() => setAboutOpen(false)}
+        />
+      )}
 
       {settingsOpen && (
         <SettingsModal

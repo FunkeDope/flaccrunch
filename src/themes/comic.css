@@ -4,11 +4,12 @@
  * speech-bubble status window with a POW! percentage burst, workers drawn as
  * comic panels and the file list as a newsprint table.
  *
- * Layout differs from base: the title bar is a tall yellow title block, the
- * toolbar is a caption-box strip framed by an ink rule, the run status is a
- * speech bubble with a tail, workers are a responsive panel grid with hard
- * shadows, and the idle view is two dashed panels over a lined notebook list
- * with a rotated red burst for Start.
+ * Layout differs from base: the title bar is a comic-cover masthead (corner
+ * box with the icon, outlined logo lettering on Ben-Day yellow, an issue-number
+ * box, inked caption buttons) over a paper strip of yellow narration-box menu
+ * titles; the run status is a speech bubble with a tail, workers are a
+ * responsive panel grid with hard shadows, and the idle view is two dashed
+ * panels over a lined notebook list with a rotated red burst for Start.
  */
 
 [data-theme="comic"] {
@@ -108,20 +109,46 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Title block: yellow band, skewed white title with red drop shadow    */
+/* Masthead: a comic cover's logo band. Row 1 is Ben-Day yellow with    */
+/* the outlined logo lettering, an issue-number box and inked caption   */
+/* buttons; row 2 is a paper strip of yellow narration-box menu titles. */
+/* The icon sits in a white corner box spanning both rows.              */
 /* ------------------------------------------------------------------ */
 
 [data-theme="comic"] .app-title-bar {
-  min-height: 54px;
-  padding: 0 20px;
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "icon title drag issue controls"
+    "icon menu menu menu menu";
+  min-height: 0;
+  padding: 0;
   border-bottom: 4px solid var(--comic-ink);
-  background: var(--comic-yellow);
+  background:
+    radial-gradient(circle, rgba(228, 50, 43, 0.3) 1.1px, transparent 1.6px) 0 0 / 6px 6px,
+    var(--comic-yellow);
+  color: var(--comic-ink);
 }
 
-[data-theme="comic"] .app-title-bar .title-bar-text {
-  display: inline-block;
+/* Corner box: the icon in a white inked square, like the cover's corner box. */
+[data-theme="comic"] .app-title-icon {
+  align-self: stretch;
+  box-sizing: content-box;
+  width: 34px;
+  height: auto;
+  margin: 0;
+  padding: 0 10px;
+  border-right: 4px solid var(--comic-ink);
+  background: var(--comic-halftone), #ffffff;
+  object-fit: contain;
+}
+
+/* Logo lettering: white Impact caps, ink outline, red drop, a slight lean.
+   The padding keeps the outline and drop inside the title's clip box. */
+[data-theme="comic"] .app-title-bar > .title-bar-text {
+  margin: 0;
+  padding: 6px 12px 8px 14px;
   font-family: var(--comic-display);
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 400;
   line-height: 1;
   letter-spacing: 0.04em;
@@ -129,27 +156,299 @@
   color: #ffffff;
   -webkit-text-stroke: 2px var(--comic-ink);
   paint-order: stroke fill;
-  text-shadow: 4px 4px 0 var(--comic-red);
-  transform: skew(-4deg);
+  text-shadow: 3px 3px 0 var(--comic-red);
+  transform: skew(-6deg);
 }
 
-/* Issue-number stamp, the way the cover price sat in the corner. */
+[data-theme="comic"] .app-title-drag {
+  min-height: 46px;
+}
+
+/* Issue-number box: a small white inked box, tilted like a cover stamp. */
 [data-theme="comic"] .app-title-bar::after {
   content: "No.1";
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 38px;
-  height: 38px;
+  grid-area: issue;
+  align-self: center;
+  justify-self: center;
+  margin: 0 14px 0 6px;
+  padding: 3px 7px 2px;
   border: 3px solid var(--comic-ink);
-  border-radius: 50%;
   background: #ffffff;
   font-family: var(--comic-display);
-  font-size: 12px;
-  letter-spacing: 0.02em;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.04em;
   color: var(--comic-ink);
-  transform: rotate(8deg);
+  box-shadow: 2px 2px 0 var(--comic-ink);
+  transform: rotate(6deg);
+  pointer-events: none;
+}
+
+/* Caption buttons: small inked boxes with thick drawn glyphs. */
+[data-theme="comic"] .app-window-controls {
+  align-self: center;
+  gap: 7px;
+  padding: 0 12px 0 0;
+}
+
+[data-theme="comic"] .app-window-controls button {
+  width: 30px;
+  min-width: 30px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 3px solid var(--comic-ink);
+  background: #ffffff;
+  color: var(--comic-ink);
+  box-shadow: 2px 2px 0 var(--comic-ink);
+}
+
+[data-theme="comic"] .app-window-controls button:hover:not(:disabled) {
+  border: 3px solid var(--comic-ink);
+  background: var(--comic-cyan);
+  color: var(--comic-ink);
+}
+
+[data-theme="comic"] .app-window-controls button[aria-label="Close"] {
+  background: var(--comic-red);
+  color: #ffffff;
+}
+
+[data-theme="comic"] .app-window-controls button[aria-label="Close"]:hover:not(:disabled) {
+  background: #f0453e;
+  color: #ffffff;
+}
+
+[data-theme="comic"] .app-window-controls button:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+[data-theme="comic"] .app-window-controls button[aria-label="Minimize"]::before {
+  width: 12px;
+  height: 3px;
+  margin: 3px 0 0 -6px;
+}
+
+[data-theme="comic"] .app-window-controls button[aria-label="Maximize"]::before {
+  width: 12px;
+  height: 11px;
+  margin: -5px 0 0 -6px;
+  border: 2px solid currentColor;
+  border-top-width: 4px;
+}
+
+[data-theme="comic"] .app-window-controls button[aria-label="Restore"]::before {
+  width: 9px;
+  height: 9px;
+  margin: -2px 0 0 -6px;
+  border: 2px solid currentColor;
+}
+
+[data-theme="comic"] .app-window-controls button[aria-label="Restore"]::after {
+  width: 9px;
+  height: 9px;
+  margin: -6px 0 0 -2px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+}
+
+[data-theme="comic"] .app-window-controls button[aria-label="Close"]::before,
+[data-theme="comic"] .app-window-controls button[aria-label="Close"]::after {
+  width: 14px;
+  height: 3px;
+  margin: -1px 0 0 -7px;
+}
+
+/* Menu bar: a paper strip under an ink rule, menu titles as narration boxes. */
+[data-theme="comic"] .app-title-bar > .menubar {
+  gap: 8px;
+  padding: 6px 12px 8px 10px;
+  border-top: 3px solid var(--comic-ink);
+  background: var(--comic-halftone), var(--comic-paper);
+}
+
+[data-theme="comic"] .menubar .menubar-item {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 3px 10px 2px;
+  border: 2px solid var(--comic-ink);
+  border-radius: 0;
+  background: var(--comic-yellow);
+  color: var(--comic-ink);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: 2px 2px 0 var(--comic-ink);
+}
+
+[data-theme="comic"] .menubar .menubar-item:hover:not(:disabled),
+[data-theme="comic"] .menubar .menubar-item.is-focused:not(:disabled) {
+  border: 2px solid var(--comic-ink);
+  background: #ffe24d;
+  box-shadow: 3px 3px 0 var(--comic-ink);
+  transform: translate(-1px, -1px);
+}
+
+/* Open: the box is pressed onto the page and goes red, like a SFX panel. */
+[data-theme="comic"] .menubar .menubar-item.is-open:not(:disabled),
+[data-theme="comic"] .menubar .menubar-item:active:not(:disabled) {
+  border: 2px solid var(--comic-ink);
+  background: var(--comic-red);
+  color: #ffffff;
+  box-shadow: none;
+  transform: translate(2px, 2px);
+}
+
+[data-theme="comic"] .menubar .menubar-item:focus-visible {
+  outline: 2px dashed var(--comic-magenta);
+  outline-offset: 3px;
+}
+
+/* Dropdowns: a white panel with a thick ink border and a hard offset shadow. */
+[data-theme="comic"] .menu {
+  min-width: 230px;
+  margin-top: 6px;
+  padding: 4px;
+  border: 3px solid var(--comic-ink);
+  border-radius: 0;
+  background: #ffffff;
+  color: var(--comic-ink);
+  box-shadow: 5px 5px 0 var(--comic-ink);
+}
+
+[data-theme="comic"] .menu .menu-submenu {
+  top: -7px;
+  left: calc(100% + 2px);
+  margin-top: 0;
+}
+
+[data-theme="comic"] .menu .menu-submenu.is-flipped {
+  left: auto;
+  right: calc(100% + 2px);
+}
+
+[data-theme="comic"] .menu .menu-item {
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 6px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--comic-ink);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  box-shadow: none;
+}
+
+[data-theme="comic"] .menu .menu-item:hover:not(:disabled),
+[data-theme="comic"] .menu .menu-item.is-active:not(:disabled) {
+  border: 0;
+  background: var(--comic-yellow);
+  color: var(--comic-ink);
+  box-shadow: inset 0 0 0 2px var(--comic-ink);
+}
+
+[data-theme="comic"] .menu .menu-item:active:not(:disabled) {
+  transform: none;
+  box-shadow: inset 0 0 0 2px var(--comic-ink);
+}
+
+[data-theme="comic"] .menu .menu-item:disabled {
+  opacity: 1;
+  color: #9a9a9a;
+  font-style: italic;
+}
+
+[data-theme="comic"] .menu .menu-item:focus-visible {
+  outline: none;
+}
+
+[data-theme="comic"] .menu-check {
+  color: var(--comic-red);
+  font-size: 1em;
+}
+
+[data-theme="comic"] .menu .menu-item:disabled .menu-check {
+  color: inherit;
+}
+
+[data-theme="comic"] .menu-shortcut {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 1;
+  color: #5a5a5a;
+}
+
+[data-theme="comic"] .menu .menu-item:hover:not(:disabled) .menu-shortcut,
+[data-theme="comic"] .menu .menu-item.is-active:not(:disabled) .menu-shortcut {
+  color: var(--comic-ink);
+}
+
+[data-theme="comic"] .menu .menu-item.is-radio .menu-check {
+  font-size: 0.8em;
+}
+
+[data-theme="comic"] .menu-arrow {
+  font-size: 18px;
+  line-height: 1;
+}
+
+[data-theme="comic"] .menu-separator {
+  height: 2px;
+  margin: 4px 2px;
+  background: var(--comic-ink);
+}
+
+/* Compact (phone) menu: the ⋮ is one more narration box; group headings are
+   ink caption strips. */
+[data-theme="comic"] .menubar .menubar-overflow {
+  min-width: 30px;
+  padding: 0;
+  font-family: var(--comic-display);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 22px;
+  letter-spacing: 0;
+}
+
+[data-theme="comic"] .menubar .menubar-menu.is-open > .menubar-overflow:not(:disabled) {
+  background: var(--comic-red);
+  color: #ffffff;
+  box-shadow: none;
+  transform: translate(2px, 2px);
+}
+
+[data-theme="comic"] .menu-compact {
+  width: max-content;
+  max-width: calc(100vw - 28px);
+  margin-top: 8px;
+}
+
+[data-theme="comic"] .menu-group-label {
+  margin: 2px 0;
+  padding: 3px 8px 2px;
+  background: var(--comic-ink);
+  color: var(--comic-yellow);
+  font-family: var(--comic-display);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  opacity: 1;
+}
+
+[data-theme="comic"] .menu-inline-submenu {
+  margin-left: 26px;
+  padding-left: 0;
+  border-left: 2px dotted var(--comic-ink);
 }
 
 /* ------------------------------------------------------------------ */
@@ -337,39 +636,6 @@
 
 [data-theme="comic"] ::-webkit-scrollbar-corner {
   background: var(--comic-paper);
-}
-
-/* ------------------------------------------------------------------ */
-/* Caption-box toolbar: one strip closed by an ink rule                 */
-/* ------------------------------------------------------------------ */
-
-[data-theme="comic"] .app-toolbar {
-  align-items: center;
-  gap: 10px;
-  padding: 4px 0 12px;
-  border-bottom: 3px solid var(--comic-ink);
-}
-
-[data-theme="comic"] .app-toolbar-actions {
-  gap: 10px;
-}
-
-[data-theme="comic"] .app-toolbar button {
-  min-height: 32px;
-  padding: 4px 16px;
-}
-
-[data-theme="comic"] .app-toolbar-brand {
-  display: inline-block;
-  padding: 4px 12px;
-  border: 3px solid var(--comic-ink);
-  background: var(--comic-yellow);
-  color: var(--comic-ink);
-  font-style: italic;
-  font-weight: 700;
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  box-shadow: 3px 3px 0 var(--comic-ink);
 }
 
 /* ------------------------------------------------------------------ */
@@ -944,27 +1210,112 @@
   text-transform: uppercase;
 }
 
-[data-theme="comic"] .title-bar-controls {
+[data-theme="comic"] .modal .title-bar-controls {
   gap: 8px;
 }
 
-[data-theme="comic"] .title-bar-controls button {
+[data-theme="comic"] .modal .title-bar-controls button {
   min-width: 28px;
   min-height: 28px;
   padding: 0;
   box-shadow: 2px 2px 0 var(--comic-ink);
 }
 
-[data-theme="comic"] .title-bar-controls button:active:not(:disabled) {
+[data-theme="comic"] .modal .title-bar-controls button:active:not(:disabled) {
   transform: translate(2px, 2px);
 }
 
-[data-theme="comic"] .title-bar-controls button[aria-label="Close"] {
-  color: var(--comic-red);
+/* Same inked box as the main window's close button: red with a white X. */
+[data-theme="comic"] .modal .title-bar-controls button[aria-label="Close"] {
+  background: var(--comic-red);
+  color: #ffffff;
+  font-family: var(--comic-display);
+  font-weight: 400;
+}
+
+[data-theme="comic"] .modal .title-bar-controls button[aria-label="Close"]:hover:not(:disabled) {
+  background: #f0453e;
+}
+
+[data-theme="comic"] .modal .title-bar-controls button[aria-label="Close"]::before {
+  font-size: 22px;
+  line-height: 1;
 }
 
 [data-theme="comic"] .modal-body {
   padding: 16px 18px 14px;
+}
+
+/* About: the logo lettering again, the version in a narration box and the
+   blurb as a speech bubble. */
+[data-theme="comic"] .about-head {
+  gap: 18px;
+}
+
+[data-theme="comic"] .about-icon {
+  box-sizing: content-box;
+  padding: 8px;
+  border: 3px solid var(--comic-ink);
+  background: var(--comic-halftone), #ffffff;
+  box-shadow: 4px 4px 0 var(--comic-ink);
+  transform: rotate(-3deg);
+}
+
+[data-theme="comic"] .about-name {
+  margin-bottom: 6px;
+  font-family: var(--comic-display);
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffffff;
+  -webkit-text-stroke: 2px var(--comic-ink);
+  paint-order: stroke fill;
+  text-shadow: 3px 3px 0 var(--comic-red);
+  transform: skew(-6deg);
+}
+
+[data-theme="comic"] .about-version {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 2px solid var(--comic-ink);
+  background: var(--comic-yellow);
+  color: var(--comic-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: 2px 2px 0 var(--comic-ink);
+}
+
+[data-theme="comic"] .about-detail {
+  margin-top: 6px;
+  font-style: italic;
+  color: var(--muted);
+}
+
+[data-theme="comic"] .about-text {
+  position: relative;
+  margin: 18px 6px 22px 0 !important;
+  padding: 10px 14px;
+  border: 3px solid var(--comic-ink);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 4px 4px 0 var(--comic-ink);
+}
+
+[data-theme="comic"] .about-text::after {
+  content: "";
+  position: absolute;
+  right: 40px;
+  bottom: -11px;
+  width: 16px;
+  height: 16px;
+  background: #ffffff;
+  border-right: 3px solid var(--comic-ink);
+  border-bottom: 3px solid var(--comic-ink);
+  transform: rotate(45deg);
 }
 
 [data-theme="comic"] .settings-scroll {
@@ -1034,21 +1385,56 @@
     padding: 8px 10px 12px;
   }
 
-  [data-theme="comic"] .app-title-bar {
-    min-height: 44px;
-    padding: 0 12px;
+  [data-theme="comic"] .app-title-icon {
+    width: 26px;
+    padding: 0 7px;
+    border-right-width: 3px;
   }
 
-  [data-theme="comic"] .app-title-bar .title-bar-text {
-    font-size: 22px;
-    text-shadow: 3px 3px 0 var(--comic-red);
+  [data-theme="comic"] .app-title-bar > .title-bar-text {
+    padding: 5px 8px 7px 10px;
+    font-size: 21px;
+    -webkit-text-stroke-width: 1.5px;
+    text-shadow: 2px 2px 0 var(--comic-red);
+  }
+
+  [data-theme="comic"] .app-title-drag {
+    min-width: 8px;
+    min-height: 40px;
+  }
+
+  [data-theme="comic"] .app-window-controls {
+    gap: 5px;
+    padding-right: 8px;
+  }
+
+  [data-theme="comic"] .app-window-controls button {
+    width: 28px;
+    min-width: 28px;
+  }
+}
+
+/* Phones / narrow windows: the menu bar collapses to one ⋮ box, so the
+   masthead is a single row and the issue box makes room for it. */
+@media (max-width: 600px) {
+  [data-theme="comic"] .app-title-bar {
+    grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto auto;
+    grid-template-areas: "icon title drag menu controls";
   }
 
   [data-theme="comic"] .app-title-bar::after {
-    width: 30px;
-    height: 30px;
-    font-size: 10px;
+    display: none;
   }
+
+  [data-theme="comic"] .app-title-bar > .menubar {
+    align-self: center;
+    padding: 0 7px 0 0;
+    border-top: 0;
+    background: transparent;
+  }
+}
+
+@media (max-width: 640px) {
 
   [data-theme="comic"] fieldset,
   [data-theme="comic"] .worker-panel,

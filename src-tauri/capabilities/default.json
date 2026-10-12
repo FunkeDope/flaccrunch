@@ -1,12 +1,20 @@
 {
   "identifier": "default",
   "description": "Default capability for FlacCrunch",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:default",
-    "core:window:allow-set-title"
+    "core:window:allow-set-title",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close"
   ]
 }

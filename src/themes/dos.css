@@ -11,6 +11,8 @@
   --font: "Perfect DOS VGA 437", "Px437 IBM VGA8", Consolas, "Lucida Console", monospace;
   --mono: "Perfect DOS VGA 437", "Px437 IBM VGA8", Consolas, "Lucida Console", monospace;
   --fs: 14px;
+  /* One text row; 16px on phones. */
+  --dos-cell: 18px;
 
   /* The sixteen colours we allow ourselves. */
   --dos-black: #000000;
@@ -110,37 +112,7 @@
   color: var(--dos-black);
 }
 
-/* Top MENU BAR: cyan strip, black text, fake pull-down menu names on the
-   left, the program name on the right. */
-[data-theme="dos"] .app-title-bar {
-  height: 18px;
-  min-height: 18px;
-  padding: 0;
-  gap: 0;
-  background: var(--dos-cyan);
-  color: var(--dos-black);
-  border: none;
-  flex-shrink: 0;
-}
-
-[data-theme="dos"] .app-title-bar .title-bar-text {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-  height: 18px;
-  padding: 0 1ch;
-  font-weight: normal;
-  letter-spacing: 0;
-  white-space: pre;
-  overflow: hidden;
-}
-
-[data-theme="dos"] .app-title-bar .title-bar-text::before {
-  content: " Left   Files   Commands   Options   Right";
-  white-space: pre;
-}
+/* Top line: the pull-down menu bar, see "Menu bar" below. */
 
 /* Bottom F-KEY BAR. Two pseudo-elements share one monospace grid: the
    in-flow ::before (pushed last with `order`) paints the black bar, the
@@ -200,40 +172,6 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Toolbar                                                             */
-/* ------------------------------------------------------------------ */
-
-[data-theme="dos"] .app-toolbar {
-  min-height: 18px;
-  margin: 0;
-  padding: 0 1ch;
-  gap: 0 1ch;
-  flex-shrink: 0;
-}
-
-[data-theme="dos"] .app-toolbar-actions {
-  gap: 0 1ch;
-}
-
-[data-theme="dos"] .app-toolbar-right {
-  gap: 1ch;
-}
-
-[data-theme="dos"] .app-toolbar-brand {
-  color: var(--dos-white);
-  font-weight: normal;
-}
-
-[data-theme="dos"] .theme-cycle {
-  color: var(--dos-bright-cyan);
-}
-
-[data-theme="dos"] .theme-cycle-label {
-  opacity: 1;
-  color: var(--dos-cyan);
-}
-
-/* ------------------------------------------------------------------ */
 /* Buttons: flat text with [ brackets ]                                */
 /* ------------------------------------------------------------------ */
 
@@ -287,7 +225,6 @@
 
 /* The bracket treatment for every command button; the modal title-bar
    glyph buttons and the folder-list "x" keep their own content. */
-[data-theme="dos"] .app-toolbar button::before,
 [data-theme="dos"] .start-footer-actions button::before,
 [data-theme="dos"] .queue-toggle-row button::before,
 [data-theme="dos"] .pane-toolbar button::before,
@@ -296,7 +233,6 @@
   content: "[ ";
 }
 
-[data-theme="dos"] .app-toolbar button::after,
 [data-theme="dos"] .start-footer-actions button::after,
 [data-theme="dos"] .queue-toggle-row button::after,
 [data-theme="dos"] .pane-toolbar button::after,
@@ -1149,12 +1085,348 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Menu bar: Norton Commander 5's pull-down line (F9)                  */
+/* ------------------------------------------------------------------ */
+
+/* One text row across the top: "  File   Settings   View ...", the
+   program name centred in the empty part, the window buttons as text
+   cells on the right. No icon: text mode has none. */
+[data-theme="dos"] .app-title-bar {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "menu drag controls";
+  height: var(--dos-cell);
+  min-height: var(--dos-cell);
+  padding: 0 0 0 1ch;
+  gap: 0;
+  border: none;
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+  font: var(--fs) / var(--dos-cell) var(--font);
+}
+
+[data-theme="dos"] .app-title-bar > .app-title-icon {
+  display: none;
+}
+
+[data-theme="dos"] .app-title-bar > .title-bar-text {
+  grid-area: drag;
+  justify-self: center;
+  margin: 0;
+  padding: 0 1ch;
+  color: var(--dos-black);
+  font-weight: normal;
+  letter-spacing: 0;
+  pointer-events: none;
+}
+
+[data-theme="dos"] .menubar .menubar-item {
+  height: var(--dos-cell);
+  min-height: 0;
+  margin: 0 1ch 0 0;
+  padding: 0 1ch;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dos-black);
+  font-weight: normal;
+  line-height: var(--dos-cell);
+}
+
+[data-theme="dos"] .menubar .menubar-item:hover:not(:disabled),
+[data-theme="dos"] .menubar .menubar-item:focus-visible,
+[data-theme="dos"] .menubar .menubar-item.is-open,
+[data-theme="dos"] .menubar .menubar-item.is-focused,
+[data-theme="dos"] .menubar .menubar-item:active:not(:disabled) {
+  border: 0;
+  background: var(--dos-black);
+  color: var(--dos-cyan);
+  outline: none;
+}
+
+/* Hot letters: yellow, never underlined. Always lit inside a pull-down,
+   lit on the bar once the keyboard engages it. */
+[data-theme="dos"] .menu-mnemonic.is-shown {
+  text-decoration: none;
+  color: var(--dos-yellow);
+}
+
+[data-theme="dos"] .menu .menu-mnemonic {
+  color: var(--dos-yellow);
+}
+
+[data-theme="dos"] .menu .menu-item:disabled .menu-mnemonic {
+  color: inherit;
+}
+
+/* Pull-down box: cyan, a black double-line frame drawn through the middle
+   of the outer character cells (one blank column either side, as NC does),
+   and a shadow of dimmed cells two columns right and one row down. The
+   frame is painted as backgrounds so it stays put when the box scrolls. */
+[data-theme="dos"] .menu {
+  --fx: calc(1.5ch - 1.5px);
+  --fy: calc(var(--dos-cell) / 2 - 1.5px);
+  --ink: linear-gradient(var(--dos-black), var(--dos-black));
+  width: max-content;
+  min-width: 24ch;
+  padding: var(--dos-cell) 2ch;
+  border: 0;
+  border-radius: 0;
+  color: var(--dos-black);
+  font: var(--fs) / var(--dos-cell) var(--font);
+  background:
+    var(--ink) left var(--fx) top var(--fy) / calc(100% - 2 * var(--fx)) 1px no-repeat,
+    var(--ink) left calc(var(--fx) + 2px) top calc(var(--fy) + 2px) / calc(100% - 2 * var(--fx) - 4px) 1px no-repeat,
+    var(--ink) left var(--fx) bottom var(--fy) / calc(100% - 2 * var(--fx)) 1px no-repeat,
+    var(--ink) left calc(var(--fx) + 2px) bottom calc(var(--fy) + 2px) / calc(100% - 2 * var(--fx) - 4px) 1px no-repeat,
+    var(--ink) left var(--fx) top var(--fy) / 1px calc(100% - 2 * var(--fy)) no-repeat,
+    var(--ink) left calc(var(--fx) + 2px) top calc(var(--fy) + 2px) / 1px calc(100% - 2 * var(--fy) - 4px) no-repeat,
+    var(--ink) right var(--fx) top var(--fy) / 1px calc(100% - 2 * var(--fy)) no-repeat,
+    var(--ink) right calc(var(--fx) + 2px) top calc(var(--fy) + 2px) / 1px calc(100% - 2 * var(--fy) - 4px) no-repeat,
+    var(--dos-cyan);
+  box-shadow: 2ch var(--dos-cell) 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Cascades open beside the parent box, first item level with its row. */
+[data-theme="dos"] .menu .menu-submenu {
+  top: calc(-1 * var(--dos-cell));
+  left: calc(100% + 1ch);
+}
+
+[data-theme="dos"] .menu .menu-submenu.is-flipped {
+  left: auto;
+  right: calc(100% + 1ch);
+}
+
+/* Items fill the row from frame to frame:  "║ ✓ Label      Ctrl+O › ║". */
+[data-theme="dos"] .menu .menu-item {
+  grid-template-columns: 3ch minmax(0, 1fr) auto 3ch;
+  height: var(--dos-cell);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dos-black);
+  font-weight: normal;
+  line-height: var(--dos-cell);
+}
+
+[data-theme="dos"] .menu .menu-item::before,
+[data-theme="dos"] .menu .menu-item::after {
+  content: none;
+}
+
+[data-theme="dos"] .menu .menu-item:hover:not(:disabled),
+[data-theme="dos"] .menu .menu-item.is-active:not(:disabled),
+[data-theme="dos"] .menu .menu-item:active:not(:disabled),
+[data-theme="dos"] .menu .menu-item:focus-visible {
+  border: 0;
+  background: var(--dos-black);
+  color: var(--dos-cyan);
+  outline: none;
+}
+
+[data-theme="dos"] .menu .menu-item:disabled {
+  opacity: 1;
+  color: var(--dos-dark-grey);
+}
+
+[data-theme="dos"] .menu .menu-check,
+[data-theme="dos"] .menu .menu-item.is-radio .menu-check,
+[data-theme="dos"] .menu .menu-arrow {
+  font-size: inherit;
+  text-align: center;
+}
+
+/* Code page 437 marks: √ for checks, • for the chosen radio, ► for a
+   cascade (the markup's ✓ ● › are not in the DOS character set). */
+[data-theme="dos"] .menu .menu-item.is-checked .menu-check,
+[data-theme="dos"] .menu .menu-item.has-submenu .menu-arrow {
+  font-size: 0;
+  line-height: 0;
+}
+
+[data-theme="dos"] .menu .menu-item.is-checked .menu-check::before,
+[data-theme="dos"] .menu .menu-item.has-submenu .menu-arrow::before {
+  display: block;
+  font-size: var(--fs);
+  line-height: var(--dos-cell);
+}
+
+[data-theme="dos"] .menu .menu-item.is-checked .menu-check::before {
+  content: "\221a";
+}
+
+[data-theme="dos"] .menu .menu-item.is-checked.is-radio .menu-check::before {
+  content: "\2022";
+}
+
+[data-theme="dos"] .menu .menu-item.has-submenu .menu-arrow::before {
+  content: "\25ba";
+}
+
+[data-theme="dos"] .menu .menu-shortcut {
+  padding-left: 3ch;
+  opacity: 1;
+  text-align: right;
+}
+
+/* Single line joined to the inner frame line: ╟──────╢ */
+[data-theme="dos"] .menu .menu-separator {
+  height: var(--dos-cell);
+  margin: 0 calc(-0.5ch + 1.5px);
+  background: var(--ink) left center / 100% 1px no-repeat;
+}
+
+/* Narrow windows: Turbo Vision's ≡ system menu on the left holds it all. */
+[data-theme="dos"] .menubar-compact .menubar-overflow {
+  font-size: 0;
+}
+
+[data-theme="dos"] .menubar-compact .menubar-overflow::before {
+  content: "\2261";
+  font-size: var(--fs);
+}
+
+[data-theme="dos"] .menubar-compact .menu {
+  left: 0;
+  right: auto;
+  max-height: calc(100vh - 4 * var(--dos-cell));
+}
+
+[data-theme="dos"] .menu .menu-group-label {
+  align-self: flex-start;
+  margin: 0 0 0 1ch;
+  padding: 0 1ch;
+  background: var(--dos-black);
+  color: var(--dos-cyan);
+  font-size: inherit;
+  font-weight: normal;
+  letter-spacing: 0;
+  line-height: var(--dos-cell);
+  text-transform: none;
+  opacity: 1;
+}
+
+[data-theme="dos"] .menu .menu-inline-submenu {
+  padding-left: 2ch;
+}
+
+/* Window buttons as text cells: [_] [□] [×] ([↕] when maximised). */
+[data-theme="dos"] .app-window-controls {
+  gap: 0;
+  padding: 0 1ch 0 0;
+}
+
+[data-theme="dos"] .app-window-controls button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 4ch;
+  min-width: 4ch;
+  height: var(--dos-cell);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dos-black);
+  line-height: var(--dos-cell);
+}
+
+[data-theme="dos"] .app-window-controls button[aria-label]::before {
+  content: "[_]";
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border: 0;
+  background: none;
+  transform: none;
+  font-size: inherit;
+}
+
+[data-theme="dos"] .app-window-controls button[aria-label="Maximize"]::before {
+  content: "[\25a1]";
+}
+
+[data-theme="dos"] .app-window-controls button[aria-label="Restore"]::before {
+  content: "[\2195]";
+}
+
+[data-theme="dos"] .app-window-controls button[aria-label="Close"]::before {
+  content: "[\00d7]";
+}
+
+/* Invisible: stretches the hit area a little below the one-row bar. */
+[data-theme="dos"] .app-window-controls button[aria-label]::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 -3px;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border: 0;
+  background: none;
+  transform: none;
+}
+
+[data-theme="dos"] .app-window-controls button:hover:not(:disabled),
+[data-theme="dos"] .app-window-controls button:focus-visible,
+[data-theme="dos"] .app-window-controls button:active:not(:disabled) {
+  border: 0;
+  background: var(--dos-black);
+  color: var(--dos-cyan);
+  outline: none;
+}
+
+[data-theme="dos"] .app-window-controls button[aria-label="Close"]:hover:not(:disabled),
+[data-theme="dos"] .app-window-controls button[aria-label="Close"]:active:not(:disabled) {
+  background: var(--dos-red);
+  color: var(--dos-white);
+}
+
+/* About: a plain NC info box, centred lines of text, no picture. */
+[data-theme="dos"] .about-window .about-icon {
+  display: none;
+}
+
+[data-theme="dos"] .about-window .about-head {
+  flex-direction: column;
+  gap: 0;
+  text-align: center;
+}
+
+[data-theme="dos"] .about-window .about-name {
+  font-size: inherit;
+  font-weight: normal;
+  color: var(--dos-white);
+}
+
+[data-theme="dos"] .about-window .about-version,
+[data-theme="dos"] .about-window .about-detail {
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .about-window .about-text {
+  margin: var(--dos-cell) 0 !important;
+  line-height: var(--dos-cell);
+  text-align: center;
+}
+
+[data-theme="dos"] .about-window .about-actions {
+  justify-content: center;
+}
+
+/* ------------------------------------------------------------------ */
 /* Small screens: panels stack, 80x25 shrinks to 12px cells            */
 /* ------------------------------------------------------------------ */
 
 @media (max-width: 640px) {
   [data-theme="dos"] {
     --fs: 12px;
+    --dos-cell: 16px;
   }
 
   [data-theme="dos"] body,
@@ -1170,10 +1442,6 @@
 
   [data-theme="dos"] .app-window {
     height: 100vh;
-  }
-
-  [data-theme="dos"] .app-title-bar .title-bar-text::before {
-    content: "";
   }
 
   [data-theme="dos"] .app-window::before,

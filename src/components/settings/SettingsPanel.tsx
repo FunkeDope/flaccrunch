@@ -58,16 +58,16 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
                 <div className="settings-group settings-check">
                   <div className="field-row">
                     <input
-                      id="show-quick-switch"
+                      id="show-dev-menu"
                       type="checkbox"
-                      checked={settings.showThemeQuickSwitch}
-                      onChange={() => onUpdate({ showThemeQuickSwitch: !settings.showThemeQuickSwitch })}
+                      checked={settings.showDevMenu}
+                      onChange={() => onUpdate({ showDevMenu: !settings.showDevMenu })}
                     />
-                    <label htmlFor="show-quick-switch">Show quick switch menu</label>
+                    <label htmlFor="show-dev-menu">Show Dev menu</label>
                   </div>
                   <div className="settings-hint">
-                    A small button in the bottom-left corner (or Ctrl+Shift+T) that switches
-                    themes from anywhere.
+                    Adds a Dev menu to the menu bar: theme quick switch (Ctrl+Shift+T), reload,
+                    DevTools, and the settings and log folders.
                   </div>
                 </div>
               </fieldset>

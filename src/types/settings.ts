@@ -11,6 +11,6 @@ export interface AppSettings {
   maxCompression: boolean;
   /** Display theme. */
   theme: ThemeId;
-  /** Show the floating quick-switch theme menu. */
-  showThemeQuickSwitch: boolean;
+  /** Show the Dev menu in the menu bar. */
+  showDevMenu: boolean;
 }

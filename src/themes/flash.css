@@ -132,24 +132,9 @@
   font-size: 16px;
 }
 
-[data-theme="flash"] .theme-cycle,
 [data-theme="flash"] .queue-peek,
 [data-theme="flash"] .worker-toggle {
   background: linear-gradient(#d7b4ff, #8e3fd1);
-}
-
-[data-theme="flash"] .title-bar-controls button {
-  min-width: 30px;
-  min-height: 28px;
-  background: linear-gradient(#ff8a8a, #e0242e);
-}
-
-[data-theme="flash"] .app-toolbar-brand {
-  font-family: Impact, "Arial Black", sans-serif;
-  font-weight: 400;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #1f7ad6;
 }
 
 [data-theme="flash"] fieldset {
@@ -286,42 +271,421 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Layout: a game HUD. Giant centred progress + score strip on top,    */
-/* workers as a horizontal "level select" row, menu buttons at the     */
-/* bottom, results table underneath.                                   */
+/* Title bar + menu bar: the title screen of a 2000s browser game     */
+/* (Newgrounds / Miniclip menus). Row 1 is the orange logo strip:     */
+/* outlined icon, Impact logo text, small candy caption buttons.      */
+/* Row 2 is a navy striped rail of chunky candy tab buttons, one      */
+/* colour each; the open tab turns yellow and presses in. Menus are   */
+/* outlined HUD panels with chunky rows, the hot row a yellow candy.  */
 /* ------------------------------------------------------------------ */
 
-[data-theme="flash"] .app-window-body {
-  flex-direction: column-reverse;
-  gap: 8px;
+[data-theme="flash"] .app-title-bar {
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto;
+  grid-template-rows: 48px auto;
+  grid-template-areas:
+    "icon title drag controls"
+    "menu menu menu menu";
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  border-bottom: 3px solid var(--border);
+  background: linear-gradient(#ffd54a, #ff9a00) top / 100% 48px no-repeat, #0e3a73;
+  box-shadow: inset 0 10px 0 rgba(255, 255, 255, 0.35);
+  color: #ffffff;
 }
 
-/* Toolbar becomes the bottom menu: big chunky buttons, centred. */
-[data-theme="flash"] .app-toolbar {
+[data-platform="mac"][data-theme="flash"] .app-title-bar {
+  padding-left: 78px;
+}
+
+[data-theme="flash"] .app-title-icon {
+  width: 30px;
+  height: 30px;
+  margin: 0 10px 0 12px;
+  filter: drop-shadow(2px 0 0 #1b1b1b) drop-shadow(-2px 0 0 #1b1b1b) drop-shadow(0 2px 0 #1b1b1b)
+    drop-shadow(0 -2px 0 #1b1b1b) drop-shadow(2px 3px 0 #1b1b1b);
+}
+
+[data-theme="flash"] .app-title-bar > .title-bar-text {
+  margin: 0;
+  padding: 2px 8px 5px 2px;
+  line-height: 1;
+}
+
+[data-theme="flash"] .app-title-bar .title-bar-text::after {
+  -webkit-text-stroke: 1.5px #1b1b1b;
+}
+
+[data-theme="flash"] .app-title-drag {
+  min-height: 48px;
+}
+
+/* Menu rail */
+[data-theme="flash"] .app-title-bar > .menubar {
+  gap: 8px;
+  padding: 7px 10px 10px;
+  border-top: 3px solid var(--border);
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0 12px, transparent 12px 24px),
+    linear-gradient(#1f7ad6, #0e3a73);
+}
+
+[data-theme="flash"] .menubar .menubar-item {
+  min-width: 0;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 14px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(#6fc3ff, #1f7ad6);
+  color: #ffffff;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 1px 1px 0 #1b1b1b;
+  box-shadow: 0 3px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .menubar .menubar-menu:nth-child(5n + 1) > .menubar-item {
+  background: linear-gradient(#9af36a, #2fb11a);
+}
+
+[data-theme="flash"] .menubar .menubar-menu:nth-child(5n + 3) > .menubar-item {
+  background: linear-gradient(#d7b4ff, #8e3fd1);
+}
+
+[data-theme="flash"] .menubar .menubar-menu:nth-child(5n + 4) > .menubar-item {
+  background: linear-gradient(#ff8a8a, #e0242e);
+}
+
+[data-theme="flash"] .menubar .menubar-menu:nth-child(5n) > .menubar-item {
+  background: linear-gradient(#7fe8e0, #12a394);
+}
+
+/* Keep labels above the gloss highlight (an absolutely placed ::before). */
+[data-theme="flash"] .menubar-label,
+[data-theme="flash"] .menu-item > span {
+  position: relative;
+}
+
+[data-theme="flash"] .menubar .menubar-item:hover:not(:disabled) {
+  border-color: var(--border);
+  filter: brightness(1.1);
+}
+
+[data-theme="flash"] .menubar .menubar-menu > .menubar-item.is-open,
+[data-theme="flash"] .menubar .menubar-menu > .menubar-item.is-focused {
+  background: linear-gradient(#ffe84d, #ffaa00);
+  color: #1b1b1b;
+  text-shadow: none;
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #1b1b1b;
+  filter: none;
+}
+
+[data-theme="flash"] .menubar .menubar-item:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: none;
+}
+
+/* Dropdown: outlined HUD panel */
+[data-theme="flash"] .menubar .menu {
+  top: calc(100% + 10px);
+  min-width: 230px;
+  padding: 6px;
+  border: 3px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+  color: #1b1b1b;
+  box-shadow: 0 5px 0 #1b1b1b;
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+[data-theme="flash"] .menubar .menu.menu-submenu {
+  top: -9px;
+  left: calc(100% + 6px);
+}
+
+[data-theme="flash"] .menubar .menu.menu-submenu.is-flipped {
+  left: auto;
+  right: calc(100% + 6px);
+}
+
+[data-theme="flash"] .menubar .menu .menu-item {
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px 0 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #1b1b1b;
+  font: inherit;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+  text-shadow: none;
+  box-shadow: none;
+  filter: none;
+  transform: none;
+}
+
+[data-theme="flash"] .menubar .menu .menu-item::before {
+  border-radius: 6px 6px 3px 3px;
+  background: transparent;
+}
+
+[data-theme="flash"] .menubar .menu .menu-item:hover:not(:disabled),
+[data-theme="flash"] .menubar .menu .menu-item.is-active:not(:disabled) {
+  background: linear-gradient(#fff27a, #ffb400);
+  color: #1b1b1b;
+  box-shadow: inset 0 0 0 2px #1b1b1b;
+  filter: none;
+}
+
+[data-theme="flash"] .menubar .menu .menu-item:hover:not(:disabled)::before,
+[data-theme="flash"] .menubar .menu .menu-item.is-active:not(:disabled)::before {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+[data-theme="flash"] .menubar .menu .menu-item:active:not(:disabled) {
+  transform: none;
+  box-shadow: inset 0 0 0 2px #1b1b1b;
+}
+
+[data-theme="flash"] .menubar .menu .menu-item:disabled {
+  background: transparent;
+  color: #a3adbf;
+  opacity: 1;
+  cursor: default;
+}
+
+[data-theme="flash"] .menu-check {
+  color: #1a9f2e;
+  font-weight: 900;
+}
+
+[data-theme="flash"] .menu-item.is-active .menu-check,
+[data-theme="flash"] .menu-item:hover .menu-check,
+[data-theme="flash"] .menu-item:disabled .menu-check {
+  color: inherit;
+}
+
+[data-theme="flash"] .menu-shortcut {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 1;
+}
+
+[data-theme="flash"] .menu-item.is-active:not(:disabled) .menu-shortcut,
+[data-theme="flash"] .menu-item:hover:not(:disabled) .menu-shortcut {
+  color: #5a3a00;
+}
+
+[data-theme="flash"] .menu-arrow {
+  color: #1f7ad6;
+  font-weight: 900;
+}
+
+[data-theme="flash"] .menu-item.is-active .menu-arrow,
+[data-theme="flash"] .menu-item:hover .menu-arrow {
+  color: inherit;
+}
+
+[data-theme="flash"] .menubar .menu-separator {
+  height: 0;
+  margin: 5px 4px;
+  border-top: 2px dashed var(--line);
+  background: none;
+}
+
+[data-theme="flash"] .menu-group-label {
+  padding: 8px 8px 3px;
+  color: #1f7ad6;
+  font-family: Impact, "Arial Black", sans-serif;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  opacity: 1;
+}
+
+[data-theme="flash"] .menu-group-label:first-child {
+  padding-top: 2px;
+}
+
+/* Narrow windows: the overflow candy button sits in the logo strip. */
+[data-theme="flash"] .app-title-bar:has(> .menubar-compact) {
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto auto;
+  grid-template-rows: 48px;
+  grid-template-areas: "icon title drag menu controls";
+}
+
+[data-theme="flash"] .app-title-bar > .menubar.menubar-compact {
+  align-self: center;
+  padding: 0 8px 0 0;
+  border: 0;
+  background: none;
+}
+
+[data-theme="flash"] .menubar .menubar-menu > .menubar-item.menubar-overflow {
+  min-width: 32px;
+  height: 30px;
+  padding: 0;
+  background: linear-gradient(#d7b4ff, #8e3fd1);
+  font-size: 18px;
+  line-height: 1;
+}
+
+[data-theme="flash"] .menubar .menubar-menu > .menubar-item.menubar-overflow.is-open,
+[data-theme="flash"] .menubar .menubar-menu > .menubar-item.menubar-overflow.is-focused {
+  background: linear-gradient(#ffe84d, #ffaa00);
+}
+
+[data-theme="flash"] .menubar-compact .menu {
+  top: calc(100% + 10px);
+  max-height: calc(100vh - 70px);
+}
+
+/* Caption buttons: small candy buttons, glyphs as outlined white strokes. */
+[data-theme="flash"] .title-bar-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+[data-theme="flash"] .app-window-controls {
+  align-self: center;
+  margin-right: 10px;
+}
+
+[data-theme="flash"] .title-bar-controls button {
+  width: 32px;
+  min-width: 32px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: linear-gradient(#6fc3ff, #1f7ad6);
+  color: #ffffff;
+  font-size: 0;
+  box-shadow: 0 3px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .title-bar-controls button::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  width: auto;
+  height: 40%;
+  margin: 0;
+  border: 0;
+  border-radius: 5px 5px 2px 2px;
+  background: rgba(255, 255, 255, 0.45);
+  transform: none;
+}
+
+[data-theme="flash"] .title-bar-controls button::after {
+  content: none;
+}
+
+[data-theme="flash"] .title-bar-controls button[aria-label="Minimize"] {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M4 11.5h8' stroke='%231b1b1b' stroke-width='6'/%3E%3Cpath d='M4 11.5h8' stroke='%23fff' stroke-width='3'/%3E%3C/g%3E%3C/svg%3E")
+      center / 16px 16px no-repeat,
+    linear-gradient(#6fc3ff, #1f7ad6);
+}
+
+[data-theme="flash"] .title-bar-controls button[aria-label="Maximize"] {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cg fill='none' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='9' height='9' rx='1' stroke='%231b1b1b' stroke-width='5'/%3E%3Crect x='3.5' y='3.5' width='9' height='9' rx='1' stroke='%23fff' stroke-width='2.2'/%3E%3C/g%3E%3C/svg%3E")
+      center / 16px 16px no-repeat,
+    linear-gradient(#6fc3ff, #1f7ad6);
+}
+
+[data-theme="flash"] .title-bar-controls button[aria-label="Restore"] {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cg fill='none' stroke-linejoin='round' stroke-linecap='round'%3E%3Cpath d='M6.5 4.5v-2h7v7h-2' stroke='%231b1b1b' stroke-width='4.6'/%3E%3Cpath d='M6.5 4.5v-2h7v7h-2' stroke='%23fff' stroke-width='2'/%3E%3Crect x='2.5' y='6.5' width='7' height='7' rx='1' stroke='%231b1b1b' stroke-width='4.6'/%3E%3Crect x='2.5' y='6.5' width='7' height='7' rx='1' stroke='%23fff' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E")
+      center / 16px 16px no-repeat,
+    linear-gradient(#6fc3ff, #1f7ad6);
+}
+
+[data-theme="flash"] .title-bar-controls button[aria-label="Close"] {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M4.5 4.5l7 7M11.5 4.5l-7 7' stroke='%231b1b1b' stroke-width='6'/%3E%3Cpath d='M4.5 4.5l7 7M11.5 4.5l-7 7' stroke='%23fff' stroke-width='3'/%3E%3C/g%3E%3C/svg%3E")
+      center / 16px 16px no-repeat,
+    linear-gradient(#ff8a8a, #e0242e);
+}
+
+/* Help -> About: a game "credits" card. */
+[data-theme="flash"] .about-body {
+  background:
+    repeating-linear-gradient(135deg, rgba(31, 122, 214, 0.06) 0 14px, transparent 14px 28px),
+    #ffffff;
+}
+
+[data-theme="flash"] .about-icon {
+  filter: drop-shadow(3px 4px 0 #1b1b1b);
+}
+
+[data-theme="flash"] .about-name {
+  font-family: Impact, "Arial Black", sans-serif;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffd54a;
+  -webkit-text-stroke: 2px #1b1b1b;
+  paint-order: stroke fill;
+  text-shadow: 3px 3px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .about-version {
+  display: inline-block;
+  margin: 6px 0 4px;
+  padding: 1px 10px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: #2fb11a;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 1px 1px 0 #1b1b1b;
+  box-shadow: 0 2px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .about-detail {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+[data-theme="flash"] .about-text {
+  padding: 10px 12px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff8d6;
+  color: #1b1b1b;
+  font-weight: 700;
+}
+
+[data-theme="flash"] .about-actions {
   justify-content: center;
   gap: 10px;
-  padding: 6px 0 2px;
-  border-top: 3px solid var(--border);
 }
 
-[data-theme="flash"] .app-toolbar-actions {
-  gap: 10px;
-}
-
-[data-theme="flash"] .app-toolbar button {
-  min-height: 40px;
-  padding: 4px 22px;
-  font-size: 15px;
-}
-
-[data-theme="flash"] .app-toolbar-right {
-  margin-left: 0;
-  gap: 10px;
-}
-
-[data-theme="flash"] .app-toolbar-brand {
-  display: none;
-}
+/* ------------------------------------------------------------------ */
+/* Layout: a game HUD. Giant centred progress + score strip on top,   */
+/* workers as a horizontal "level select" row, results table          */
+/* underneath.                                                        */
+/* ------------------------------------------------------------------ */
 
 /* Run status = the HUD header: score chips row above a giant bar. */
 [data-theme="flash"] .run-status-window {
@@ -475,17 +839,17 @@
 }
 
 @media (max-width: 640px) {
-  [data-theme="flash"] .app-toolbar {
-    flex-wrap: wrap;
-  }
-
-  [data-theme="flash"] .app-toolbar button {
-    min-height: 34px;
-    padding: 4px 12px;
-    font-size: 13px;
-  }
-
   [data-theme="flash"] .run-status-main .status-bar-pct {
     font-size: 32px;
+  }
+
+  [data-theme="flash"] .app-title-bar > .title-bar-text {
+    font-size: 18px;
+  }
+
+  [data-theme="flash"] .app-title-icon {
+    width: 26px;
+    height: 26px;
+    margin: 0 8px 0 10px;
   }
 }

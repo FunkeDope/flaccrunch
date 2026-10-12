@@ -236,10 +236,9 @@
 }
 
 /* Icon helper: buttons and rows draw their icon as a masked ::before. */
-[data-theme="material"] .app-toolbar-actions button::before,
 [data-theme="material"] .start-next-button::before,
 [data-theme="material"] .remove-btn::before,
-[data-theme="material"] .title-bar-controls button::before,
+[data-theme="material"] .modal .title-bar-controls button::before,
 [data-theme="material"] .drop-zone::before,
 [data-theme="material"] .folder-item::before {
   content: "";
@@ -364,114 +363,155 @@
   background: var(--md-surface);
 }
 
+/* Top app bar: the title, then the menus (an overflow ⋮ on phones, inline
+   text menus in wide windows), then the window buttons. */
 [data-theme="material"] .app-title-bar {
-  flex: none;
-  height: 64px;
-  padding: 0 64px 0 16px;
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto auto;
+  grid-template-areas: "icon title drag menu controls";
+  min-height: 64px;
+  padding: 0 4px 0 16px;
   border: 0;
   background: var(--md-surface);
   color: var(--md-on-surface);
 }
 
-[data-theme="material"] .app-title-bar .title-bar-text {
+[data-theme="material"] .app-title-icon {
+  display: none;
+}
+
+[data-theme="material"] .app-title-bar > .title-bar-text {
+  margin: 0;
   font-size: 22px;
   line-height: 28px;
   font-weight: 400;
   letter-spacing: 0;
 }
 
-[data-theme="material"] .app-window-body {
-  padding: 0;
-  gap: 0;
-}
-
-/* Toolbar: tonal buttons under the app bar; Settings becomes the app bar's
-   trailing icon button. */
-[data-theme="material"] .app-toolbar {
-  flex: none;
-  flex-wrap: nowrap;
+[data-theme="material"] .menubar-item {
+  min-width: 0;
+  min-height: 40px;
   margin: 0;
-  padding: 0 16px 8px;
-}
-
-[data-theme="material"] .app-toolbar:has(.app-toolbar-actions > button:only-child) {
-  padding: 0;
-}
-
-[data-theme="material"] .app-toolbar-actions {
-  flex: 1;
-  gap: 8px;
-}
-
-[data-theme="material"] .app-toolbar-actions > button:not(:last-child) {
-  flex: 1;
-  max-width: 220px;
-  min-height: 48px;
-  padding: 0 20px 0 16px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 24px;
+  border-radius: 20px;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font: 500 14px/20px var(--font);
+  align-self: center;
+}
+
+[data-theme="material"] .menubar-item.is-open,
+[data-theme="material"] .menubar-item.is-focused {
   background: var(--md-secondary-container);
   color: var(--md-on-secondary-container);
-  font-size: 0;
 }
 
-[data-theme="material"] .app-toolbar-actions > button:first-child:not(:last-child) {
-  --md-icon: var(--md-icon-new-folder);
+[data-theme="material"] .menubar-overflow {
+  width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 22px;
+  font-weight: 700;
 }
 
-[data-theme="material"] .app-toolbar-actions > button:nth-child(2):not(:last-child) {
-  --md-icon: var(--md-icon-queue-music);
+/* M3 menu: a surface-container sheet, 48dp rows on touch, 36dp with a mouse. */
+[data-theme="material"] .menu {
+  min-width: 224px;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--md-surface-container);
+  color: var(--md-on-surface);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-[data-theme="material"] .app-toolbar-actions > button:not(:last-child)::after {
-  position: static;
+[data-theme="material"] .menu-item {
+  grid-template-columns: 40px minmax(0, 1fr) auto 28px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--md-on-surface);
+  font: 400 14px/20px var(--font);
+}
+
+@media (pointer: fine) {
+  [data-theme="material"] .menu-item {
+    min-height: 36px;
+  }
+}
+
+[data-theme="material"] .menu-item.is-active:not(:disabled)::after {
+  opacity: 0.12;
+}
+
+[data-theme="material"] .menu-item.is-checked {
+  color: var(--md-primary);
+}
+
+[data-theme="material"] .menu-shortcut {
+  color: var(--md-on-surface-variant);
+  opacity: 1;
+}
+
+[data-theme="material"] .menu-separator {
+  margin: 8px 0;
+  background: var(--md-outline-variant);
+}
+
+[data-theme="material"] .menu-group-label {
+  padding: 8px 16px 4px;
+  color: var(--md-primary);
+  font: 500 12px/16px var(--font);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  opacity: 1;
+}
+
+/* Window buttons keep base's line glyphs; ::after is the restore / close
+   stroke there, not the M3 state layer. */
+[data-theme="material"] .app-window-controls button {
+  width: 46px;
+  min-width: 46px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--md-on-surface-variant);
+}
+
+[data-theme="material"] .app-window-controls button:hover {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+[data-theme="material"] .app-window-controls button[aria-label="Close"]:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+
+[data-theme="material"] .app-window-controls button[aria-label]::after {
   inset: auto;
   border-radius: 0;
   background: none;
   opacity: 1;
-  font-size: 14px;
-  line-height: 20px;
+  transition: none;
 }
 
-[data-theme="material"] .app-toolbar-actions > button:first-child:not(:last-child)::after {
-  content: "Add folder";
+[data-theme="material"] .app-window-controls button[aria-label="Minimize"]::after,
+[data-theme="material"] .app-window-controls button[aria-label="Maximize"]::after {
+  content: none;
 }
 
-[data-theme="material"] .app-toolbar-actions > button:nth-child(2):not(:last-child)::after {
-  content: "Add files";
+[data-theme="material"] .app-window-controls button[aria-label="Close"]::after {
+  background: currentColor;
 }
 
-/* Tonal buttons draw their state layer with box-shadow (::after holds the label). */
-[data-theme="material"] .app-toolbar-actions > button:not(:last-child):hover {
-  box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--md-on-secondary-container) 8%, transparent);
-}
-
-[data-theme="material"] .app-toolbar-actions > button:not(:last-child):active {
-  box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--md-on-secondary-container) 12%, transparent);
-}
-
-[data-theme="material"] .app-toolbar-actions > button:last-child {
-  --md-icon: var(--md-icon-settings);
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 48px;
-  min-height: 48px;
-  height: 48px;
+[data-theme="material"] .app-window-body {
   padding: 0;
-  border: 0;
-  border-radius: 50%;
-  color: var(--md-on-surface-variant);
-  font-size: 0;
-}
-
-[data-theme="material"] .app-toolbar-actions > button:last-child::before {
-  width: 24px;
-  height: 24px;
-}
-
-[data-theme="material"] .app-toolbar-right {
-  display: none;
+  gap: 0;
 }
 
 [data-theme="material"] .content {
@@ -1025,11 +1065,11 @@
   letter-spacing: 0;
 }
 
-[data-theme="material"] .title-bar-controls {
+[data-theme="material"] .modal .title-bar-controls {
   gap: 0;
 }
 
-[data-theme="material"] .title-bar-controls button {
+[data-theme="material"] .modal .title-bar-controls button {
   --md-icon: var(--md-icon-close);
   width: 48px;
   min-width: 48px;
@@ -1041,17 +1081,17 @@
   color: var(--md-on-surface-variant);
 }
 
-[data-theme="material"] .title-bar-controls button::before {
+[data-theme="material"] .modal .title-bar-controls button::before {
   width: 24px;
   height: 24px;
   font-size: 0;
 }
 
-[data-theme="material"] .title-bar-controls button[aria-label="Maximize"] {
+[data-theme="material"] .modal .title-bar-controls button[aria-label="Maximize"] {
   --md-icon: var(--md-icon-fullscreen);
 }
 
-[data-theme="material"] .title-bar-controls button[aria-label="Restore"] {
+[data-theme="material"] .modal .title-bar-controls button[aria-label="Restore"] {
   --md-icon: var(--md-icon-fullscreen-exit);
 }
 
@@ -1154,16 +1194,31 @@
 /* ------------------------------------------------------------------ */
 
 @media (min-width: 721px) and (min-height: 521px) {
+  /* Desktop: a 48px bar with the menus inline after the title. */
   [data-theme="material"] .app-title-bar {
-    padding-left: 24px;
+    grid-template-areas: "icon title menu drag controls";
+    min-height: 48px;
+    padding: 0 0 0 16px;
   }
 
-  [data-theme="material"] .app-toolbar {
-    padding: 0 24px 12px;
+  [data-theme="material"] .app-title-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+    margin-right: 12px;
   }
 
-  [data-theme="material"] .app-toolbar-actions > button:last-child {
-    right: 12px;
+  [data-theme="material"] .app-title-bar > .title-bar-text {
+    margin-right: 16px;
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 500;
+  }
+
+  [data-theme="material"] .menubar-item {
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: 16px;
   }
 
   [data-theme="material"] .content {
@@ -1421,8 +1476,8 @@
     line-height: 28px;
   }
 
-  [data-theme="material"] .title-bar-controls button[aria-label="Maximize"],
-  [data-theme="material"] .title-bar-controls button[aria-label="Restore"] {
+  [data-theme="material"] .modal .title-bar-controls button[aria-label="Maximize"],
+  [data-theme="material"] .modal .title-bar-controls button[aria-label="Restore"] {
     display: none;
   }
 

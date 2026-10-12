@@ -132,13 +132,15 @@ FLAC is close to its floor; beyond the subset you are buying tenths of a percent
 
 ## UI Overview
 
-The UI uses a Win98-inspired desktop window aesthetic with a toolbar, fieldset panels, and a status bar.
+The window draws its own title bar (the native one is turned off), so every display theme styles the whole window, including the title bar and menus. The empty part of the title bar drags the window; double-click maximises.
 
-### Toolbar
-Shown at the top of the app window at all times:
-- **Folder...** / **Files...** buttons — add folders or individual FLAC files to the queue (hidden during active processing)
-- **Settings...** — opens the settings dialog
-- Brand tagline on the right
+### Menu bar
+In the title bar on every theme (a single ⋮ menu on narrow windows and phones). Alt shows the mnemonics, Alt+letter opens a menu, arrow keys move, Enter picks, Escape closes.
+- **File** — Add Folder… (Ctrl+O), Add Files… (Ctrl+Shift+O), Start (Ctrl+Enter), Cancel Run, New Run, Show Full Log… (Ctrl+L), Export Log… (Ctrl+S), Exit
+- **Settings** — Preferences… (Ctrl+,) plus quick toggles for Maximum Compression, Mark Files as Crunched, Skip Crunched Files and Verbose Logging
+- **View** — Theme ▸ and Show Dev Menu
+- **Dev** (when enabled) — Theme ▸, Next Theme (Ctrl+Shift+T), Reload UI (Ctrl+R), Toggle DevTools (F12), Open Settings Folder, Open Log Folder
+- **Help** — FlacCrunch on GitHub, Release Notes, Report an Issue, About FlacCrunch
 
 ### Idle Summary Bar
 Shown when no run is active. Displays current queue count, thread count, retry limit, and verbose logging state at a glance.
@@ -170,7 +172,7 @@ All processed files in a `fieldset` panel, sorted by savings % descending by def
 Opens as a modal on "Show Full Log". Displays the full EFC summary log text. Maximize/restore toggle. Save button exports to file.
 
 ### Folder Selector (idle state)
-- **Desktop:** drag-and-drop zones for folders and files, plus toolbar buttons
+- **Desktop:** drag-and-drop zones for folders and files, plus File → Add Folder… / Add Files…
 - **Android:** native file picker (folder picker unavailable on Android)
 - Permission errors from scan reported inline
 
@@ -279,7 +281,7 @@ flaccrunch/
 │   ├── components/
 │   │   ├── common/               # Badge, ProgressBar, ByteDisplay, ElapsedTimer
 │   │   ├── folders/              # FolderSelector, drag-and-drop
-│   │   ├── layout/               # AppShell, toolbar
+│   │   ├── layout/               # AppShell (title bar), MenuBar, window buttons, About
 │   │   ├── processing/           # RunStatusBar, WorkerCard, WorkerGrid,
 │   │   │                         # ProcessingDashboard, RecentEventsTable,
 │   │   │                         # LogViewerModal

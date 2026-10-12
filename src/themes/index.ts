@@ -43,7 +43,7 @@ export const THEMES: readonly ThemeInfo[] = [
   { id: "comic", name: "Comic Book", tagline: "Halftone dots, thick ink outlines, speech-bubble panels, POW.", workers: "cards" },
   { id: "dos", name: "DOS", tagline: "Norton Commander on a real DOS screen: black, light grey, double-line frames.", workers: "cards" },
   { id: "gameboy", name: "Game Boy", tagline: "Four-shade LCD green in a grey handheld shell.", workers: "cards" },
-  { id: "limewire", name: "LimeWire", tagline: "LimeWire 4 on Windows XP: search pane, results table, downloads.", workers: "cards" },
+  { id: "limewire", name: "LimeWire", tagline: "LimeWire 4 on Windows XP: Luna title bar, menu bar, tabs and results table.", workers: "cards" },
 ];
 
 /** Material on Android phones, the plain Windows dark app everywhere else. */

@@ -78,7 +78,7 @@ describe("tauri wrappers — command names", () => {
 
   it("saveSettings calls 'save_settings' with settings argument", async () => {
     mockInvoke.mockResolvedValue(undefined);
-    const settings = { threadCount: null, logFolder: null, maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false, maxCompression: false, theme: "basic-dark" as const, showThemeQuickSwitch: false };
+    const settings = { threadCount: null, logFolder: null, maxRetries: 3, verboseLogging: false, markAsCrunched: false, skipCrunched: false, maxCompression: false, theme: "basic-dark" as const, showDevMenu: false };
     await saveSettings(settings);
     expect(mockInvoke).toHaveBeenCalledWith("save_settings", { settings });
   });

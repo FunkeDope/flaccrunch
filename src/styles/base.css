@@ -100,29 +100,202 @@ body {
   gap: 6px;
 }
 
-.app-toolbar {
-  justify-content: space-between;
-  flex-wrap: wrap;
-  margin-bottom: 0;
+/* Title bar ---------------------------------------------------------- */
+/* The native title bar is off: this bar holds the icon, title, menu bar and
+   window buttons, and its empty parts drag the window. It is a grid so a
+   theme only re-arranges areas: one row (icon title menu … controls) here,
+   or e.g. "icon title drag controls" / "menu menu menu menu" for a classic
+   title bar with the menu bar underneath. */
+
+.app-title-bar {
+  position: relative;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "icon title menu drag controls";
+  align-items: center;
+  flex: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.app-toolbar-actions {
-  margin-left: 0;
+.app-title-icon {
+  grid-area: icon;
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 
-.app-toolbar-right {
+.app-title-bar > .title-bar-text {
+  grid-area: title;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-title-bar > .menubar {
+  grid-area: menu;
+}
+
+.app-title-drag {
+  grid-area: drag;
+  align-self: stretch;
+  min-width: 24px;
+}
+
+.app-title-bar > .wa-vis {
+  grid-area: drag;
+  justify-self: end;
+  pointer-events: none;
+}
+
+.app-window-controls {
+  grid-area: controls;
+  align-self: stretch;
+  display: flex;
+}
+
+/* Menu bar and menus ------------------------------------------------- */
+
+.menubar {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  min-width: 0;
+}
+
+.menubar-menu {
+  position: relative;
+  display: flex;
+}
+
+.menubar-item {
+  white-space: nowrap;
+}
+
+.menu-mnemonic.is-shown {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 220px;
+  max-width: calc(100vw - 16px);
+  padding: 4px 0;
+  text-align: left;
+}
+
+.menu.is-flipped {
+  left: auto;
+  right: 0;
+}
+
+.menu-row {
+  position: relative;
+}
+
+.menu-item {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto 18px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu-check {
+  text-align: center;
+  font-size: 0.85em;
+}
+
+.menu-item.is-radio .menu-check {
+  font-size: 0.6em;
+}
+
+.menu-shortcut {
+  padding-left: 28px;
+  opacity: 0.75;
+}
+
+.menu-arrow {
+  text-align: center;
+}
+
+.menu-submenu {
+  top: -5px;
+  left: 100%;
+}
+
+.menu-submenu.is-flipped {
+  left: auto;
+  right: 100%;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+}
+
+/* Narrow windows: everything in one overflow menu. */
+/* Opens rightwards from the ⋮ button, or leftwards (is-flipped) when the
+   button sits at the right end of the bar. */
+.menubar-compact .menu {
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+
+.menu-group-label {
+  padding: 6px 12px 2px;
+  font-size: 0.8em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+
+.menu-inline-submenu {
+  padding-left: 18px;
+}
+
+/* About dialog -------------------------------------------------------- */
+
+.about-window {
+  width: min(440px, calc(100vw - 20px));
+}
+
+.about-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-left: auto;
+  gap: 16px;
 }
 
-.app-toolbar-brand {
+.about-icon {
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+
+.about-name {
+  font-size: 1.6em;
   font-weight: 700;
 }
 
-.theme-cycle-label {
-  opacity: 0.7;
+.about-version,
+.about-detail {
+  color: var(--muted);
+}
+
+.about-text {
+  margin: 14px 0 !important;
+  line-height: 1.45;
 }
 
 .content {
@@ -1075,6 +1248,172 @@ body {
     content: "\2750";
   }
 
+
+  /* App title bar: 32px, Windows-11 style caption buttons. Re-asserts the
+     grid over the generic .title-bar flex rule above. */
+  .app-title-bar {
+    display: grid;
+    justify-content: normal;
+    min-height: 32px;
+    padding: 0 0 0 10px;
+    gap: 0;
+  }
+
+  .app-title-icon {
+    margin-right: 8px;
+  }
+
+  .app-title-bar > .title-bar-text {
+    margin-right: 10px;
+    font-weight: 600;
+  }
+
+  .menubar-item {
+    min-height: 0;
+    margin: 4px 0;
+    padding: 0 9px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--title-text);
+    font-weight: 400;
+  }
+
+  .menubar-item:hover,
+  .menubar-item.is-open,
+  .menubar-item.is-focused {
+    border: 0;
+    background: var(--row-hover);
+  }
+
+  .menubar-item:active:not(:disabled) {
+    transform: none;
+  }
+
+  .menu {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  .menu-item {
+    display: grid;
+    justify-content: normal;
+    gap: 0;
+    min-height: 28px;
+    padding: 0 6px 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font-weight: 400;
+  }
+
+  .menu-item:hover:not(:disabled),
+  .menu-item.is-active:not(:disabled) {
+    border: 0;
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .menu-item:active:not(:disabled) {
+    transform: none;
+  }
+
+  .menu-item:disabled {
+    opacity: 0.45;
+  }
+
+  .menu-separator {
+    background: var(--border);
+  }
+
+  .app-window-controls {
+    gap: 0;
+  }
+
+  .app-window-controls button {
+    position: relative;
+    width: 46px;
+    min-width: 46px;
+    min-height: 32px;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--title-text);
+  }
+
+  .app-window-controls button:hover {
+    border: 0;
+    background: var(--row-hover);
+  }
+
+  .app-window-controls button:active:not(:disabled) {
+    transform: none;
+  }
+
+  .app-window-controls button[aria-label="Close"]:hover {
+    background: #c42b1c;
+    color: #ffffff;
+  }
+
+  /* Caption glyphs drawn with 1px lines, like Segoe Fluent Icons. */
+  .app-window-controls button[aria-label]::before,
+  .app-window-controls button[aria-label]::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    box-sizing: border-box;
+    font-size: 0;
+  }
+
+  .app-window-controls button[aria-label="Minimize"]::before {
+    width: 10px;
+    height: 1px;
+    margin: 0 0 0 -5px;
+    background: currentColor;
+  }
+
+  .app-window-controls button[aria-label="Maximize"]::before {
+    width: 10px;
+    height: 10px;
+    margin: -5px 0 0 -5px;
+    border: 1px solid currentColor;
+  }
+
+  .app-window-controls button[aria-label="Restore"]::before {
+    width: 8px;
+    height: 8px;
+    margin: -3px 0 0 -5px;
+    border: 1px solid currentColor;
+  }
+
+  .app-window-controls button[aria-label="Restore"]::after {
+    width: 8px;
+    height: 8px;
+    margin: -5px 0 0 -3px;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+  }
+
+  .app-window-controls button[aria-label="Close"]::before,
+  .app-window-controls button[aria-label="Close"]::after {
+    width: 14px;
+    height: 1px;
+    margin: 0 0 0 -7px;
+    background: currentColor;
+    transform: rotate(45deg);
+  }
+
+  .app-window-controls button[aria-label="Close"]::after {
+    transform: rotate(-45deg);
+  }
+
   .window-body {
     padding: 10px;
   }
@@ -1125,10 +1464,6 @@ body {
     color: var(--accent-text);
   }
 
-  .theme-cycle {
-    font-weight: 500;
-    color: var(--muted);
-  }
 
   input[type="text"],
   select {

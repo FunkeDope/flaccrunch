@@ -43,6 +43,9 @@ pub fn run_with_startup_paths(startup_paths: Vec<String>) {
             commands::logs::get_efc_log,
             commands::logs::write_text_file,
             commands::logs::copy_file_to_path,
+            commands::system::get_libflac_version,
+            commands::system::toggle_devtools,
+            commands::system::open_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlacCrunch");

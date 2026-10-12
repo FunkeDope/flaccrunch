@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerdicer/tauri-v2-schema/refs/heads/main/tauri.conf.json",
   "productName": "FlacCrunch",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "identifier": "com.flaccrunch.app",
   "mainBinaryName": "flaccrunch",
   "build": {
@@ -16,8 +16,12 @@
         "title": "FlacCrunch",
         "width": 895,
         "height": 740,
+        "minWidth": 360,
+        "minHeight": 420,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false,
+        "shadow": true
       }
     ],
     "security": {

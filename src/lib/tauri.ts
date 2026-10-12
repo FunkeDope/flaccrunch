@@ -91,3 +91,19 @@ export async function getStartupPaths(): Promise<string[]> {
 export async function copyFileToPath(sourcePath: string, destinationPath: string): Promise<void> {
   return invoke<void>("copy_file_to_path", { sourcePath, destinationPath });
 }
+
+// Menu bar: About, Dev menu, folders and project links
+export type ExternalTarget = "settings-folder" | "log-folder" | "project" | "releases" | "issues";
+
+export async function getLibflacVersion(): Promise<string> {
+  return invoke<string>("get_libflac_version");
+}
+
+export async function toggleDevtools(): Promise<void> {
+  return invoke<void>("toggle_devtools");
+}
+
+/** Opens a known folder in the file manager or a project page in the browser. */
+export async function openExternal(target: ExternalTarget): Promise<void> {
+  return invoke<void>("open_external", { target });
+}

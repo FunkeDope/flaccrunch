@@ -4,7 +4,10 @@
  * without Tauri. Not part of the production build (only index.html is bundled).
  *
  *   /preview.html?theme=winamp&view=running
- *   view = idle | running | complete | settings | log
+ *   view = idle | running | complete | settings | log | about
+ *
+ * Window buttons are drawn as on Windows/Linux; click the menu bar to check
+ * the menus (they work here, wired to the fake views).
  */
 import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
@@ -15,13 +18,14 @@ import { ProcessingDashboard } from "../components/processing/ProcessingDashboar
 import { RunStatusBar } from "../components/processing/RunStatusBar";
 import { LogViewerModal } from "../components/processing/LogViewerModal";
 import { SettingsModal } from "../components/settings/SettingsPanel";
-import { ThemeMenu } from "../components/layout/ThemeMenu";
+import { AboutModal } from "../components/layout/AboutModal";
+import { buildMenus } from "../components/layout/appMenus";
 import { useTheme } from "../hooks/useTheme";
-import { DEFAULT_THEME, isThemeId, type ThemeId } from "../themes";
+import { DEFAULT_THEME, isThemeId, nextTheme, type ThemeId } from "../themes";
 import type { AppSettings } from "../types/settings";
 import type { FileEvent, RunCounters, WorkerStatus } from "../types/processing";
 
-type View = "idle" | "running" | "complete" | "settings" | "log";
+type View = "idle" | "running" | "complete" | "settings" | "log" | "about";
 
 const params = new URLSearchParams(window.location.search);
 const initialView = (params.get("view") as View | null) ?? "idle";
@@ -112,13 +116,13 @@ function Preview() {
     skipCrunched: false,
     maxCompression: true,
     theme: initialTheme,
-    showThemeQuickSwitch: true,
+    showDevMenu: true,
   });
   const themeInfo = useTheme(settings.theme);
   const setTheme = (id: ThemeId) => setSettings((s) => ({ ...s, theme: id }));
 
   const running = view === "running";
-  const complete = view === "complete";
+  const complete = view === "complete" || view === "log";
   const active = running || complete;
   const status = running ? "processing" : complete ? "complete" : "idle";
   const startTime = Date.now() - 754_000;
@@ -126,10 +130,31 @@ function Preview() {
   return (
     <>
       <AppShell
-        onSettingsClick={() => setView("settings")}
-        onAddFolder={() => setFolders((f) => [...f, `D:\\Music\\New Folder ${f.length + 1}`])}
-        onAddFiles={() => setFolders((f) => [...f, `D:\\Music\\loose-${f.length + 1}.flac`])}
-        showQueueActions={!active}
+        title="FlacCrunch v1.6.0"
+        menus={buildMenus({
+          status,
+          canStart: folders.length > 0 && !active,
+          desktop: true,
+          settings,
+          onUpdate: (p) => setSettings((s) => ({ ...s, ...p })),
+          onAddFolder: () => setFolders((f) => [...f, `D:\\Music\\New Folder ${f.length + 1}`]),
+          onAddFiles: () => setFolders((f) => [...f, `D:\\Music\\loose-${f.length + 1}.flac`]),
+          onStart: () => setView("running"),
+          onCancel: () => setView("complete"),
+          onNewRun: () => setView("idle"),
+          onShowLog: () => setView("log"),
+          onExportLog: () => {},
+          onPreferences: () => setView("settings"),
+          onTheme: setTheme,
+          onNextTheme: () => setTheme(nextTheme(settings.theme)),
+          onAbout: () => setView("about"),
+          onOpen: () => {},
+          onReload: () => window.location.reload(),
+          onToggleDevtools: () => {},
+          onExit: () => {},
+        })}
+        windowControls
+        busy={running}
         theme={settings.theme}
       >
         <div className="app-stack">
@@ -169,7 +194,9 @@ function Preview() {
             <ProcessingDashboard workers={workers(running)} recentEvents={events(complete ? 148 : 61)} runFolders={FOLDERS} workerLayout={themeInfo.workers} />
           )}
         </div>
-        {settings.showThemeQuickSwitch && <ThemeMenu theme={settings.theme} onSelect={setTheme} />}
+        {view === "about" && (
+          <AboutModal appVersion="1.6.0" libflacVersion="1.5.0" onOpen={() => {}} onClose={() => setView("idle")} />
+        )}
         {view === "settings" && (
           <SettingsModal
             settings={settings}

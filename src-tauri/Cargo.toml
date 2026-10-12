@@ -1,6 +1,6 @@
 [package]
 name = "flaccrunch"
-version = "1.5.0"
+version = "1.6.0"
 description = "Lossless FLAC recompression with album art optimization"
 authors = ["FlacCrunch Contributors"]
 edition = "2021"
@@ -39,7 +39,7 @@ gui = [
 tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = [], optional = true }
+tauri = { version = "2", features = ["devtools"], optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-fs = { version = "2", optional = true }
 url = { version = "2", optional = true }

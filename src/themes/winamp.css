@@ -6,8 +6,10 @@
  *   grey bevel  #bdced6 / #adb5c6 / #4a5a6b (EQ/PL, transport buttons)
  *   sliders     #c8c5d3 knobs on #31314d / #1f1f31 grooves
  *   playlist    text #00ff00, current #ffffff, selected bg #0000c6
- * Layout mimics the Winamp window stack: main window (status), equalizer-ish
- * strip (toolbar), playlist editor (files) — each with its own ridged title.
+ * Layout mimics the Winamp window stack: main window title strip with a row
+ * of playlist-style menu buttons, main display (status), equalizer-ish worker
+ * window, playlist editor (files) — each with its own ridged title. The
+ * dropdowns are Win9x popups, as Winamp's own menus are.
  */
 
 [data-theme="winamp"] {
@@ -100,12 +102,13 @@
   box-shadow: inset 1px 1px 0 #4a4a6a, inset -1px -1px 0 var(--wa-shadow);
 }
 
-/* Title bar: 14px, gold ridges either side of the centred white title. */
+/* Title bars (dialogs, sub-windows): the 14px Winamp strip, gold ridges
+   either side of the centred white title, 9x9 buttons at the right. */
 [data-theme="winamp"] .title-bar {
   min-height: 14px;
   height: 14px;
-  padding: 0 4px;
-  gap: 6px;
+  padding: 0 2px 0 4px;
+  gap: 4px;
   background: var(--wa-body);
   border-bottom: 1px solid var(--wa-shadow);
 }
@@ -114,7 +117,7 @@
 [data-theme="winamp"] .title-bar::after {
   content: "";
   flex: 1;
-  height: 7px;
+  height: 8px;
   background: repeating-linear-gradient(
     180deg,
     var(--wa-gold) 0 1px,
@@ -122,6 +125,10 @@
     var(--wa-shadow) 2px 3px,
     transparent 3px 4px
   );
+}
+
+[data-theme="winamp"] .title-bar::after {
+  order: 2;
 }
 
 [data-theme="winamp"] .title-bar-text {
@@ -135,48 +142,78 @@
   white-space: nowrap;
 }
 
-[data-theme="winamp"] .app-title-bar .title-bar-text::after {
-  content: " - LOSSLESS CRUNCHER";
-  color: var(--wa-grey-mid);
+/* ------------------------------------------------------------------ */
+/* Main window title bar + menu strip                                   */
+/* ------------------------------------------------------------------ */
+
+/* Row 1 is the main window's 14px title strip: icon where the options
+   button sits, ridges | FLACCRUNCH V1.5.1 | ridges (the right-hand ridges are
+   the drag handle, with the spectrum analyser at their end), then the 9x9
+   buttons. Row 2 is a strip of grey bevelled menu buttons, like the playlist
+   editor's ADD / REM / SEL / MISC / LIST buttons that open Winamp's popups. */
+[data-theme="winamp"] .app-title-bar {
+  display: grid;
+  height: auto;
+  min-height: 0;
+  grid-template-columns: auto minmax(8px, 1fr) auto minmax(24px, 1fr) auto;
+  grid-template-rows: 14px auto;
+  grid-template-areas:
+    "icon gripl title drag controls"
+    "menu menu menu menu menu";
+  gap: 0;
+  padding: 0 2px 0 4px;
 }
 
-[data-theme="winamp"] .title-bar-controls {
-  order: 3;
-  gap: 1px;
+[data-theme="winamp"] .app-title-bar::before {
+  grid-area: gripl;
+  align-self: center;
+  height: 8px;
+  margin: 0 4px 0 2px;
 }
 
-[data-theme="winamp"] .title-bar-controls button {
-  min-width: 9px;
-  min-height: 9px;
-  width: 9px;
-  height: 9px;
-  padding: 0;
-  border: 1px solid var(--wa-edge);
-  background: var(--wa-body-dark);
-  box-shadow: inset 1px 1px 0 #6a6a8a;
-  font-size: 7px;
-  line-height: 1;
-  color: var(--wa-grey);
+[data-theme="winamp"] .app-title-bar::after {
+  display: none;
 }
 
-[data-theme="winamp"] .title-bar-controls button::before {
-  content: "";
+[data-platform="mac"][data-theme="winamp"] .app-title-bar {
+  grid-template-rows: 28px auto;
+  padding-left: 78px;
 }
 
-[data-theme="winamp"] .title-bar-controls button[aria-label="Close"] {
-  background: #70818f;
+[data-theme="winamp"] .app-title-icon {
+  width: 10px;
+  height: 10px;
+  margin: 0;
 }
 
-/* Spectrum analyser inside the main title bar, right after the name. */
+[data-theme="winamp"] .app-title-bar > .title-bar-text {
+  margin: 0;
+  font-weight: bold;
+}
+
+[data-theme="winamp"] .app-title-drag {
+  margin: 0 3px 0 4px;
+  background: repeating-linear-gradient(
+      180deg,
+      var(--wa-gold) 0 1px,
+      var(--wa-gold-dark) 1px 2px,
+      var(--wa-shadow) 2px 3px,
+      transparent 3px 4px
+    )
+    left center / 100% 8px no-repeat;
+}
+
+/* Spectrum analyser at the end of the right-hand ridges. */
 [data-theme="winamp"] .wa-vis {
-  order: 2;
   display: inline-flex;
   align-items: flex-end;
   gap: 1px;
-  height: 10px;
+  height: 12px;
+  margin-right: 3px;
   padding: 1px 2px;
   background: #000000;
   border: 1px solid var(--wa-shadow);
+  box-shadow: -3px 0 0 var(--wa-body);
 }
 
 [data-theme="winamp"] .wa-vis-bar {
@@ -199,8 +236,380 @@
   animation-duration: 0.31s;
 }
 
+/* Caption buttons: each a 20x20 hit area (it spills 3px over the strip's
+   edges) with the drawn 9x9 bevelled square inside. The squares hug each
+   other so the cluster reads like Winamp's minimise / shade / close. */
+[data-theme="winamp"] .title-bar-controls {
+  order: 3;
+  display: flex;
+  align-self: center;
+  gap: 0;
+  position: relative;
+  z-index: 1;
+}
+
+[data-theme="winamp"] .title-bar-controls button,
+[data-theme="winamp"] .app-window-controls button {
+  position: relative;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin: -3px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wa-grey);
+  font-size: 0;
+}
+
+[data-theme="winamp"] .title-bar-controls button:hover:not(:disabled),
+[data-theme="winamp"] .app-window-controls button:hover:not(:disabled),
+[data-theme="winamp"] .title-bar-controls button:active:not(:disabled),
+[data-theme="winamp"] .app-window-controls button:active:not(:disabled) {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-theme="winamp"] .title-bar-controls button:focus-visible {
+  outline: 1px dotted var(--wa-gold);
+  outline-offset: -4px;
+}
+
+/* The square. */
+[data-theme="winamp"] .title-bar-controls button::before,
+[data-theme="winamp"] .app-window-controls button[aria-label]::before {
+  content: "";
+  display: block;
+  position: absolute;
+  top: 6px;
+  left: 5px;
+  width: 9px;
+  height: 9px;
+  margin: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--wa-edge);
+  background: var(--wa-body-dark);
+  box-shadow: inset 1px 1px 0 #6a6a8a;
+  transform: none;
+}
+
+[data-theme="winamp"] .title-bar-controls button[aria-label="Minimize"]::before {
+  left: 10px;
+}
+
+[data-theme="winamp"] .title-bar-controls button[aria-label="Close"]::before {
+  left: 1px;
+  background: #70818f;
+  box-shadow: inset 1px 1px 0 #a5b3bd;
+}
+
+[data-theme="winamp"] .title-bar-controls button:hover:not(:disabled)::before {
+  background: #4a4a6a;
+}
+
+[data-theme="winamp"] .title-bar-controls button[aria-label="Close"]:hover:not(:disabled)::before {
+  background: #8494a1;
+}
+
+[data-theme="winamp"] .title-bar-controls button:active:not(:disabled)::before {
+  background: var(--wa-shadow);
+  box-shadow: inset -1px -1px 0 #6a6a8a;
+}
+
+/* The glyph, positioned inside the square. */
+[data-theme="winamp"] .title-bar-controls button[aria-label]::after,
+[data-theme="winamp"] .app-window-controls button[aria-label]::after {
+  content: "";
+  display: block;
+  position: absolute;
+  margin: 0;
+  box-sizing: border-box;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  transform: none;
+}
+
+[data-theme="winamp"] .title-bar-controls button[aria-label="Minimize"]::after {
+  top: 12px;
+  left: 12px;
+  width: 5px;
+  height: 1px;
+  background: var(--wa-grey);
+}
+
+[data-theme="winamp"] .title-bar-controls button[aria-label="Maximize"]::after {
+  top: 8px;
+  left: 7px;
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--wa-grey);
+  border-top-width: 2px;
+}
+
+[data-theme="winamp"] .title-bar-controls button[aria-label="Restore"]::after {
+  top: 10px;
+  left: 7px;
+  width: 4px;
+  height: 3px;
+  border: 1px solid var(--wa-grey);
+  background: var(--wa-body-dark);
+  box-shadow: 1px -2px 0 0 var(--wa-grey);
+}
+
+/* Pixel-drawn 5x5 "x". */
+[data-theme="winamp"] .title-bar-controls button[aria-label="Close"]::after {
+  top: 8px;
+  left: 3px;
+  width: 1px;
+  height: 1px;
+  background: #1e1f25;
+  box-shadow:
+    4px 0 #1e1f25,
+    1px 1px #1e1f25,
+    3px 1px #1e1f25,
+    2px 2px #1e1f25,
+    1px 3px #1e1f25,
+    3px 3px #1e1f25,
+    0 4px #1e1f25,
+    4px 4px #1e1f25;
+}
+
+/* Menu strip under the title. */
+[data-theme="winamp"] .app-title-bar > .menubar {
+  gap: 2px;
+  margin: 0 -2px 0 -4px;
+  padding: 2px 4px 3px;
+  border-top: 1px solid var(--wa-shadow);
+  background: var(--wa-body-dark);
+  box-shadow: inset 0 1px 0 #4a4a6a;
+}
+
+[data-theme="winamp"] .menubar .menubar-item {
+  min-width: 0;
+  min-height: 15px;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid var(--wa-edge);
+  border-radius: 0;
+  background: var(--wa-grey);
+  color: #1e1f25;
+  font: bold 8px Arial, Helvetica, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: inset 1px 1px 0 #efffff, inset -1px -1px 0 var(--wa-grey-dark);
+}
+
+[data-theme="winamp"] .menubar .menubar-item::before {
+  display: none;
+}
+
+[data-theme="winamp"] .menubar .menubar-item:hover:not(:disabled) {
+  border-color: var(--wa-edge);
+  background: #cbd9df;
+}
+
+[data-theme="winamp"] .menubar .menubar-item.is-open,
+[data-theme="winamp"] .menubar .menubar-item.is-open:hover:not(:disabled),
+[data-theme="winamp"] .menubar .menubar-item:active:not(:disabled) {
+  background: var(--wa-grey-mid);
+  box-shadow: inset 1px 1px 0 var(--wa-grey-dark), inset -1px -1px 0 #efffff;
+}
+
+[data-theme="winamp"] .menubar .menubar-item.is-open .menubar-label {
+  position: relative;
+  top: 1px;
+  left: 1px;
+}
+
+[data-theme="winamp"] .menubar .menubar-item:focus {
+  outline: none;
+}
+
+[data-theme="winamp"] .menubar .menubar-item.is-focused {
+  outline: 1px dotted #1e1f25;
+  outline-offset: -3px;
+}
+
+[data-theme="winamp"] .menubar .menu-mnemonic.is-shown {
+  text-underline-offset: 1px;
+}
+
+/* Narrow windows: the menu collapses into the options button at the top
+   left of the title strip, which is where Winamp's main menu lives. */
+[data-theme="winamp"] .app-title-bar:has(> .menubar-compact) {
+  grid-template-columns: auto auto minmax(8px, 1fr) auto minmax(24px, 1fr) auto;
+  grid-template-rows: 14px;
+  grid-template-areas: "menu icon gripl title drag controls";
+}
+
+[data-theme="winamp"] .app-title-bar > .menubar-compact {
+  margin: 0 3px 0 -4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+[data-theme="winamp"] .menubar-compact .menubar-item.menubar-overflow {
+  position: relative;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin: -3px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0;
+  color: transparent;
+}
+
+[data-theme="winamp"] .menubar-compact .menubar-item.menubar-overflow:hover:not(:disabled),
+[data-theme="winamp"] .menubar-compact .menubar-item.menubar-overflow:active:not(:disabled),
+[data-theme="winamp"] .menubar-compact .menubar-item.menubar-overflow.is-open {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* The options button: a 9x9 square with three little lines. */
+[data-theme="winamp"] .menubar-compact .menubar-item.menubar-overflow::before {
+  content: "";
+  display: block;
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 9px;
+  height: 9px;
+  margin: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--wa-edge);
+  background:
+    linear-gradient(var(--wa-grey) 0 0) 2px 1px / 3px 1px no-repeat,
+    linear-gradient(var(--wa-grey) 0 0) 2px 3px / 3px 1px no-repeat,
+    linear-gradient(var(--wa-grey) 0 0) 2px 5px / 3px 1px no-repeat,
+    var(--wa-body-dark);
+  box-shadow: inset 1px 1px 0 #6a6a8a;
+}
+
+[data-theme="winamp"] .menubar-compact .menubar-item.menubar-overflow.is-open::before,
+[data-theme="winamp"] .menubar-compact .menubar-item.menubar-overflow:active::before {
+  background-color: var(--wa-shadow);
+  box-shadow: inset -1px -1px 0 #6a6a8a;
+}
+
+[data-theme="winamp"] .menubar-compact .menu {
+  top: calc(100% - 3px);
+  left: 6px;
+  right: auto;
+  max-width: calc(100vw - 24px);
+}
+
+/* Popup menus: Winamp's own menus are plain Win9x popups, so these are too —
+   silver, 2px 3D border, MS Sans Serif, navy highlight. */
+[data-theme="winamp"] .menu {
+  min-width: 180px;
+  padding: 3px;
+  border: 0;
+  border-radius: 0;
+  background: #c0c0c0;
+  color: #000000;
+  font: 11px Tahoma, "Microsoft Sans Serif", "MS Sans Serif", Arial, sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  box-shadow:
+    inset -1px -1px #000000,
+    inset 1px 1px #dfdfdf,
+    inset -2px -2px #808080,
+    inset 2px 2px #ffffff;
+}
+
+[data-theme="winamp"] .menu .menu-item {
+  min-width: 0;
+  min-height: 18px;
+  padding: 0 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #000000;
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+[data-theme="winamp"] .menu .menu-item::before {
+  display: none;
+}
+
+[data-theme="winamp"] .menu .menu-item:focus,
+[data-theme="winamp"] .menu .menu-item:focus-visible {
+  outline: none;
+}
+
+[data-theme="winamp"] .menu .menu-item:hover:not(:disabled),
+[data-theme="winamp"] .menu .menu-item.is-active:not(:disabled),
+[data-theme="winamp"] .menu .menu-item:active:not(:disabled) {
+  border: 0;
+  background: #000080;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+[data-theme="winamp"] .menu .menu-item:disabled {
+  color: #808080;
+  text-shadow: 1px 1px 0 #ffffff;
+}
+
+[data-theme="winamp"] .menu-shortcut {
+  opacity: 1;
+}
+
+/* Solid submenu triangle instead of the chevron. */
+[data-theme="winamp"] .menu-item.has-submenu .menu-arrow {
+  position: relative;
+  align-self: stretch;
+  font-size: 0;
+}
+
+[data-theme="winamp"] .menu-item.has-submenu .menu-arrow::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 7px;
+  margin-top: -4px;
+  border: 4px solid transparent;
+  border-left-color: currentColor;
+  border-right-width: 0;
+}
+
+[data-theme="winamp"] .menu-separator {
+  height: 0;
+  margin: 3px 1px;
+  background: none;
+  border-top: 1px solid #808080;
+  border-bottom: 1px solid #ffffff;
+}
+
+[data-theme="winamp"] .menu-submenu {
+  top: -3px;
+}
+
+[data-theme="winamp"] .menu-group-label {
+  padding: 4px 8px 2px 26px;
+  opacity: 1;
+  color: #808080;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 /* ------------------------------------------------------------------ */
-/* Toolbar = the shuffle/repeat/EQ/PL button row                        */
+/* Buttons: the grey bevelled EQ / PL / SHUFFLE style                   */
 /* ------------------------------------------------------------------ */
 
 [data-theme="winamp"] .window-body {
@@ -209,21 +618,6 @@
 
 [data-theme="winamp"] .app-window-body {
   gap: 4px;
-}
-
-[data-theme="winamp"] .app-toolbar {
-  padding: 4px 6px;
-  background: var(--wa-body-dark);
-  border: 1px solid var(--wa-shadow);
-  box-shadow: inset 1px 1px 0 #4a4a6a;
-}
-
-[data-theme="winamp"] .app-toolbar-brand {
-  font: bold 8px Arial, Helvetica, sans-serif;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--wa-gold);
-  text-shadow: 1px 1px 0 var(--wa-edge);
 }
 
 /* Grey bevelled buttons, exactly like EQ / PL / SHUFFLE. */
@@ -261,8 +655,7 @@
   box-shadow: inset 1px 1px 0 var(--wa-grey-dark), inset -1px -1px 0 #efffff;
 }
 
-[data-theme="winamp"] button.default::before,
-[data-theme="winamp"] .theme-cycle::before {
+[data-theme="winamp"] button.default::before {
   background: var(--wa-lcd);
   box-shadow: 0 0 2px var(--wa-lcd);
 }
@@ -277,7 +670,6 @@
   outline-offset: -3px;
 }
 
-[data-theme="winamp"] .title-bar-controls button::before,
 [data-theme="winamp"] .remove-btn::before {
   display: none;
 }
@@ -698,6 +1090,43 @@
   padding: 8px;
 }
 
+/* About: the name and version on the main window's black LCD. */
+[data-theme="winamp"] .about-head {
+  gap: 10px;
+  padding: 6px 8px;
+  background: #000000;
+  border: 1px solid var(--wa-shadow);
+  box-shadow: 0 0 0 1px #4a4a6a;
+}
+
+[data-theme="winamp"] .about-icon {
+  width: 40px;
+  height: 40px;
+}
+
+[data-theme="winamp"] .about-name {
+  font: bold 14px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wa-digit);
+}
+
+[data-theme="winamp"] .about-version,
+[data-theme="winamp"] .about-detail {
+  font: bold 10px var(--mono);
+  text-transform: uppercase;
+  color: var(--wa-lcd);
+}
+
+[data-theme="winamp"] .about-detail {
+  color: var(--wa-gold);
+}
+
+[data-theme="winamp"] .about-text {
+  margin: 10px 0 !important;
+  color: var(--text);
+}
+
 [data-theme="winamp"] .settings-hint {
   color: var(--wa-grey-mid);
 }
@@ -742,9 +1171,5 @@
 @media (max-width: 640px) {
   [data-theme="winamp"] .worker-grid {
     grid-template-columns: 1fr;
-  }
-
-  [data-theme="winamp"] .app-title-bar .title-bar-text::after {
-    content: "";
   }
 }

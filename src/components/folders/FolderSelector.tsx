@@ -57,7 +57,7 @@ export function FolderSelector({
       <legend>Source Selection</legend>
       {error && <div className="error-banner">{error}</div>}
       <div className="start-screen-copy">
-        <p>Select FLAC folders or files from the toolbar, then continue.</p>
+        <p>Drop FLAC folders or files here, or use File → Add Folder… / Add Files….</p>
         <p>
           {folders.length === 0
             ? "No items selected."

@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.6.0 — 2026-10-11
+
+### New: a real app window with a menu bar
+
+- The native title bar is gone. The app draws its own title bar, so every theme styles the whole window: icon, title, menu bar and minimise / maximise / close buttons. Drag the empty part of the title bar to move the window; double-click it to maximise. macOS keeps its own traffic-light buttons.
+- New menu bar, replacing the Folder… / Files… / Settings… toolbar:
+  - **File:** Add Folder… (Ctrl+O), Add Files… (Ctrl+Shift+O), Start (Ctrl+Enter), Cancel Run, New Run, Show Full Log… (Ctrl+L), Export Log… (Ctrl+S), Exit.
+  - **Settings:** Preferences… (Ctrl+,) and quick toggles for Maximum Compression, Mark Files as Crunched, Skip Crunched Files and Verbose Logging.
+  - **View:** Theme ▸ and Show Dev Menu.
+  - **Help:** FlacCrunch on GitHub, Release Notes, Report an Issue, About FlacCrunch (new dialog with the app and libFLAC versions).
+- Works like a Windows menu from the keyboard: Alt shows the underlined letters, Alt+letter opens a menu, arrow keys move, Enter picks, Escape closes. Narrow windows and phones get a single ⋮ menu.
+- Every theme has its own title bar and menus: Notepad-style for Basic, navy caption and grey menu bar for Windows 95, an M3 app bar for Material, Norton Commander pull-downs for DOS, XP Luna for LimeWire, the Winamp title strip, a terminal line for Matrix, Pokémon-style menu boxes for Game Boy, and matching designs for Wizard, Arcade, Casino, Comic and Flash.
+- Windows 95 and LimeWire no longer draw a fake desktop (teal, Bliss) around the window; the themed window fills the app.
+
+### New: Dev menu
+
+- **Settings → Show Dev menu** (or **View → Show Dev Menu**) adds a Dev menu: theme quick switch and Next Theme (Ctrl+Shift+T), Reload UI (Ctrl+R), Toggle DevTools (F12), Open Settings Folder and Open Log Folder.
+- It replaces the floating theme button in the bottom-left corner. If the quick switch menu was on, the Dev menu is now on.
+
+### Fixed
+
+- A fresh Android install now really starts on the Material theme (the backend's default theme was still Basic (Dark)).
+
+---
+
 ## v1.5.0 — 2026-10-11
 
 ### Fixed: Android layout under the status bar and camera cutout

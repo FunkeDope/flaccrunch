@@ -26,13 +26,21 @@ pub struct AppSettings {
     /// Display theme id (GUI only; validated by the frontend).
     #[serde(default = "default_theme")]
     pub theme: String,
-    /// Show the floating quick-switch theme menu (GUI only).
-    #[serde(default)]
-    pub show_theme_quick_switch: bool,
+    /// Show the Dev menu in the menu bar (GUI only). Reads the pre-1.5.1
+    /// `showThemeQuickSwitch` key too: the theme quick switch moved there.
+    #[serde(default, alias = "showThemeQuickSwitch")]
+    pub show_dev_menu: bool,
 }
 
+/// Material on Android, the plain dark Windows look everywhere else. Used when
+/// there is no settings.json yet or it has no theme (matches DEFAULT_THEME in
+/// src/themes/index.ts, which the frontend uses before settings load).
 fn default_theme() -> String {
-    "basic-dark".to_string()
+    if cfg!(target_os = "android") {
+        "material".to_string()
+    } else {
+        "basic-dark".to_string()
+    }
 }
 
 impl Default for AppSettings {
@@ -46,7 +54,7 @@ impl Default for AppSettings {
             skip_crunched: false,
             max_compression: false,
             theme: default_theme(),
-            show_theme_quick_switch: false,
+            show_dev_menu: false,
         }
     }
 }
@@ -105,7 +113,7 @@ mod tests {
         assert!(!s.mark_as_crunched);
         assert!(!s.skip_crunched);
         assert_eq!(s.theme, "basic-dark");
-        assert!(!s.show_theme_quick_switch);
+        assert!(!s.show_dev_menu);
     }
 
     #[test]
@@ -119,7 +127,7 @@ mod tests {
             skip_crunched: false,
             max_compression: true,
             theme: "winamp".to_string(),
-            show_theme_quick_switch: true,
+            show_dev_menu: true,
         };
         let json = serde_json::to_string(&original).expect("serialize");
         assert!(json.contains("threadCount"), "{json}");
@@ -131,7 +139,16 @@ mod tests {
         assert!(back.verbose_logging);
         assert!(back.mark_as_crunched);
         assert_eq!(back.theme, "winamp");
-        assert!(back.show_theme_quick_switch);
+        assert!(back.show_dev_menu);
+    }
+
+    #[test]
+    fn test_old_quick_switch_key_maps_to_dev_menu() {
+        let back: AppSettings =
+            serde_json::from_str(r#"{"maxRetries":3,"showThemeQuickSwitch":true}"#).unwrap();
+        assert!(back.show_dev_menu);
+        let json = serde_json::to_string(&back).unwrap();
+        assert!(json.contains("showDevMenu"), "{json}");
     }
 
     #[test]

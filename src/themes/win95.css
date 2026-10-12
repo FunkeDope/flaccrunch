@@ -6,7 +6,7 @@
   --mono: "Courier New", Courier, monospace;
   --fs: 11px;
 
-  --desktop: #008080;
+  --desktop: silver;
   --bg: silver;
   --surface: silver;
   --surface-2: #ffffff;
@@ -45,9 +45,16 @@
   --shadow: none;
 }
 
+/* The window IS the app window: no teal desktop around it. 98.css's bevelled
+   .window border is the frame. */
 [data-theme="win95"] .app-shell {
+  padding: 0;
   -webkit-font-smoothing: none;
   font-smooth: never;
+}
+
+[data-theme="win95"] .app-window {
+  height: 100vh;
 }
 
 [data-theme="win95"] .error-banner {
@@ -86,6 +93,124 @@
   background: #fff4f4;
 }
 
-[data-theme="win95"] .theme-cycle {
+
+/* Title bar + menu bar, as in a Windows 95 application window: the navy
+   caption (icon, bold title, 98.css caption buttons) and, under it, the grey
+   menu bar. Menus are raised silver popups with a navy highlight. */
+[data-theme="win95"] .app-title-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto;
+  grid-template-rows: 20px auto;
+  grid-template-areas:
+    "icon title drag controls"
+    "menu menu menu menu";
+  padding: 0;
+  background: linear-gradient(90deg, navy, #1084d0) 0 0 / 100% 20px no-repeat, silver;
+}
+
+[data-theme="win95"] .app-title-icon {
+  margin: 0 3px 0 3px;
+}
+
+[data-theme="win95"] .app-title-bar > .title-bar-text {
+  margin-right: 24px;
+}
+
+[data-theme="win95"] .app-window-controls {
+  align-items: center;
+  padding-right: 2px;
+}
+
+[data-theme="win95"] .app-title-bar > .menubar {
+  padding: 2px 0 1px;
+  background: silver;
+  color: #000000;
+}
+
+[data-theme="win95"] .menubar .menubar-item {
   min-width: 0;
+  min-height: 0;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: #000000;
+  font: inherit;
+}
+
+[data-theme="win95"] .menubar .menubar-item:focus,
+[data-theme="win95"] .menubar .menubar-item:not(:disabled):active {
+  outline: none;
+  box-shadow: none;
+}
+
+[data-theme="win95"] .menubar .menubar-item.is-open,
+[data-theme="win95"] .menubar .menubar-item.is-focused {
+  background: navy;
+  color: #ffffff;
+}
+
+[data-theme="win95"] .menu {
+  min-width: 180px;
+  padding: 3px;
+  background: silver;
+  color: #000000;
+  box-shadow:
+    inset -1px -1px #0a0a0a,
+    inset 1px 1px #dfdfdf,
+    inset -2px -2px grey,
+    inset 2px 2px #ffffff;
+}
+
+[data-theme="win95"] .menu .menu-item {
+  min-width: 0;
+  min-height: 20px;
+  padding: 0 4px 0 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: #000000;
+  font: inherit;
+}
+
+[data-theme="win95"] .menu .menu-item:focus,
+[data-theme="win95"] .menu .menu-item:not(:disabled):active {
+  outline: none;
+  box-shadow: none;
+}
+
+[data-theme="win95"] .menu .menu-item:not(:disabled):hover,
+[data-theme="win95"] .menu .menu-item.is-active:not(:disabled) {
+  background: navy;
+  color: #ffffff;
+}
+
+[data-theme="win95"] .menu .menu-item:disabled {
+  color: grey;
+  text-shadow: 1px 1px 0 #ffffff;
+}
+
+[data-theme="win95"] .menu-shortcut {
+  opacity: 1;
+}
+
+[data-theme="win95"] .menu-separator {
+  height: 0;
+  margin: 3px 1px;
+  border-top: 1px solid grey;
+  border-bottom: 1px solid #ffffff;
+}
+
+[data-theme="win95"] .menu-submenu {
+  top: -3px;
+}
+
+[data-theme="win95"] .menu-group-label {
+  opacity: 1;
+  color: grey;
+}
+
+[data-theme="win95"] .about-version,
+[data-theme="win95"] .about-detail {
+  color: #222222;
 }

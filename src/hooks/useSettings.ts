@@ -14,7 +14,7 @@ const defaultSettings: AppSettings = {
   skipCrunched: false,
   maxCompression: false,
   theme: DEFAULT_THEME,
-  showThemeQuickSwitch: false,
+  showDevMenu: false,
 };
 
 export function useSettings() {

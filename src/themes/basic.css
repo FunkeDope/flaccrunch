@@ -180,15 +180,6 @@
   padding: 8px;
 }
 
-[data-theme^="basic"] .app-toolbar {
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--b-line);
-}
-
-[data-theme^="basic"] .app-toolbar-brand {
-  font-weight: 400;
-  color: var(--b-muted);
-}
 
 /* Standard buttons. */
 [data-theme^="basic"] button {
@@ -240,6 +231,159 @@
 [data-theme^="basic"] .title-bar-controls button,
 [data-theme^="basic"] .worker-toggle {
   min-width: 0;
+}
+
+/* Title bar + menu bar: a Windows 10 desktop app (Notepad). A 30px caption
+   row with icon, title and 46px caption buttons, then the menu bar on its
+   own row; Win32 popup menus. */
+[data-theme^="basic"] {
+  --b-menubar-hot: #e5f3ff;
+  --b-menubar-hot-border: #cce8ff;
+  --b-menubar-open: #cce8ff;
+  --b-menubar-open-border: #99d1ff;
+  --b-menu-bg: #f2f2f2;
+  --b-menu-border: #cccccc;
+  --b-menu-hot: #91c9f7;
+  --b-menu-separator: #d7d7d7;
+  --b-menu-disabled: #6d6d6d;
+}
+
+[data-theme="basic-dark"] {
+  --b-menubar-hot: #353535;
+  --b-menubar-hot-border: #353535;
+  --b-menubar-open: #404040;
+  --b-menubar-open-border: #404040;
+  --b-menu-bg: #2b2b2b;
+  --b-menu-border: #484848;
+  --b-menu-hot: #414141;
+  --b-menu-separator: #484848;
+  --b-menu-disabled: #7a7a7a;
+}
+
+[data-theme^="basic"] .app-title-bar {
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon title drag controls"
+    "menu menu menu menu";
+  min-height: 0;
+  padding: 0;
+  background: var(--b-titlebar);
+  border-bottom: 1px solid var(--b-line);
+}
+
+[data-theme^="basic"] .app-title-icon {
+  margin: 0 7px 0 8px;
+}
+
+[data-theme^="basic"] .app-title-bar > .title-bar-text {
+  margin: 0;
+  font-weight: 400;
+  line-height: 30px;
+}
+
+[data-theme^="basic"] .app-title-drag {
+  min-height: 30px;
+}
+
+[data-theme^="basic"] .app-window-controls button {
+  min-height: 30px;
+  width: 46px;
+  min-width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--b-text);
+}
+
+[data-theme^="basic"] .app-window-controls button:hover:not(:disabled) {
+  border: none;
+  background: var(--b-button-hover);
+}
+
+[data-theme^="basic"] .app-window-controls button[aria-label="Close"]:hover:not(:disabled) {
+  background: var(--b-close-hover);
+  color: #ffffff;
+}
+
+[data-theme^="basic"] .app-window-controls button:active:not(:disabled) {
+  border: none;
+}
+
+[data-theme^="basic"] .app-title-bar > .menubar {
+  padding: 0 0 1px 1px;
+}
+
+[data-theme^="basic"] .menubar-item {
+  min-width: 0;
+  min-height: 19px;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--b-text);
+  line-height: 17px;
+}
+
+[data-theme^="basic"] .menubar-item:hover:not(:disabled),
+[data-theme^="basic"] .menubar-item.is-focused:not(:disabled) {
+  border-color: var(--b-menubar-hot-border);
+  background: var(--b-menubar-hot);
+}
+
+[data-theme^="basic"] .menubar-item.is-open:not(:disabled) {
+  border-color: var(--b-menubar-open-border);
+  background: var(--b-menubar-open);
+}
+
+[data-theme^="basic"] .menu {
+  min-width: 200px;
+  padding: 2px;
+  border: 1px solid var(--b-menu-border);
+  border-radius: 0;
+  background: var(--b-menu-bg);
+  color: var(--b-text);
+  box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme^="basic"] .menu-item {
+  min-width: 0;
+  min-height: 22px;
+  padding: 0 4px 0 0;
+  border: none;
+  background: transparent;
+  color: var(--b-text);
+}
+
+[data-theme^="basic"] .menu-item:hover:not(:disabled),
+[data-theme^="basic"] .menu-item.is-active:not(:disabled) {
+  border: none;
+  background: var(--b-menu-hot);
+  color: var(--b-text);
+}
+
+[data-theme^="basic"] .menu-item:disabled {
+  opacity: 1;
+  border: none;
+  background: transparent;
+  color: var(--b-menu-disabled);
+}
+
+[data-theme^="basic"] .menu-shortcut {
+  opacity: 1;
+}
+
+[data-theme^="basic"] .menu-separator {
+  margin: 3px 2px 3px 28px;
+  background: var(--b-menu-separator);
+}
+
+[data-theme^="basic"] .menu-submenu {
+  top: -3px;
+}
+
+[data-theme^="basic"] .menubar-overflow {
+  min-width: 32px;
+  font-size: 16px;
 }
 
 /* Text boxes, combo boxes, check boxes. */
