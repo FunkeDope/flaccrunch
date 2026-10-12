@@ -1,0 +1,1202 @@
+/*
+ * DOS — Norton Commander / Turbo Vision text-mode UI.
+ *
+ * CGA/EGA palette only, everything monospace on an 8x18 character grid.
+ * Black screen, light-grey double-line frames, a grey menu bar on top, a black
+ * F-key bar on the bottom, grey dialogs with a hard black drop shadow.
+ * Layout: workers LEFT, files RIGHT, side by side like NC's two panels.
+ */
+
+[data-theme="dos"] {
+  --font: "Perfect DOS VGA 437", "Px437 IBM VGA8", Consolas, "Lucida Console", monospace;
+  --mono: "Perfect DOS VGA 437", "Px437 IBM VGA8", Consolas, "Lucida Console", monospace;
+  --fs: 14px;
+
+  /* The sixteen colours we allow ourselves. */
+  --dos-black: #000000;
+  --dos-blue: #000000;
+  --dos-green: #00aa00;
+  --dos-cyan: #aaaaaa;
+  --dos-red: #aa0000;
+  --dos-brown: #aa5500;
+  --dos-grey: #aaaaaa;
+  --dos-dark-grey: #555555;
+  --dos-bright-cyan: #aaaaaa;
+  --dos-bright-green: #55ff55;
+  --dos-bright-red: #ff5555;
+  --dos-yellow: #ffff55;
+  --dos-white: #ffffff;
+
+  --desktop: var(--dos-blue);
+  --bg: var(--dos-blue);
+  --surface: var(--dos-blue);
+  --surface-2: var(--dos-blue);
+  --text: var(--dos-bright-cyan);
+  --text-strong: var(--dos-white);
+  --muted: var(--dos-dark-grey);
+  --border: var(--dos-bright-cyan);
+  --border-strong: var(--dos-bright-cyan);
+  --accent: var(--dos-cyan);
+  --accent-text: var(--dos-black);
+  --title-bg: var(--dos-cyan);
+  --title-text: var(--dos-black);
+
+  --ok: var(--dos-bright-green);
+  --warn: var(--dos-yellow);
+  --fail: var(--dos-bright-red);
+  /* Stage names are plain white text in the worker list (black on the
+     highlighted current line, see .worker-panel.active). */
+  --stage-blue: var(--dos-white);
+  --stage-green: var(--dos-white);
+  --stage-amber: var(--dos-white);
+  --stage-purple: var(--dos-white);
+
+  --pane-bg: var(--dos-blue);
+  --row-hover: var(--dos-cyan);
+  --row-fail-bg: transparent;
+  --row-fail-hover: var(--dos-cyan);
+  --worker-active-bg: transparent;
+  --drop-active-bg: var(--dos-cyan);
+  --progress-track: var(--dos-blue);
+  --progress-fill: var(--dos-bright-cyan);
+
+  --line: var(--dos-cyan);
+  --line-dark: var(--dos-cyan);
+  --line-highlight: transparent;
+  --radius: 0;
+  --radius-sm: 0;
+  --shadow: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Screen                                                              */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] body {
+  font: var(--fs) / 18px var(--font);
+  color: var(--text);
+  background: var(--dos-blue);
+  -webkit-font-smoothing: none;
+}
+
+[data-theme="dos"] .app-shell {
+  padding: 0;
+  background: var(--dos-blue);
+}
+
+[data-theme="dos"] .app-window {
+  height: 100vh;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--dos-blue);
+}
+
+[data-theme="dos"] .app-window-body {
+  padding: 0;
+  gap: 0;
+}
+
+[data-theme="dos"] .content {
+  padding: 0;
+}
+
+[data-theme="dos"] .app-stack {
+  gap: 8px;
+}
+
+[data-theme="dos"] ::selection {
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+}
+
+/* Top MENU BAR: cyan strip, black text, fake pull-down menu names on the
+   left, the program name on the right. */
+[data-theme="dos"] .app-title-bar {
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  gap: 0;
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+  border: none;
+  flex-shrink: 0;
+}
+
+[data-theme="dos"] .app-title-bar .title-bar-text {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  padding: 0 1ch;
+  font-weight: normal;
+  letter-spacing: 0;
+  white-space: pre;
+  overflow: hidden;
+}
+
+[data-theme="dos"] .app-title-bar .title-bar-text::before {
+  content: " Left   Files   Commands   Options   Right";
+  white-space: pre;
+}
+
+/* Bottom F-KEY BAR. Two pseudo-elements share one monospace grid: the
+   in-flow ::before (pushed last with `order`) paints the black bar, the
+   cyan label blocks (hard gradient stops in ch units) and the black label
+   text; the absolutely positioned ::after overlays the grey key numbers. */
+[data-theme="dos"] .app-window::before,
+[data-theme="dos"] .app-window::after {
+  display: block;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  font: var(--fs) / 18px var(--font);
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+[data-theme="dos"] .app-window::before {
+  content: " Help   Menu   View   Edit   Copy   RenMov   Mkdir   Delete   PullDn    Quit";
+  order: 10;
+  flex-shrink: 0;
+  color: var(--dos-black);
+  background: linear-gradient(
+    90deg,
+    var(--dos-black) 0 1ch,
+    var(--dos-cyan) 1ch 5ch,
+    var(--dos-black) 5ch 8ch,
+    var(--dos-cyan) 8ch 12ch,
+    var(--dos-black) 12ch 15ch,
+    var(--dos-cyan) 15ch 19ch,
+    var(--dos-black) 19ch 22ch,
+    var(--dos-cyan) 22ch 26ch,
+    var(--dos-black) 26ch 29ch,
+    var(--dos-cyan) 29ch 33ch,
+    var(--dos-black) 33ch 36ch,
+    var(--dos-cyan) 36ch 42ch,
+    var(--dos-black) 42ch 45ch,
+    var(--dos-cyan) 45ch 50ch,
+    var(--dos-black) 50ch 53ch,
+    var(--dos-cyan) 53ch 59ch,
+    var(--dos-black) 59ch 62ch,
+    var(--dos-cyan) 62ch 68ch,
+    var(--dos-black) 68ch 72ch,
+    var(--dos-cyan) 72ch 76ch,
+    var(--dos-black) 76ch
+  );
+}
+
+[data-theme="dos"] .app-window::after {
+  content: "1      2      3      4      5      6        7       8        9        10";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  color: var(--dos-grey);
+  background: transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar                                                             */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] .app-toolbar {
+  min-height: 18px;
+  margin: 0;
+  padding: 0 1ch;
+  gap: 0 1ch;
+  flex-shrink: 0;
+}
+
+[data-theme="dos"] .app-toolbar-actions {
+  gap: 0 1ch;
+}
+
+[data-theme="dos"] .app-toolbar-right {
+  gap: 1ch;
+}
+
+[data-theme="dos"] .app-toolbar-brand {
+  color: var(--dos-white);
+  font-weight: normal;
+}
+
+[data-theme="dos"] .theme-cycle {
+  color: var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] .theme-cycle-label {
+  opacity: 1;
+  color: var(--dos-cyan);
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons: flat text with [ brackets ]                                */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] button {
+  min-height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dos-bright-cyan);
+  font: inherit;
+  font-weight: normal;
+  line-height: 18px;
+  gap: 0;
+  white-space: pre;
+}
+
+[data-theme="dos"] button:hover:not(:disabled),
+[data-theme="dos"] button:focus-visible {
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+  outline: none;
+}
+
+[data-theme="dos"] button:active:not(:disabled) {
+  transform: none;
+  background: var(--dos-black);
+  color: var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] button:disabled {
+  opacity: 1;
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] button.default {
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] button.default:hover:not(:disabled),
+[data-theme="dos"] button.default:focus-visible {
+  background: var(--dos-bright-cyan);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] button.default:disabled {
+  background: transparent;
+  color: var(--dos-cyan);
+}
+
+/* The bracket treatment for every command button; the modal title-bar
+   glyph buttons and the folder-list "x" keep their own content. */
+[data-theme="dos"] .app-toolbar button::before,
+[data-theme="dos"] .start-footer-actions button::before,
+[data-theme="dos"] .queue-toggle-row button::before,
+[data-theme="dos"] .pane-toolbar button::before,
+[data-theme="dos"] .status-bar-actions button::before,
+[data-theme="dos"] .settings-actions button::before {
+  content: "[ ";
+}
+
+[data-theme="dos"] .app-toolbar button::after,
+[data-theme="dos"] .start-footer-actions button::after,
+[data-theme="dos"] .queue-toggle-row button::after,
+[data-theme="dos"] .pane-toolbar button::after,
+[data-theme="dos"] .status-bar-actions button::after,
+[data-theme="dos"] .settings-actions button::after {
+  content: " ]";
+}
+
+[data-theme="dos"] .folder-item .remove-btn {
+  min-width: 3ch;
+  min-height: 18px;
+  padding: 0;
+  color: var(--dos-bright-red);
+}
+
+/* ------------------------------------------------------------------ */
+/* Frames: double-line cyan boxes with the title in the top border      */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] .window {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+[data-theme="dos"] fieldset {
+  padding: 0 1ch 8px;
+  border: 3px double var(--dos-bright-cyan);
+  border-radius: 0;
+  background: var(--dos-blue);
+}
+
+[data-theme="dos"] legend {
+  padding: 0 4px;
+  margin-left: 1ch;
+  font-size: inherit;
+  font-weight: normal;
+  letter-spacing: 0;
+  text-transform: none;
+  background: var(--dos-blue);
+  color: var(--dos-white);
+}
+
+[data-theme="dos"] .sunken-panel {
+  border: 3px double var(--dos-bright-cyan);
+  border-radius: 0;
+  background: var(--dos-blue);
+}
+
+[data-theme="dos"] .error-banner {
+  margin: 0 0 8px;
+  padding: 0 1ch;
+  border: 3px double var(--dos-bright-red);
+  border-radius: 0;
+  background: var(--dos-blue);
+  color: var(--dos-bright-red);
+}
+
+/* ------------------------------------------------------------------ */
+/* Idle screen                                                         */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] .status-bar {
+  gap: 0;
+}
+
+[data-theme="dos"] .app-summary-bar {
+  padding: 0 1ch;
+}
+
+[data-theme="dos"] .status-bar-field {
+  padding: 0 1ch;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dos-bright-cyan);
+  font-size: inherit;
+  line-height: 18px;
+}
+
+[data-theme="dos"] .status-bar-field strong {
+  color: var(--dos-white);
+  font-weight: normal;
+}
+
+[data-theme="dos"] .app-summary-bar .status-bar-field + .status-bar-field {
+  border-left: 1px solid var(--dos-cyan);
+}
+
+[data-theme="dos"] .start-fieldset {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+[data-theme="dos"] .start-screen-copy {
+  color: var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] .start-screen-copy p + p {
+  margin-top: 0;
+  color: var(--dos-white);
+}
+
+[data-theme="dos"] .drop-zone-row {
+  gap: 1ch;
+  margin-top: 8px;
+}
+
+[data-theme="dos"] .drop-zone {
+  min-height: 72px;
+  padding: 8px 1ch;
+  border: 3px double var(--dos-bright-cyan);
+  border-radius: 0;
+  background: var(--dos-blue);
+}
+
+[data-theme="dos"] .drop-zone:hover {
+  border-color: var(--dos-white);
+}
+
+[data-theme="dos"] .drop-zone.active {
+  background: var(--dos-cyan);
+  border-color: var(--dos-white);
+}
+
+[data-theme="dos"] .drop-zone-title {
+  font-size: inherit;
+  font-weight: normal;
+  line-height: 18px;
+  color: var(--dos-white);
+}
+
+[data-theme="dos"] .drop-zone-note {
+  margin-top: 0;
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] .drop-zone.active .drop-zone-title,
+[data-theme="dos"] .drop-zone.active .drop-zone-note {
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .intake-footer {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+[data-theme="dos"] .queue-list-panel,
+[data-theme="dos"] .bad-folders-panel {
+  padding: 0 1ch;
+}
+
+[data-theme="dos"] .queue-section-label {
+  margin: 0;
+  font-size: inherit;
+  font-weight: normal;
+  color: var(--dos-yellow);
+}
+
+[data-theme="dos"] .queue-empty {
+  font-style: normal;
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] .folder-item {
+  gap: 1ch;
+  padding: 0;
+  line-height: 18px;
+}
+
+[data-theme="dos"] .folder-item .path {
+  color: var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] .queue-badge-active {
+  padding: 0 1ch;
+  font-size: inherit;
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .start-footer-actions {
+  gap: 1ch;
+  margin-top: 0;
+}
+
+[data-theme="dos"] .start-next-button {
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Run status: a grey NC dialog floating above the panels              */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] .run-status-window {
+  margin: 0 8px 8px 0;
+  border: 6px solid var(--dos-grey);
+  border-radius: 0;
+  background: var(--dos-grey);
+  color: var(--dos-black);
+  /* The single frame line, drawn one cell inside the grey body. */
+  outline: 1px solid var(--dos-black);
+  outline-offset: -7px;
+  box-shadow: 8px 8px 0 var(--dos-black);
+}
+
+[data-theme="dos"] .run-status-main {
+  gap: 0 1ch;
+}
+
+[data-theme="dos"] .run-status-window .status-bar {
+  padding: 0 6px 6px;
+}
+
+[data-theme="dos"] .run-status-window .status-bar-field,
+[data-theme="dos"] .run-status-window .status-bar-field strong {
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .run-status-window .chip-success strong {
+  color: var(--dos-green);
+}
+
+[data-theme="dos"] .run-status-window .chip-error strong {
+  color: var(--dos-red);
+}
+
+[data-theme="dos"] .status-bar-label {
+  font-weight: normal;
+  text-transform: none;
+}
+
+[data-theme="dos"] .status-bar-label.label-processing {
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .status-bar-label.label-cancelling,
+[data-theme="dos"] .status-bar-label.label-warning {
+  color: var(--dos-brown);
+}
+
+[data-theme="dos"] .status-bar-label.label-success {
+  color: var(--dos-green);
+}
+
+[data-theme="dos"] .status-bar-label.label-error {
+  color: var(--dos-red);
+}
+
+[data-theme="dos"] .status-bar-pct {
+  min-width: 4ch;
+  text-align: right;
+  font-weight: normal;
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .status-bar-actions {
+  gap: 1ch;
+}
+
+/* Dialog buttons: grey on grey, the default one on cyan. */
+[data-theme="dos"] .run-status-window button,
+[data-theme="dos"] .modal button {
+  background: var(--dos-grey);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .run-status-window button:hover:not(:disabled),
+[data-theme="dos"] .run-status-window button:focus-visible,
+[data-theme="dos"] .modal button:hover:not(:disabled),
+[data-theme="dos"] .modal button:focus-visible {
+  background: var(--dos-black);
+  color: var(--dos-grey);
+}
+
+[data-theme="dos"] .run-status-window button:disabled,
+[data-theme="dos"] .modal button:disabled {
+  color: var(--dos-dark-grey);
+}
+
+[data-theme="dos"] .run-status-window button.default,
+[data-theme="dos"] .modal button.default {
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .run-status-window button.default:hover:not(:disabled),
+[data-theme="dos"] .run-status-window button.default:focus-visible,
+[data-theme="dos"] .modal button.default:hover:not(:disabled),
+[data-theme="dos"] .modal button.default:focus-visible {
+  background: var(--dos-bright-cyan);
+  color: var(--dos-black);
+}
+
+/* ------------------------------------------------------------------ */
+/* Progress bars: rows of solid character blocks                       */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] .progress-indicator {
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  /* 25% stipple on blue: the "light shade" character. */
+  background: conic-gradient(var(--dos-cyan) 25%, var(--dos-blue) 0) 0 0 / 4px 4px;
+}
+
+[data-theme="dos"] .progress-indicator-bar {
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, var(--dos-bright-cyan) 0 7px, var(--dos-blue) 7px 8px);
+  transition: width 0.1s steps(1);
+}
+
+[data-theme="dos"] .run-progress {
+  height: 18px;
+  background: var(--dos-grey);
+}
+
+[data-theme="dos"] .run-progress .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, var(--dos-blue) 0 7px, var(--dos-grey) 7px 8px);
+}
+
+[data-theme="dos"] .run-status-window.status-success .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, var(--dos-green) 0 7px, var(--dos-grey) 7px 8px);
+}
+
+[data-theme="dos"] .run-status-window.status-warning .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, var(--dos-brown) 0 7px, var(--dos-grey) 7px 8px);
+}
+
+[data-theme="dos"] .run-status-window.status-error .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, var(--dos-red) 0 7px, var(--dos-grey) 7px 8px);
+}
+
+/* ------------------------------------------------------------------ */
+/* Two panels side by side: Workers | Files                            */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] .processing-section {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) !important;
+  gap: 0 8px;
+}
+
+[data-theme="dos"] .resize-handle {
+  display: none;
+}
+
+/* No workers rendered: the file panel takes the whole width. */
+[data-theme="dos"] .processing-section > .files-pane:first-child {
+  grid-column: 1 / -1;
+}
+
+[data-theme="dos"] .workers-pane,
+[data-theme="dos"] .files-pane {
+  padding: 0;
+}
+
+[data-theme="dos"] .pane-toolbar {
+  min-height: 18px;
+  margin: 0;
+  padding: 0 1ch;
+  gap: 0 1ch;
+}
+
+[data-theme="dos"] .workers-heading {
+  gap: 0 1ch;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+[data-theme="dos"] .section-kicker {
+  color: var(--dos-yellow);
+}
+
+[data-theme="dos"] .worker-summary {
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] .bad-files-kicker {
+  margin-left: 0;
+  font-weight: normal;
+  color: var(--dos-bright-red);
+}
+
+/* Inside a panel the body is separated from its header by one line,
+   like the column-header rule in an NC file panel. */
+[data-theme="dos"] .worker-body,
+[data-theme="dos"] .events-table-wrap {
+  padding: 0;
+  border: none;
+  border-top: 1px solid var(--dos-bright-cyan);
+  background: var(--dos-blue);
+}
+
+[data-theme="dos"] .workers-pane .queue-list-panel,
+[data-theme="dos"] .files-pane .bad-folders-panel {
+  margin: 0 1ch 4px;
+  max-height: 126px;
+}
+
+[data-theme="dos"] .bad-folders-panel {
+  border-color: var(--dos-bright-red);
+  background: var(--dos-blue);
+}
+
+[data-theme="dos"] .bad-folders-panel .queue-section-label,
+[data-theme="dos"] .bad-folder-count {
+  font-weight: normal;
+  color: var(--dos-bright-red);
+}
+
+/* ------------------------------------------------------------------ */
+/* Workers: a plain list, three text lines per worker                  */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] .worker-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+
+/* The card's two wrapper divs are flattened so id / stage / file name
+   can share the first grid row; the bar and the hashes each take a row. */
+[data-theme="dos"] .worker-panel {
+  display: grid;
+  grid-template-columns: auto 12ch minmax(0, 1fr);
+  grid-template-rows: 18px 18px 18px;
+  gap: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] .worker-panel + .worker-panel {
+  margin-top: 4px;
+}
+
+[data-theme="dos"] .worker-panel-top,
+[data-theme="dos"] .worker-file-cell {
+  display: contents;
+}
+
+[data-theme="dos"] .worker-id {
+  padding: 0 1ch;
+  font-weight: normal;
+  line-height: 18px;
+  color: var(--dos-yellow);
+}
+
+[data-theme="dos"] .worker-stage-cell {
+  min-width: 0;
+  padding-right: 1ch;
+  line-height: 18px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+[data-theme="dos"] .worker-stage {
+  font-weight: normal;
+}
+
+[data-theme="dos"] .worker-card .file-name {
+  margin: 0;
+  padding-right: 1ch;
+  line-height: 18px;
+  text-overflow: clip;
+  color: var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] .worker-progress-row {
+  grid-column: 1 / -1;
+  height: 18px;
+  padding: 0 1ch;
+  gap: 1ch;
+}
+
+[data-theme="dos"] .worker-progress {
+  height: 14px;
+  padding: 0;
+}
+
+[data-theme="dos"] .worker-percent {
+  min-width: 4ch;
+  color: var(--dos-yellow);
+}
+
+[data-theme="dos"] .worker-hash-panel {
+  grid-column: 1 / -1;
+  height: 18px;
+  padding: 0 1ch;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+[data-theme="dos"] .worker-hashes {
+  flex-direction: row;
+  gap: 1ch;
+  margin: 0;
+  line-height: 18px;
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] .hash-row {
+  flex: 1 1 0;
+  min-width: 0;
+  gap: 1ch;
+}
+
+[data-theme="dos"] .hash-row-out {
+  flex: 1.5 1 0;
+}
+
+[data-theme="dos"] .hash-label {
+  min-width: 3ch;
+  font-weight: normal;
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] .hash-val,
+[data-theme="dos"] .hash-extra {
+  text-overflow: clip;
+}
+
+[data-theme="dos"] .hash-neutral,
+[data-theme="dos"] .hash-missing,
+[data-theme="dos"] .hash-computing {
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] .hash-saved,
+[data-theme="dos"] .hash-saved-low {
+  font-weight: normal;
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] .hash-saved-good {
+  color: var(--dos-bright-green);
+}
+
+/* Idle slots are dimmed like NC's hidden files. */
+[data-theme="dos"] .worker-panel.idle-card .worker-id,
+[data-theme="dos"] .worker-panel.idle-card .file-name {
+  color: var(--dos-cyan);
+}
+
+/* The current item: a cyan bar with black text across the name line. */
+[data-theme="dos"] .worker-panel.active {
+  --stage-blue: var(--dos-black);
+  --stage-green: var(--dos-black);
+  --stage-amber: var(--dos-black);
+  --stage-purple: var(--dos-black);
+}
+
+[data-theme="dos"] .worker-panel.active .worker-id,
+[data-theme="dos"] .worker-panel.active .worker-stage-cell,
+[data-theme="dos"] .worker-panel.active .file-name {
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+}
+
+/* ------------------------------------------------------------------ */
+/* Files: NC file-panel table                                          */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] table {
+  color: var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] table thead th {
+  height: 18px;
+  padding: 0 1ch;
+  background: var(--dos-blue);
+  color: var(--dos-yellow);
+  font-size: inherit;
+  font-weight: normal;
+  letter-spacing: 0;
+  text-transform: none;
+  border-bottom: 1px solid var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] .sortable-th:hover {
+  color: var(--dos-white);
+}
+
+[data-theme="dos"] .sort-arrow {
+  color: var(--dos-cyan);
+}
+
+[data-theme="dos"] .events-table th,
+[data-theme="dos"] .events-table td {
+  height: 18px;
+  padding: 0 1ch;
+}
+
+[data-theme="dos"] table td {
+  border-bottom: none;
+  border-left: 1px solid var(--dos-cyan);
+}
+
+[data-theme="dos"] table td:first-child {
+  border-left: none;
+}
+
+[data-theme="dos"] .events-table tbody tr:hover td,
+[data-theme="dos"] .events-table tr.row-fail:hover td {
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+  border-left-color: var(--dos-cyan);
+}
+
+/* The cursor bar wins over per-cell semantic colours (inline styles). */
+[data-theme="dos"] .events-table tbody tr:hover td * {
+  color: var(--dos-black) !important;
+}
+
+[data-theme="dos"] .events-table tr.row-fail td {
+  font-weight: normal;
+  color: var(--dos-bright-red);
+}
+
+[data-theme="dos"] .status-ok,
+[data-theme="dos"] .status-warn,
+[data-theme="dos"] .status-retry,
+[data-theme="dos"] .status-fail {
+  font-weight: normal;
+}
+
+[data-theme="dos"] .saved-art {
+  color: var(--dos-white);
+}
+
+[data-theme="dos"] .placeholder-row td {
+  color: var(--dos-cyan);
+}
+
+/* Bottom status line of the panel. */
+[data-theme="dos"] .events-table-footer {
+  min-height: 18px;
+  padding: 0 1ch;
+  border-top: 1px solid var(--dos-bright-cyan);
+  color: var(--dos-bright-cyan);
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs: grey body, double black frame, hard black shadow           */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] .modal-overlay {
+  background: transparent;
+}
+
+[data-theme="dos"] .window.modal {
+  border: 3px double var(--dos-black);
+  border-radius: 0;
+  background: var(--dos-grey);
+  color: var(--dos-black);
+  box-shadow: 8px 8px 0 var(--dos-black);
+}
+
+[data-theme="dos"] .modal .title-bar {
+  position: relative;
+  justify-content: center;
+  height: 18px;
+  padding: 0 1ch;
+  background: var(--dos-grey);
+  color: var(--dos-black);
+  border: none;
+}
+
+[data-theme="dos"] .modal .title-bar-text {
+  font-weight: normal;
+  letter-spacing: 0;
+  white-space: pre;
+}
+
+[data-theme="dos"] .modal .title-bar-text::before {
+  content: " ";
+}
+
+[data-theme="dos"] .modal .title-bar-text::after {
+  content: " ";
+}
+
+[data-theme="dos"] .modal .title-bar-controls {
+  position: absolute;
+  top: 0;
+  right: 1ch;
+  gap: 0;
+}
+
+[data-theme="dos"] .modal .title-bar-controls button {
+  min-width: 3ch;
+  min-height: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 18px;
+  background: var(--dos-grey);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .modal .title-bar-controls button[aria-label="Close"]::before {
+  font-size: inherit;
+}
+
+[data-theme="dos"] .modal .title-bar-controls button:hover:not(:disabled),
+[data-theme="dos"] .modal .title-bar-controls button:focus-visible {
+  background: var(--dos-black);
+  color: var(--dos-grey);
+}
+
+[data-theme="dos"] .modal-body {
+  padding: 8px 2ch 8px;
+}
+
+[data-theme="dos"] .modal fieldset {
+  padding: 0 1ch 8px;
+  border: 1px solid var(--dos-black);
+  background: var(--dos-grey);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .modal legend {
+  background: var(--dos-grey);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] .settings-group + .settings-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--dos-black);
+  box-shadow: none;
+}
+
+[data-theme="dos"] .settings-hint,
+[data-theme="dos"] .settings-version,
+[data-theme="dos"] .settings-path {
+  color: var(--dos-dark-grey);
+}
+
+[data-theme="dos"] .settings-check .settings-hint {
+  margin-left: 3ch;
+}
+
+[data-theme="dos"] .modal .error-banner {
+  margin: 0;
+  border: 1px solid var(--dos-red);
+  background: var(--dos-grey);
+  color: var(--dos-red);
+}
+
+[data-theme="dos"] .settings-actions {
+  gap: 1ch;
+}
+
+/* Fields: cyan background, black text, no borders. */
+[data-theme="dos"] input[type="text"],
+[data-theme="dos"] select {
+  min-height: 18px;
+  height: 18px;
+  padding: 0 1ch;
+  border: none;
+  border-radius: 0;
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] input[type="text"]::placeholder {
+  color: var(--dos-blue);
+}
+
+[data-theme="dos"] input[type="text"]:focus,
+[data-theme="dos"] select:focus {
+  outline: none;
+  background: var(--dos-bright-cyan);
+}
+
+[data-theme="dos"] select option {
+  background: var(--dos-cyan);
+  color: var(--dos-black);
+}
+
+[data-theme="dos"] input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--dos-black);
+}
+
+[data-theme="dos"] input[type="range"] {
+  accent-color: var(--dos-black);
+}
+
+[data-theme="dos"] .settings-slider {
+  margin: 4px 0 0;
+}
+
+[data-theme="dos"] label {
+  gap: 1ch;
+}
+
+/* Log viewer: the F3 file viewer, blue screen inside the grey dialog. */
+[data-theme="dos"] .log-viewer-shell {
+  padding: 0;
+  border: 1px solid var(--dos-black);
+  background: var(--dos-blue);
+}
+
+[data-theme="dos"] .log-viewer-text {
+  padding: 0 1ch;
+  font: var(--fs) / 18px var(--font);
+  background: var(--dos-blue);
+  color: var(--dos-grey);
+}
+
+[data-theme="dos"] .log-viewer-placeholder {
+  color: var(--dos-grey);
+}
+
+/* ------------------------------------------------------------------ */
+/* Scrollbars: a stippled track with a solid thumb                     */
+/* ------------------------------------------------------------------ */
+
+[data-theme="dos"] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+[data-theme="dos"] ::-webkit-scrollbar-thumb {
+  background: var(--dos-cyan);
+  border-radius: 0;
+}
+
+[data-theme="dos"] ::-webkit-scrollbar-track {
+  background: conic-gradient(var(--dos-cyan) 25%, var(--dos-blue) 0) 0 0 / 4px 4px;
+}
+
+[data-theme="dos"] .modal ::-webkit-scrollbar-thumb {
+  background: var(--dos-black);
+}
+
+[data-theme="dos"] .modal ::-webkit-scrollbar-track {
+  background: conic-gradient(var(--dos-dark-grey) 25%, var(--dos-grey) 0) 0 0 / 4px 4px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Small screens: panels stack, 80x25 shrinks to 12px cells            */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  [data-theme="dos"] {
+    --fs: 12px;
+  }
+
+  [data-theme="dos"] body,
+  [data-theme="dos"] .log-viewer-text,
+  [data-theme="dos"] .app-window::before,
+  [data-theme="dos"] .app-window::after {
+    font: var(--fs) / 16px var(--font);
+  }
+
+  [data-theme="dos"] .app-shell {
+    padding: 0;
+  }
+
+  [data-theme="dos"] .app-window {
+    height: 100vh;
+  }
+
+  [data-theme="dos"] .app-title-bar .title-bar-text::before {
+    content: "";
+  }
+
+  [data-theme="dos"] .app-window::before,
+  [data-theme="dos"] .app-window::after {
+    height: 16px;
+  }
+
+  [data-theme="dos"] .processing-section {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+    gap: 8px 0;
+  }
+
+  [data-theme="dos"] .worker-panel {
+    grid-template-columns: auto 11ch minmax(0, 1fr);
+  }
+
+  [data-theme="dos"] .run-status-main {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  [data-theme="dos"] .status-bar-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useMemo } from "react";
 import { WorkerGrid } from "./WorkerGrid";
+import { WorkerTable } from "./WorkerTable";
 import { RecentEventsTable } from "./RecentEventsTable";
 import { failedFolders } from "../../lib/format";
 import type {
@@ -11,19 +12,20 @@ interface ProcessingDashboardProps {
   workers: WorkerStatus[];
   recentEvents: FileEvent[];
   runFolders: string[];
+  /** How the active theme presents workers: sortable table or themed cards. */
+  workerLayout?: "cards" | "table";
 }
 
 export function ProcessingDashboard({
   workers,
   recentEvents,
   runFolders,
+  workerLayout = "cards",
 }: ProcessingDashboardProps) {
   const [workersCollapsed, setWorkersCollapsed] = useState(false);
-  const [queueOpen, setQueueOpen] = useState(false);
-  const inProgressFiles = workers
-    .filter((w) => w.state !== "idle" && w.file)
-    .map((w) => w.file as string);
-  const [splitRatio, setSplitRatio] = useState(0.75);
+  // null = automatic: the workers pane takes the height its cards need (capped
+  // by CSS) and the files table gets the rest. Dragging the handle sets a ratio.
+  const [splitRatio, setSplitRatio] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const badFolders = useMemo(() => failedFolders(recentEvents), [recentEvents]);
   const failedCount = badFolders.reduce((sum, f) => sum + f.count, 0);
@@ -75,9 +77,11 @@ export function ProcessingDashboard({
     : "waiting for work";
 
   const showWorkers = workers.length > 0;
-  const gridRows = showWorkers
-    ? `minmax(0, ${splitRatio}fr) auto minmax(0, ${1 - splitRatio}fr)`
-    : "minmax(0, 1fr)";
+  const gridRows = !showWorkers
+    ? "minmax(0, 1fr)"
+    : splitRatio === null
+      ? "auto auto minmax(0, 1fr)"
+      : `minmax(0, ${splitRatio}fr) auto minmax(0, ${1 - splitRatio}fr)`;
 
   return (
     <div
@@ -86,24 +90,17 @@ export function ProcessingDashboard({
       style={{ gridTemplateRows: gridRows }}
     >
       {showWorkers && (
-        <fieldset className="workers-pane">
+        <fieldset className={`workers-pane ${splitRatio === null ? "is-auto" : ""}`}>
           <legend>Workers</legend>
           <div className="pane-toolbar">
             <div className="workers-heading">
-              <span className="section-kicker">{workers.length} slots</span>
+              <span className="section-kicker">
+                {workers.length} slots · {runFolders.length} {runFolders.length === 1 ? "source" : "sources"}
+              </span>
               <span className="worker-summary">
                 {workersCollapsed ? `${activeCount} active | ${workerSummary}` : workerSummary}
               </span>
             </div>
-            <button
-              type="button"
-              className="worker-toggle"
-              aria-expanded={queueOpen}
-              onClick={() => setQueueOpen((value) => !value)}
-              title="Show the source folders/files queued for this run"
-            >
-              {queueOpen ? "Hide queue" : `Show queue (${runFolders.length})`}
-            </button>
             <button
               type="button"
               className="worker-toggle"
@@ -113,49 +110,9 @@ export function ProcessingDashboard({
               {workersCollapsed ? "Expand" : "Collapse"}
             </button>
           </div>
-          {queueOpen && (
-            <div className="sunken-panel queue-list-panel">
-              <div className="queue-section-label">
-                Sources ({runFolders.length})
-              </div>
-              {runFolders.length === 0 ? (
-                <div className="queue-empty">No sources recorded.</div>
-              ) : (
-                <ul className="folder-list">
-                  {runFolders.map((path) => {
-                    const inProgress = inProgressFiles.some((f) => f === path || f.startsWith(path));
-                    return (
-                      <li key={path} className="folder-item">
-                        <span className="path" title={path}>{path}</span>
-                        {inProgress && (
-                          <span className="queue-badge-active" title="A file under this source is being processed">
-                            in progress
-                          </span>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {inProgressFiles.length > 0 && (
-                <>
-                  <div className="queue-section-label">
-                    In progress ({inProgressFiles.length})
-                  </div>
-                  <ul className="folder-list">
-                    {inProgressFiles.map((file) => (
-                      <li key={file} className="folder-item">
-                        <span className="path" title={file}>{file}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
-          )}
           {!workersCollapsed && (
             <div className="sunken-panel worker-body">
-              <WorkerGrid workers={workers} />
+              {workerLayout === "table" ? <WorkerTable workers={workers} /> : <WorkerGrid workers={workers} />}
             </div>
           )}
         </fieldset>
@@ -165,7 +122,8 @@ export function ProcessingDashboard({
         <div
           className="resize-handle"
           onMouseDown={handleDragStart}
-          onDoubleClick={() => setSplitRatio(0.5)}
+          onDoubleClick={() => setSplitRatio(null)}
+          title="Drag to resize; double-click to fit the workers pane to its content"
         />
       )}
 

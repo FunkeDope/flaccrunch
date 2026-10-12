@@ -1,0 +1,750 @@
+/*
+ * Winamp — the classic 2.x "base" skin, sampled from the real sprites:
+ *   body        #39395a / #383859 (steel blue-purple), shadows #181829 #1e1f25
+ *   title ridges gold #ecce7a with #a3946a shading, title text #ffffff
+ *   LCD         #000000 with text #00e200, digits #00f800
+ *   grey bevel  #bdced6 / #adb5c6 / #4a5a6b (EQ/PL, transport buttons)
+ *   sliders     #c8c5d3 knobs on #31314d / #1f1f31 grooves
+ *   playlist    text #00ff00, current #ffffff, selected bg #0000c6
+ * Layout mimics the Winamp window stack: main window (status), equalizer-ish
+ * strip (toolbar), playlist editor (files) — each with its own ridged title.
+ */
+
+[data-theme="winamp"] {
+  --font: Arial, Helvetica, sans-serif;
+  --mono: "Lucida Console", Consolas, monospace;
+  --fs: 11px;
+
+  --desktop: #000000;
+  --bg: #39395a;
+  --surface: #39395a;
+  --surface-2: #000000;
+  --text: #d7d7dd;
+  --text-strong: #ffffff;
+  --muted: #8f8fa8;
+  --border: #181829;
+  --border-strong: #4a4a6a;
+  --accent: #ecce7a;
+  --accent-text: #1e1f25;
+  --title-bg: #39395a;
+  --title-text: #ffffff;
+
+  --ok: #00e200;
+  --warn: #ecce7a;
+  --fail: #ff2833;
+  --stage-blue: #00e200;
+  --stage-green: #00e200;
+  --stage-amber: #ecce7a;
+  --stage-purple: #c8c5d3;
+
+  --pane-bg: #000000;
+  --row-hover: #0000c6;
+  --row-fail-bg: #2a0004;
+  --row-fail-hover: #4e0f00;
+  --worker-active-bg: #000000;
+  --drop-active-bg: #0000c6;
+  --progress-track: #1f1f31;
+  --progress-fill: #00e200;
+
+  --line: #181829;
+  --line-dark: #181829;
+  --line-highlight: #4a4a6a;
+  --radius: 0;
+  --radius-sm: 0;
+  --shadow: none;
+
+  --wa-body: #39395a;
+  --wa-body-dark: #31314d;
+  --wa-shadow: #181829;
+  --wa-edge: #1e1f25;
+  --wa-gold: #ecce7a;
+  --wa-gold-dark: #a3946a;
+  --wa-grey: #bdced6;
+  --wa-grey-mid: #adb5c6;
+  --wa-grey-dark: #4a5a6b;
+  --wa-lcd: #00e200;
+  --wa-digit: #00f800;
+}
+
+@keyframes wa-bounce {
+  from {
+    height: 10%;
+  }
+  to {
+    height: 100%;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Desktop and window chrome                                            */
+/* ------------------------------------------------------------------ */
+
+[data-theme="winamp"] body {
+  -webkit-font-smoothing: none;
+}
+
+[data-theme="winamp"] .app-shell {
+  padding: 6px;
+  background: #000000;
+}
+
+[data-theme="winamp"] .app-window {
+  height: calc(100vh - 12px);
+}
+
+/* Every "window" is a slab of the steel body with a 1px dark edge. */
+[data-theme="winamp"] .window {
+  background: var(--wa-body);
+  border: 1px solid var(--wa-edge);
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #4a4a6a, inset -1px -1px 0 var(--wa-shadow);
+}
+
+/* Title bar: 14px, gold ridges either side of the centred white title. */
+[data-theme="winamp"] .title-bar {
+  min-height: 14px;
+  height: 14px;
+  padding: 0 4px;
+  gap: 6px;
+  background: var(--wa-body);
+  border-bottom: 1px solid var(--wa-shadow);
+}
+
+[data-theme="winamp"] .title-bar::before,
+[data-theme="winamp"] .title-bar::after {
+  content: "";
+  flex: 1;
+  height: 7px;
+  background: repeating-linear-gradient(
+    180deg,
+    var(--wa-gold) 0 1px,
+    var(--wa-gold-dark) 1px 2px,
+    var(--wa-shadow) 2px 3px,
+    transparent 3px 4px
+  );
+}
+
+[data-theme="winamp"] .title-bar-text {
+  order: 1;
+  margin: 0 2px;
+  font: bold 9px Arial, Helvetica, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-shadow: 1px 1px 0 var(--wa-edge);
+  white-space: nowrap;
+}
+
+[data-theme="winamp"] .app-title-bar .title-bar-text::after {
+  content: " - LOSSLESS CRUNCHER";
+  color: var(--wa-grey-mid);
+}
+
+[data-theme="winamp"] .title-bar-controls {
+  order: 3;
+  gap: 1px;
+}
+
+[data-theme="winamp"] .title-bar-controls button {
+  min-width: 9px;
+  min-height: 9px;
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 1px solid var(--wa-edge);
+  background: var(--wa-body-dark);
+  box-shadow: inset 1px 1px 0 #6a6a8a;
+  font-size: 7px;
+  line-height: 1;
+  color: var(--wa-grey);
+}
+
+[data-theme="winamp"] .title-bar-controls button::before {
+  content: "";
+}
+
+[data-theme="winamp"] .title-bar-controls button[aria-label="Close"] {
+  background: #70818f;
+}
+
+/* Spectrum analyser inside the main title bar, right after the name. */
+[data-theme="winamp"] .wa-vis {
+  order: 2;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 10px;
+  padding: 1px 2px;
+  background: #000000;
+  border: 1px solid var(--wa-shadow);
+}
+
+[data-theme="winamp"] .wa-vis-bar {
+  display: block;
+  width: 2px;
+  height: 10%;
+  background: linear-gradient(to top, #00e200 0 50%, #ecce7a 50% 80%, #ff2833 80%);
+  transition: height 0.3s ease;
+}
+
+[data-theme="winamp"] .wa-vis.is-active .wa-vis-bar {
+  animation: wa-bounce 0.4s ease-in-out infinite alternate;
+}
+
+[data-theme="winamp"] .wa-vis.is-active .wa-vis-bar:nth-child(3n) {
+  animation-duration: 0.52s;
+}
+
+[data-theme="winamp"] .wa-vis.is-active .wa-vis-bar:nth-child(4n + 1) {
+  animation-duration: 0.31s;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar = the shuffle/repeat/EQ/PL button row                        */
+/* ------------------------------------------------------------------ */
+
+[data-theme="winamp"] .window-body {
+  padding: 6px;
+}
+
+[data-theme="winamp"] .app-window-body {
+  gap: 4px;
+}
+
+[data-theme="winamp"] .app-toolbar {
+  padding: 4px 6px;
+  background: var(--wa-body-dark);
+  border: 1px solid var(--wa-shadow);
+  box-shadow: inset 1px 1px 0 #4a4a6a;
+}
+
+[data-theme="winamp"] .app-toolbar-brand {
+  font: bold 8px Arial, Helvetica, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--wa-gold);
+  text-shadow: 1px 1px 0 var(--wa-edge);
+}
+
+/* Grey bevelled buttons, exactly like EQ / PL / SHUFFLE. */
+[data-theme="winamp"] button {
+  min-height: 15px;
+  padding: 0 7px;
+  border: 1px solid var(--wa-edge);
+  border-radius: 0;
+  background: var(--wa-grey);
+  color: #1e1f25;
+  font: bold 8px Arial, Helvetica, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: inset 1px 1px 0 #efffff, inset -1px -1px 0 var(--wa-grey-dark);
+}
+
+[data-theme="winamp"] button::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-right: 4px;
+  background: #4a5a6b;
+  box-shadow: inset 1px 1px 0 #2b2b44;
+}
+
+[data-theme="winamp"] button:hover:not(:disabled) {
+  border-color: var(--wa-edge);
+  background: #cbd9df;
+}
+
+[data-theme="winamp"] button:active:not(:disabled) {
+  transform: none;
+  background: var(--wa-grey-mid);
+  box-shadow: inset 1px 1px 0 var(--wa-grey-dark), inset -1px -1px 0 #efffff;
+}
+
+[data-theme="winamp"] button.default::before,
+[data-theme="winamp"] .theme-cycle::before {
+  background: var(--wa-lcd);
+  box-shadow: 0 0 2px var(--wa-lcd);
+}
+
+[data-theme="winamp"] button:disabled {
+  opacity: 1;
+  color: #7b8494;
+}
+
+[data-theme="winamp"] button:focus-visible {
+  outline: 1px dotted #1e1f25;
+  outline-offset: -3px;
+}
+
+[data-theme="winamp"] .title-bar-controls button::before,
+[data-theme="winamp"] .remove-btn::before {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Panels: LCD glass and the steel body                                 */
+/* ------------------------------------------------------------------ */
+
+[data-theme="winamp"] fieldset {
+  padding: 18px 6px 6px;
+  position: relative;
+  border: 1px solid var(--wa-edge);
+  border-radius: 0;
+  background: var(--wa-body);
+  box-shadow: inset 1px 1px 0 #4a4a6a, inset -1px -1px 0 var(--wa-shadow);
+}
+
+/* Legends become ridged Winamp title bars for each sub-window. */
+[data-theme="winamp"] legend {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 14px;
+  margin: 0;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--wa-shadow);
+  font: bold 9px Arial, Helvetica, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-shadow: 1px 1px 0 var(--wa-edge);
+}
+
+[data-theme="winamp"] legend::before,
+[data-theme="winamp"] legend::after {
+  content: "";
+  flex: 1;
+  height: 7px;
+  background: repeating-linear-gradient(
+    180deg,
+    var(--wa-gold) 0 1px,
+    var(--wa-gold-dark) 1px 2px,
+    var(--wa-shadow) 2px 3px,
+    transparent 3px 4px
+  );
+}
+
+[data-theme="winamp"] .sunken-panel,
+[data-theme="winamp"] input[type="text"],
+[data-theme="winamp"] select,
+[data-theme="winamp"] .drop-zone,
+[data-theme="winamp"] .log-viewer-text,
+[data-theme="winamp"] .log-viewer-shell {
+  background: #000000;
+  color: var(--wa-lcd);
+  border: 1px solid var(--wa-shadow);
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #000000, 0 0 0 1px #4a4a6a;
+  font: bold 10px var(--mono);
+}
+
+[data-theme="winamp"] select,
+[data-theme="winamp"] input[type="text"] {
+  min-height: 18px;
+  padding: 0 4px;
+}
+
+[data-theme="winamp"] .drop-zone {
+  border-style: solid;
+  min-height: 48px;
+}
+
+[data-theme="winamp"] .drop-zone-title,
+[data-theme="winamp"] .drop-zone-note {
+  font: bold 10px var(--mono);
+  text-transform: uppercase;
+  color: var(--wa-lcd);
+}
+
+[data-theme="winamp"] .drop-zone-note {
+  color: #7b8494;
+}
+
+[data-theme="winamp"] .start-screen-copy {
+  color: var(--text);
+}
+
+/* Status chips = the kbps / kHz readouts: black LCD, green digits. */
+[data-theme="winamp"] .status-bar {
+  gap: 3px;
+}
+
+[data-theme="winamp"] .status-bar-field {
+  padding: 0 5px;
+  min-height: 15px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--wa-shadow);
+  border-radius: 0;
+  background: #000000;
+  color: var(--wa-lcd);
+  font: bold 10px var(--mono);
+  text-transform: uppercase;
+  box-shadow: 0 0 0 1px #4a4a6a;
+}
+
+[data-theme="winamp"] .status-bar-field strong {
+  color: var(--wa-digit);
+  margin-left: 3px;
+}
+
+[data-theme="winamp"] .chip-error strong {
+  color: var(--fail);
+}
+
+/* ------------------------------------------------------------------ */
+/* Run status = the main window display                                 */
+/* ------------------------------------------------------------------ */
+
+[data-theme="winamp"] .run-status-body {
+  padding: 6px !important;
+}
+
+[data-theme="winamp"] .run-status-main {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 6px;
+  padding: 4px;
+  background: #000000;
+  border: 1px solid var(--wa-shadow);
+  box-shadow: 0 0 0 1px #4a4a6a;
+}
+
+[data-theme="winamp"] .status-bar-label {
+  font: bold 10px var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--wa-lcd) !important;
+}
+
+[data-theme="winamp"] .status-bar-label.label-error {
+  color: var(--fail) !important;
+}
+
+[data-theme="winamp"] .status-bar-label.label-cancelling,
+[data-theme="winamp"] .status-bar-label.label-warning {
+  color: var(--wa-gold) !important;
+}
+
+[data-theme="winamp"] .status-bar-pct {
+  font: bold 18px var(--mono);
+  color: var(--wa-digit);
+  letter-spacing: 0.04em;
+}
+
+[data-theme="winamp"] .run-status-window .status-bar {
+  padding: 4px 6px 6px;
+}
+
+/* Progress = the position slider: dark groove, grey knob at the fill edge. */
+[data-theme="winamp"] .progress-indicator {
+  position: relative;
+  height: 10px;
+  border: 1px solid var(--wa-shadow);
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, #31314d 0 2px, #1f1f31 2px 4px);
+  box-shadow: inset 0 1px 0 #1e1e2f;
+  overflow: visible;
+}
+
+[data-theme="winamp"] .progress-indicator-bar {
+  position: relative;
+  border-radius: 0;
+  background: transparent;
+  min-width: 29px;
+}
+
+[data-theme="winamp"] .progress-indicator-bar::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  right: 0;
+  width: 29px;
+  border: 1px solid var(--wa-edge);
+  background: var(--wa-grey);
+  box-shadow: inset 1px 1px 0 #efffff, inset -1px -1px 0 var(--wa-grey-dark);
+  background-image: linear-gradient(90deg, transparent 12px, #4a5a6b 12px 13px, transparent 13px 15px, #4a5a6b 15px 16px, transparent 16px);
+}
+
+[data-theme="winamp"] .run-progress {
+  height: 10px;
+  margin: 0 2px;
+}
+
+[data-theme="winamp"] .worker-progress {
+  height: 7px;
+}
+
+[data-theme="winamp"] .worker-progress > .progress-indicator-bar {
+  min-width: 14px;
+  background: linear-gradient(90deg, #00e200, #ecce7a 70%, #ff2833);
+}
+
+[data-theme="winamp"] .worker-progress > .progress-indicator-bar::after {
+  width: 14px;
+  background-image: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard: EQ-style worker window above a playlist editor            */
+/* ------------------------------------------------------------------ */
+
+[data-theme="winamp"] .processing-section {
+  gap: 4px;
+}
+
+[data-theme="winamp"] .resize-handle {
+  height: 4px;
+}
+
+[data-theme="winamp"] .resize-handle::after {
+  width: 100%;
+  height: 2px;
+  border: none;
+  background: repeating-linear-gradient(90deg, var(--wa-gold-dark) 0 6px, transparent 6px 10px);
+}
+
+[data-theme="winamp"] .pane-toolbar {
+  margin-bottom: 4px;
+}
+
+[data-theme="winamp"] .section-kicker,
+[data-theme="winamp"] .worker-summary {
+  font: bold 8px Arial, Helvetica, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--wa-gold);
+}
+
+/* Workers: a grid of little LCDs, like the EQ band readouts. */
+[data-theme="winamp"] .worker-body {
+  padding: 3px;
+  background: var(--wa-body-dark);
+  box-shadow: inset 1px 1px 0 var(--wa-shadow);
+  border: 1px solid var(--wa-shadow);
+}
+
+[data-theme="winamp"] .worker-grid {
+  gap: 3px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+[data-theme="winamp"] .worker-panel {
+  min-height: 0;
+  padding: 3px 4px;
+  gap: 2px;
+  border: 1px solid var(--wa-shadow);
+  border-radius: 0;
+  background: #000000;
+  box-shadow: 0 0 0 1px #4a4a6a;
+  font: bold 10px var(--mono);
+  color: var(--wa-lcd);
+}
+
+[data-theme="winamp"] .worker-panel.idle-card {
+  color: #27273d;
+}
+
+[data-theme="winamp"] .worker-panel.idle-card .file-name,
+[data-theme="winamp"] .worker-panel.idle-card .worker-id {
+  color: #2f2f4a;
+}
+
+[data-theme="winamp"] .worker-id {
+  color: var(--wa-digit);
+}
+
+[data-theme="winamp"] .worker-card .file-name {
+  color: var(--wa-lcd);
+  text-transform: uppercase;
+}
+
+[data-theme="winamp"] .worker-percent {
+  color: var(--wa-digit);
+  font-size: 10px;
+}
+
+[data-theme="winamp"] .worker-hash-panel {
+  padding: 2px 0 0;
+  border: none;
+  border-top: 1px solid #1f1f31;
+  box-shadow: none;
+}
+
+[data-theme="winamp"] .hash-label {
+  color: #7b8494;
+}
+
+[data-theme="winamp"] .hash-val,
+[data-theme="winamp"] .hash-extra {
+  font-size: 9px;
+}
+
+[data-theme="winamp"] .hash-neutral {
+  color: var(--wa-lcd);
+}
+
+[data-theme="winamp"] .hash-missing,
+[data-theme="winamp"] .hash-computing {
+  color: #4a5a6b;
+}
+
+[data-theme="winamp"] .hash-saved-low {
+  color: var(--wa-grey-mid);
+}
+
+/* Files = the playlist editor: green entries, white current, blue selection. */
+[data-theme="winamp"] .events-table-wrap {
+  border: 1px solid var(--wa-shadow);
+  box-shadow: 0 0 0 1px #4a4a6a;
+  color: #00ff00;
+  font: 11px Arial, Helvetica, sans-serif;
+}
+
+[data-theme="winamp"] table thead th {
+  background: #000000;
+  color: #ffffff;
+  font: bold 9px Arial, Helvetica, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #1f1f31;
+}
+
+[data-theme="winamp"] table td {
+  border-bottom: none;
+  color: #00ff00;
+}
+
+[data-theme="winamp"] .events-table th,
+[data-theme="winamp"] .events-table td {
+  height: 15px;
+  padding: 0 4px;
+}
+
+[data-theme="winamp"] .events-table tbody tr:first-child td {
+  color: #ffffff;
+}
+
+[data-theme="winamp"] .events-table tbody tr:hover td {
+  background: #0000c6;
+  color: #ffffff;
+}
+
+[data-theme="winamp"] .events-table tr.row-fail td {
+  background: #000000;
+  color: #ff2833;
+}
+
+[data-theme="winamp"] .events-table tr.row-fail:hover td {
+  background: #0000c6;
+}
+
+[data-theme="winamp"] .saved-audio,
+[data-theme="winamp"] .saved-art {
+  color: #00ff00;
+}
+
+[data-theme="winamp"] .saved-zero,
+[data-theme="winamp"] .sort-arrow {
+  color: #4a5a6b;
+}
+
+[data-theme="winamp"] .status-ok {
+  color: #00ff00;
+}
+
+[data-theme="winamp"] .events-table-footer {
+  padding: 3px 5px;
+  margin-top: 3px;
+  background: #000000;
+  border: 1px solid var(--wa-shadow);
+  box-shadow: 0 0 0 1px #4a4a6a;
+  font: bold 10px var(--mono);
+  color: var(--wa-digit);
+}
+
+[data-theme="winamp"] .queue-list-panel,
+[data-theme="winamp"] .bad-folders-panel {
+  font: bold 10px var(--mono);
+  color: #00ff00;
+}
+
+[data-theme="winamp"] .bad-folders-panel {
+  background: #000000;
+}
+
+[data-theme="winamp"] .queue-section-label {
+  color: #ffffff;
+}
+
+[data-theme="winamp"] .bad-files-kicker,
+[data-theme="winamp"] .bad-folder-count {
+  color: var(--fail);
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs                                                              */
+/* ------------------------------------------------------------------ */
+
+[data-theme="winamp"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="winamp"] .modal-body {
+  padding: 8px;
+}
+
+[data-theme="winamp"] .settings-hint {
+  color: var(--wa-grey-mid);
+}
+
+[data-theme="winamp"] .settings-version {
+  color: var(--wa-gold);
+}
+
+[data-theme="winamp"] .settings-group + .settings-group {
+  border-top-color: var(--wa-shadow);
+  box-shadow: inset 0 1px 0 #4a4a6a;
+}
+
+[data-theme="winamp"] input[type="checkbox"],
+[data-theme="winamp"] input[type="range"] {
+  accent-color: var(--wa-grey);
+}
+
+[data-theme="winamp"] .error-banner {
+  background: #000000;
+  border: 1px solid var(--fail);
+  color: var(--fail);
+  font: bold 10px var(--mono);
+}
+
+[data-theme="winamp"] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+[data-theme="winamp"] ::-webkit-scrollbar-thumb {
+  background: var(--wa-grey);
+  border: 1px solid var(--wa-edge);
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #efffff, inset -1px -1px 0 var(--wa-grey-dark);
+}
+
+[data-theme="winamp"] ::-webkit-scrollbar-track {
+  background: #000000;
+}
+
+@media (max-width: 640px) {
+  [data-theme="winamp"] .worker-grid {
+    grid-template-columns: 1fr;
+  }
+
+  [data-theme="winamp"] .app-title-bar .title-bar-text::after {
+    content: "";
+  }
+}

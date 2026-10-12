@@ -5,13 +5,13 @@ interface WorkerCardProps {
   worker: WorkerStatus;
 }
 
-const NULL_MD5 = "00000000000000000000000000000000";
+export const NULL_MD5 = "00000000000000000000000000000000";
 
 function isRealHash(h: string | undefined | null): h is string {
   return !!h && h !== NULL_MD5;
 }
 
-function hashColors(
+export function hashColors(
   src: string | undefined,
   out: string | undefined,
   emb: string | undefined
@@ -77,12 +77,12 @@ function hashColors(
   return { srcColor, outColor: "hash-neutral", embColor };
 }
 
-function displayHash(hash: string | undefined | null): string {
+export function displayHash(hash: string | undefined | null): string {
   if (!hash || hash === NULL_MD5) return "null";
   return hash;
 }
 
-function formatSavedPct(value: number): string {
+export function formatSavedPct(value: number): string {
   const normalized = Math.abs(value) < 0.05 ? 0 : value;
   return `${normalized.toFixed(1)}%↓`;
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.0 — 2026-10-11
+
+### New: display themes
+
+- Thirteen switchable looks: **Basic (Dark)** (new default), Basic, Wizard, Windows 95, Winamp, Matrix, Flash Game, Arcade, Casino, Comic Book, DOS, Game Boy and LimeWire. Each theme has its own layout and chrome, not just a colour swap. The choice is saved per machine and applied before first paint, so the app doesn't flash the wrong theme on launch.
+- Switch from **Settings → Theme**, or with the floating theme menu in the bottom-left corner (Ctrl+Shift+T toggles it, Escape closes it). Collapsed, the menu is a single small dot.
+- Plain themes (Basic, Basic (Dark), Wizard) show workers as a sortable table; the rest use themed cards.
+- The workers pane fits its content by default; drag the divider to resize it, double-click to fit it again.
+- 98.css is now scoped to the Windows 95 theme at build time, so the other themes start from unstyled elements.
+
+---
+
 ## v1.3.2 — 2026-10-11
 
 ### New: settings are remembered

@@ -1,0 +1,1123 @@
+/*
+ * Casino - a Las Vegas slot machine on a red-velvet floor.
+ *
+ * The desktop is red velvet with a diamond quilt; the app window is the slot
+ * cabinet: dark red body, layered gold chrome frame, and a chasing-bulb
+ * marquee for a title bar. Under the marquee the toolbar is a deck of chrome
+ * slot buttons; "Start >" is the big red SPIN button. While running, the run
+ * status is the black-glass PAYOUT panel with a glowing 7-segment percentage
+ * and a gold coin-track bar, the workers are white REELS in one horizontal
+ * row, and the files table sits on a green FELT table with a gold rail.
+ */
+
+[data-theme="casino"] {
+  --font: "Segoe UI", Arial, Helvetica, sans-serif;
+  --mono: "Lucida Console", Consolas, "Courier New", monospace;
+  --serif: Georgia, "Times New Roman", Times, serif;
+  --fs: 13px;
+
+  --velvet: #4a0a12;
+  --cabinet: #2a0608;
+  --cabinet-2: #3a0a10;
+  --glass: #120406;
+  --gold: #ffd700;
+  --gold-dark: #c9a000;
+  --bronze: #8a5a00;
+  --gold-light: #fff6b0;
+  --cream: #fff3d6;
+  --felt: #0b6b3a;
+  --felt-light: #118a4a;
+  --felt-dark: #085228;
+
+  --desktop: var(--velvet);
+  --bg: var(--cabinet);
+  --surface: var(--cabinet-2);
+  --surface-2: var(--glass);
+  --text: var(--cream);
+  --text-strong: #fffaf0;
+  --muted: #d9b86a;
+  --border: var(--bronze);
+  --border-strong: var(--gold);
+  --accent: var(--gold);
+  --accent-text: var(--velvet);
+  --title-bg: linear-gradient(#ffe066, #c9a000);
+  --title-text: var(--velvet);
+
+  /* Readable on the dark cabinet; the reels and the felt rescope these. */
+  --ok: #3ddc84;
+  --warn: #ff9f1c;
+  --fail: #ff5a5a;
+  --stage-blue: var(--gold);
+  --stage-green: #3ddc84;
+  --stage-amber: #ff9f1c;
+  --stage-purple: #ff5fa0;
+
+  --pane-bg: var(--glass);
+  --row-hover: var(--felt-light);
+  --row-fail-bg: #3a0a0a;
+  --row-fail-hover: #4a1010;
+  --worker-active-bg: #fffaf0;
+  --drop-active-bg: var(--felt-light);
+  --progress-track: #000000;
+  --progress-fill: repeating-linear-gradient(90deg, #ffd700 0 14px, #c9a000 14px 16px);
+
+  --line: var(--bronze);
+  --line-dark: var(--bronze);
+  --line-highlight: transparent;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+}
+
+/* Marquee bulbs swap lit/unlit every half second. */
+@keyframes casino-chase {
+  0%,
+  100% {
+    background-position: 0 0, 7px 0;
+  }
+
+  50% {
+    background-position: 7px 0, 14px 0;
+  }
+}
+
+/* Coins slide along the payout track while a run is in progress. */
+@keyframes casino-coins {
+  to {
+    background-position: 16px 0;
+  }
+}
+
+/* Active reels breathe a gold outline. */
+@keyframes casino-pulse {
+  0%,
+  100% {
+    outline-color: #ffd700;
+    box-shadow:
+      inset 0 16px 14px -10px rgba(0, 0, 0, 0.35),
+      inset 0 -16px 14px -10px rgba(0, 0, 0, 0.35),
+      0 0 14px 2px rgba(255, 215, 0, 0.55);
+  }
+
+  50% {
+    outline-color: rgba(255, 215, 0, 0.3);
+    box-shadow:
+      inset 0 16px 14px -10px rgba(0, 0, 0, 0.35),
+      inset 0 -16px 14px -10px rgba(0, 0, 0, 0.35),
+      0 0 4px 0 rgba(255, 215, 0, 0.2);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Floor and cabinet                                                    */
+/* ------------------------------------------------------------------ */
+
+[data-theme="casino"] body {
+  background: var(--velvet);
+}
+
+[data-theme="casino"] ::selection {
+  background: var(--gold);
+  color: var(--velvet);
+}
+
+[data-theme="casino"] .app-shell {
+  padding: 14px;
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 22px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 22px),
+    radial-gradient(ellipse at 50% 0%, #6a1020 0%, #4a0a12 55%, #2e0509 100%);
+}
+
+[data-theme="casino"] .window.app-window {
+  height: calc(100vh - 28px);
+  border: 6px solid var(--gold-dark);
+  border-radius: 14px;
+  background: var(--cabinet);
+  box-shadow:
+    inset 0 0 0 1px #ffe066,
+    0 0 0 2px var(--gold),
+    0 0 0 5px var(--bronze),
+    0 0 0 7px var(--gold),
+    0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+/* Marquee: gold plate with a strip of chasing bulbs top and bottom. */
+[data-theme="casino"] .app-title-bar {
+  position: relative;
+  justify-content: center;
+  padding: 16px 20px;
+  background: var(--title-bg);
+  color: var(--title-text);
+  border-bottom: 3px solid var(--bronze);
+  box-shadow: inset 0 0 0 2px var(--bronze);
+}
+
+[data-theme="casino"] .app-title-bar::before,
+[data-theme="casino"] .app-title-bar::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 10px;
+  background-image:
+    radial-gradient(circle at 5px 5px, #ffffff 0 1.5px, #fff6b0 2.5px, rgba(255, 246, 176, 0.45) 3.2px, transparent 4.5px),
+    radial-gradient(circle at 5px 5px, #7a4e00 0 2.5px, #5a3800 3px, transparent 3.6px);
+  background-size: 14px 10px, 14px 10px;
+  background-position: 0 0, 7px 0;
+  background-repeat: repeat-x;
+  animation: casino-chase 1s steps(1, end) infinite;
+  pointer-events: none;
+}
+
+[data-theme="casino"] .app-title-bar::before {
+  top: 2px;
+}
+
+[data-theme="casino"] .app-title-bar::after {
+  bottom: 2px;
+}
+
+[data-theme="casino"] .app-title-bar .title-bar-text {
+  font: 700 20px / 1 var(--serif);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--velvet);
+  text-shadow: 0 1px 0 var(--gold-light);
+}
+
+[data-theme="casino"] .app-window-body {
+  padding: 0 14px 14px;
+  gap: 8px;
+}
+
+[data-theme="casino"] .app-stack {
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Button deck: chrome slot buttons centred under the marquee          */
+/* ------------------------------------------------------------------ */
+
+[data-theme="casino"] .app-toolbar {
+  justify-content: center;
+  gap: 12px;
+  margin: 0 -14px;
+  padding: 10px 14px;
+  background: var(--glass);
+  border-bottom: 2px solid var(--bronze);
+  box-shadow: inset 0 -1px 0 rgba(255, 215, 0, 0.25);
+}
+
+[data-theme="casino"] .app-toolbar-actions {
+  gap: 12px;
+}
+
+[data-theme="casino"] .app-toolbar button {
+  min-height: 44px;
+  padding: 4px 26px;
+  font-size: 14px;
+}
+
+/* The deck is only buttons; the brand line lives on the marquee's energy. */
+[data-theme="casino"] .app-toolbar-right {
+  display: none;
+}
+
+[data-theme="casino"] button {
+  min-height: 36px;
+  padding: 4px 16px;
+  border: 2px solid var(--velvet);
+  border-radius: 10px;
+  background: linear-gradient(#fff2b0, #d4a800 50%, #8a5a00);
+  color: var(--velvet);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 0 rgba(255, 246, 176, 0.7);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.25),
+    0 2px 0 #1a0204,
+    0 4px 8px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="casino"] button:hover:not(:disabled) {
+  border-color: var(--velvet);
+  filter: brightness(1.08);
+}
+
+[data-theme="casino"] button:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 0 0 #1a0204,
+    0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="casino"] button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+[data-theme="casino"] button:disabled {
+  opacity: 0.55;
+  filter: saturate(0.4);
+}
+
+/* Red "spin" buttons: Start, New Run, OK. */
+[data-theme="casino"] button.default {
+  background: linear-gradient(#ff5a5a, #b00020);
+  border-color: var(--velvet);
+  color: var(--cream);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.3),
+    0 0 0 2px var(--gold),
+    0 2px 0 2px #5a0010,
+    0 4px 10px 2px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="casino"] button.default:active:not(:disabled) {
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.25),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+    0 0 0 2px var(--gold),
+    0 0 0 2px #5a0010,
+    0 1px 4px 2px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="casino"] button.default.start-next-button {
+  min-height: 56px;
+  padding: 4px 48px;
+  border-radius: 999px;
+  font-size: 20px;
+  letter-spacing: 0.1em;
+  box-shadow:
+    inset 0 3px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.3),
+    0 0 0 3px var(--gold),
+    0 0 0 5px var(--bronze),
+    0 4px 0 5px #5a0010,
+    0 10px 20px 4px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="casino"] button.default.start-next-button:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow:
+    inset 0 3px 0 rgba(255, 255, 255, 0.25),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+    0 0 0 3px var(--gold),
+    0 0 0 5px var(--bronze),
+    0 0 0 5px #5a0010,
+    0 2px 6px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* ------------------------------------------------------------------ */
+/* Panels, tokens, inputs                                               */
+/* ------------------------------------------------------------------ */
+
+[data-theme="casino"] .window {
+  background: var(--cabinet);
+  border: 3px solid var(--gold-dark);
+  border-radius: 12px;
+}
+
+[data-theme="casino"] fieldset {
+  padding: 12px 14px 14px;
+  border: 2px solid var(--bronze);
+  border-radius: 12px;
+  background: var(--cabinet-2);
+  box-shadow: inset 0 0 0 1px rgba(255, 215, 0, 0.22);
+}
+
+[data-theme="casino"] legend {
+  padding: 2px 14px;
+  border: 2px solid var(--gold);
+  border-radius: 999px;
+  background: var(--cabinet);
+  color: var(--gold);
+  font: 700 12px / 1.4 var(--serif);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+[data-theme="casino"] .sunken-panel {
+  border: 2px solid var(--bronze);
+  border-radius: 8px;
+  background: var(--glass);
+}
+
+/* Chips are gold-rimmed black tokens with a bronze inner ring. */
+[data-theme="casino"] .status-bar {
+  gap: 6px;
+}
+
+[data-theme="casino"] .status-bar-field {
+  padding: 3px 12px;
+  border: 2px solid var(--gold);
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--cream);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow:
+    inset 0 0 0 2px var(--glass),
+    inset 0 0 0 3px var(--bronze);
+}
+
+[data-theme="casino"] .status-bar-field strong {
+  font-family: var(--mono);
+  color: var(--gold);
+}
+
+[data-theme="casino"] .status-bar-field.chip-success strong {
+  color: #3ddc84;
+}
+
+[data-theme="casino"] .status-bar-field.chip-error {
+  border-color: #e0242e;
+}
+
+[data-theme="casino"] .status-bar-field.chip-error strong {
+  color: #ff5a5a;
+}
+
+[data-theme="casino"] input[type="text"],
+[data-theme="casino"] select {
+  min-height: 32px;
+  border: 2px solid var(--gold-dark);
+  border-radius: 6px;
+  background: var(--glass);
+  color: var(--cream);
+}
+
+[data-theme="casino"] input[type="text"]:focus,
+[data-theme="casino"] select:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.35);
+}
+
+[data-theme="casino"] input[type="text"]::placeholder {
+  color: #a68a4a;
+}
+
+[data-theme="casino"] select option {
+  background: var(--glass);
+  color: var(--cream);
+}
+
+[data-theme="casino"] input[type="checkbox"],
+[data-theme="casino"] input[type="range"] {
+  accent-color: var(--gold);
+}
+
+[data-theme="casino"] .error-banner {
+  padding: 6px 10px;
+  border: 2px solid #e0242e;
+  border-radius: 6px;
+  background: #3a0a0a;
+  color: #ff8a8a;
+  font-weight: 600;
+}
+
+[data-theme="casino"] .progress-indicator {
+  border: 2px solid var(--gold);
+  border-radius: 4px;
+  background: #000000;
+}
+
+[data-theme="casino"] .progress-indicator-bar {
+  border-radius: 1px;
+  background: repeating-linear-gradient(90deg, #ffd700 0 14px, #c9a000 14px 16px);
+  background-size: 16px 100%;
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.35);
+}
+
+[data-theme="casino"] .resize-handle::after {
+  width: 60px;
+  height: 6px;
+  border: 1px solid var(--bronze);
+  border-radius: 999px;
+  background: linear-gradient(#ffe066, #c9a000);
+}
+
+[data-theme="casino"] ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+[data-theme="casino"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(#ffe066, #c9a000);
+  border: 2px solid var(--glass);
+  border-radius: 999px;
+}
+
+[data-theme="casino"] ::-webkit-scrollbar-track {
+  background: var(--glass);
+}
+
+/* ------------------------------------------------------------------ */
+/* Idle: betting table                                                  */
+/* ------------------------------------------------------------------ */
+
+[data-theme="casino"] .app-summary-bar {
+  justify-content: center;
+  gap: 8px;
+}
+
+[data-theme="casino"] .start-screen-copy {
+  text-align: center;
+  font: italic 14px / 1.4 var(--serif);
+  color: var(--cream);
+}
+
+[data-theme="casino"] .start-screen-copy p + p {
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+[data-theme="casino"] .drop-zone-row {
+  gap: 12px;
+  margin-top: 10px;
+}
+
+/* Two felt pads with a gold dashed rail. */
+[data-theme="casino"] .drop-zone {
+  min-height: 140px;
+  border: 3px dashed var(--gold);
+  border-radius: 10px;
+  background: radial-gradient(ellipse at 50% 40%, #118a4a 0%, #0b6b3a 70%);
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="casino"] .drop-zone:hover,
+[data-theme="casino"] .drop-zone.active {
+  border-style: solid;
+  background: radial-gradient(ellipse at 50% 40%, #16a058 0%, #118a4a 70%);
+}
+
+[data-theme="casino"] .drop-zone-title {
+  font: 700 18px / 1.2 var(--serif);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cream);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="casino"] .drop-zone-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(255, 243, 214, 0.8);
+}
+
+[data-theme="casino"] .intake-footer {
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* The queue is a cream betting slip with red ruling. */
+[data-theme="casino"] .queue-list-panel {
+  padding: 2px 10px;
+  border: 2px solid var(--bronze);
+  border-radius: 6px;
+  background: #fffaf0;
+  color: #2a1a0a;
+  --muted: #8a7a5a;
+}
+
+[data-theme="casino"] .queue-list-panel .folder-item {
+  align-items: center;
+  padding: 4px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+[data-theme="casino"] .queue-list-panel .folder-item + .folder-item {
+  border-top: 1px solid rgba(224, 36, 46, 0.45);
+}
+
+[data-theme="casino"] .queue-list-panel .remove-btn {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0;
+  border: 1px solid #7a0010;
+  border-radius: 50%;
+  background: linear-gradient(#ff5a5a, #b00020);
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1;
+  text-shadow: none;
+  box-shadow: 0 1px 0 #5a0010;
+}
+
+[data-theme="casino"] .queue-list-panel .remove-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+[data-theme="casino"] .start-footer-actions {
+  justify-content: center;
+  margin-top: 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Running: the PAYOUT panel                                            */
+/* ------------------------------------------------------------------ */
+
+[data-theme="casino"] .run-status-window {
+  --stage-blue: var(--cream);
+  --stage-green: #3ddc84;
+  --stage-amber: #ff9f1c;
+  border: 3px solid var(--gold);
+  border-radius: 12px;
+  background: linear-gradient(#1a0608, #120406 40%, #0a0203);
+  box-shadow:
+    inset 0 0 0 2px var(--bronze),
+    inset 0 20px 30px -20px rgba(255, 215, 0, 0.18),
+    0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="casino"] .run-status-main {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "label pct actions"
+    "bar pct actions";
+  column-gap: 16px;
+  row-gap: 6px;
+  align-items: center;
+  padding: 6px 8px 4px;
+}
+
+[data-theme="casino"] .run-status-main .status-bar-label {
+  grid-area: label;
+  align-self: end;
+  font: 700 16px / 1.1 var(--serif);
+  letter-spacing: 0.14em;
+  color: var(--cream);
+}
+
+[data-theme="casino"] .status-bar-label.label-processing {
+  color: var(--cream);
+}
+
+[data-theme="casino"] .status-bar-label.label-success {
+  color: #3ddc84;
+}
+
+[data-theme="casino"] .status-bar-label.label-cancelling,
+[data-theme="casino"] .status-bar-label.label-warning {
+  color: #ff9f1c;
+}
+
+[data-theme="casino"] .status-bar-label.label-error {
+  color: #ff5a5a;
+}
+
+/* Coin track. */
+[data-theme="casino"] .run-status-main .run-progress {
+  grid-area: bar;
+  align-self: start;
+  height: 18px;
+}
+
+[data-theme="casino"] .run-status-main .progress-indicator-bar {
+  animation: casino-coins 0.6s linear infinite;
+}
+
+[data-theme="casino"] .run-status-window.status-success .progress-indicator-bar,
+[data-theme="casino"] .run-status-window.status-warning .progress-indicator-bar,
+[data-theme="casino"] .run-status-window.status-error .progress-indicator-bar {
+  animation: none;
+}
+
+[data-theme="casino"] .run-status-window.status-error .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, #e0242e 0 14px, #8a0010 14px 16px);
+}
+
+/* Seven-segment payout readout: live digits over unlit "888%" ghosts. */
+[data-theme="casino"] .run-status-main .status-bar-pct {
+  grid-area: pct;
+  position: relative;
+  z-index: 0;
+  min-width: 4ch;
+  padding: 6px 12px;
+  border: 2px solid var(--bronze);
+  border-radius: 6px;
+  background: #000000;
+  font: 700 40px / 1 var(--mono);
+  letter-spacing: 0.02em;
+  text-align: right;
+  color: var(--gold);
+  text-shadow:
+    0 0 6px rgba(255, 215, 0, 0.85),
+    0 0 18px rgba(255, 160, 0, 0.5);
+  box-shadow:
+    inset 0 0 14px rgba(255, 215, 0, 0.14),
+    inset 0 2px 0 rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="casino"] .run-status-main .status-bar-pct::before {
+  content: "888%";
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  z-index: -1;
+  color: rgba(255, 215, 0, 0.1);
+  text-shadow: none;
+  pointer-events: none;
+}
+
+[data-theme="casino"] .run-status-main .status-bar-actions {
+  grid-area: actions;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+[data-theme="casino"] .status-bar-actions button {
+  min-height: 36px;
+  padding: 4px 14px;
+  font-size: 12px;
+}
+
+[data-theme="casino"] .run-status-window .status-bar {
+  justify-content: center;
+  gap: 6px;
+  padding: 2px 10px 10px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Workers: the REELS                                                   */
+/* ------------------------------------------------------------------ */
+
+[data-theme="casino"] .pane-toolbar {
+  margin-bottom: 6px;
+}
+
+[data-theme="casino"] .section-kicker,
+[data-theme="casino"] .worker-summary {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+[data-theme="casino"] .worker-toggle {
+  min-height: 26px;
+  padding: 2px 12px;
+  font-size: 11px;
+}
+
+[data-theme="casino"] .worker-body {
+  padding: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: linear-gradient(#0a0203, #160406 50%, #0a0203);
+}
+
+[data-theme="casino"] .worker-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 10px;
+  padding: 0;
+}
+
+/* A reel window: cream paper, bronze frame, curved top and bottom. */
+[data-theme="casino"] .worker-panel {
+  --text: #2a1a0a;
+  --text-strong: #1a0a04;
+  --muted: #8a7a5a;
+  --ok: #0b6b3a;
+  --warn: #c86a00;
+  --fail: #c0101c;
+  --stage-blue: #b8900a;
+  --stage-amber: #d97400;
+  --stage-purple: #e0247a;
+  --stage-green: #0b6b3a;
+  flex: 0 0 170px;
+  gap: 5px;
+  min-height: 0;
+  padding: 8px;
+  border: 3px solid var(--bronze);
+  border-radius: 8px;
+  background: linear-gradient(#e6d9bc, #fffaf0 22%, #fffaf0 78%, #e6d9bc);
+  color: #2a1a0a;
+  box-shadow:
+    inset 0 16px 14px -10px rgba(0, 0, 0, 0.35),
+    inset 0 -16px 14px -10px rgba(0, 0, 0, 0.35);
+  outline: 3px solid transparent;
+  outline-offset: 0;
+}
+
+[data-theme="casino"] .worker-panel.active {
+  background: linear-gradient(#e6d9bc, #fffaf0 22%, #fffaf0 78%, #e6d9bc);
+  animation: casino-pulse 1.2s ease-in-out infinite;
+}
+
+[data-theme="casino"] .worker-panel.idle-card {
+  background: linear-gradient(#cfc3a8, #efe6d0 22%, #efe6d0 78%, #cfc3a8);
+  opacity: 0.8;
+}
+
+[data-theme="casino"] .worker-panel-top {
+  align-items: center;
+}
+
+/* Gold coin badge. */
+[data-theme="casino"] .worker-id {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--bronze);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff6b0 0%, #ffd700 45%, #c9a000 100%);
+  color: var(--velvet);
+  font: 700 11px / 1 var(--serif);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 246, 176, 0.6),
+    0 1px 0 #5a3a00;
+}
+
+[data-theme="casino"] .worker-stage {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+[data-theme="casino"] .worker-card .file-name {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+[data-theme="casino"] .worker-progress {
+  height: 12px;
+  border: 1px solid var(--bronze);
+  border-radius: 3px;
+  background: var(--cabinet);
+}
+
+[data-theme="casino"] .worker-progress .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, #ffd700 0 8px, #c9a000 8px 10px);
+  background-size: 10px 100%;
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.35);
+}
+
+[data-theme="casino"] .worker-percent {
+  font: 700 11px / 1 var(--mono);
+}
+
+[data-theme="casino"] .worker-hash-panel {
+  padding: 4px 0 0;
+  border: none;
+  border-top: 1px solid var(--gold-dark);
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: #5a4a2a;
+}
+
+[data-theme="casino"] .hash-label {
+  min-width: 24px;
+  color: var(--bronze);
+}
+
+[data-theme="casino"] .hash-neutral {
+  color: #5a4a2a;
+}
+
+[data-theme="casino"] .hash-saved-low {
+  color: #5a4a2a;
+}
+
+/* ------------------------------------------------------------------ */
+/* Files: the green FELT table                                          */
+/* ------------------------------------------------------------------ */
+
+[data-theme="casino"] .files-pane {
+  --muted: #bfe3cc;
+  --ok: #b9ffd6;
+  --warn: #ffd27a;
+  --fail: #ff6b6b;
+  --stage-purple: #ffa3cc;
+  border: 3px solid var(--gold);
+  border-radius: 10px;
+  background: radial-gradient(ellipse at 50% 30%, #118a4a 0%, #0b6b3a 70%);
+  color: var(--cream);
+  box-shadow:
+    inset 0 0 0 2px var(--bronze),
+    inset 0 0 40px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="casino"] .files-pane legend {
+  border-color: var(--gold);
+}
+
+[data-theme="casino"] .events-table-wrap {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="casino"] table thead th {
+  background: var(--felt-dark);
+  color: var(--gold);
+  font: 700 11px / 1.4 var(--serif);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--gold);
+}
+
+[data-theme="casino"] .sort-arrow {
+  color: var(--gold-dark);
+}
+
+[data-theme="casino"] table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--cream);
+}
+
+[data-theme="casino"] .events-table th,
+[data-theme="casino"] .events-table td {
+  height: 22px;
+  padding: 0 8px;
+}
+
+[data-theme="casino"] .events-table tbody tr:hover td {
+  background: var(--felt-light);
+}
+
+[data-theme="casino"] .events-table tr.row-fail td {
+  background: #3a0a0a;
+  color: #ff5a5a;
+}
+
+[data-theme="casino"] .events-table tr.row-fail:hover td {
+  background: #4a1010;
+}
+
+[data-theme="casino"] .files-pane .status-fail {
+  color: #ff5a5a;
+}
+
+[data-theme="casino"] .events-table-footer {
+  padding-top: 6px;
+  font-size: 11px;
+  color: #bfe3cc;
+}
+
+[data-theme="casino"] .bad-files-kicker {
+  color: #ff8a8a;
+}
+
+[data-theme="casino"] .bad-folders-panel {
+  border: 1px solid #e0242e;
+  border-radius: 6px;
+  background: #3a0a0a;
+}
+
+[data-theme="casino"] .bad-folders-panel .queue-section-label,
+[data-theme="casino"] .bad-folder-count {
+  color: #ff8a8a;
+}
+
+/* ------------------------------------------------------------------ */
+/* Modals: cabinet service panels                                       */
+/* ------------------------------------------------------------------ */
+
+[data-theme="casino"] .modal-overlay {
+  background: rgba(20, 2, 4, 0.75);
+}
+
+[data-theme="casino"] .modal {
+  border: 4px solid var(--gold-dark);
+  border-radius: 12px;
+  background: var(--cabinet);
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 0 0 4px var(--bronze),
+    0 20px 50px rgba(0, 0, 0, 0.7);
+}
+
+[data-theme="casino"] .modal .title-bar {
+  padding: 8px 12px;
+  background: var(--title-bg);
+  color: var(--velvet);
+  border-bottom: 3px solid var(--bronze);
+}
+
+[data-theme="casino"] .modal .title-bar-text {
+  font: 700 15px / 1.2 var(--serif);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 var(--gold-light);
+}
+
+[data-theme="casino"] .title-bar-controls button {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 2px solid var(--velvet);
+  border-radius: 50%;
+  background: linear-gradient(#ff5a5a, #b00020);
+  color: var(--cream);
+  text-shadow: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 1px 0 #5a0010;
+}
+
+[data-theme="casino"] .title-bar-controls button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+[data-theme="casino"] .title-bar-controls button[aria-label="Close"]::before {
+  font-size: 15px;
+}
+
+[data-theme="casino"] .title-bar-controls button[aria-label="Maximize"]::before,
+[data-theme="casino"] .title-bar-controls button[aria-label="Restore"]::before {
+  font-size: 12px;
+}
+
+[data-theme="casino"] .modal-body {
+  padding: 14px;
+}
+
+[data-theme="casino"] .settings-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+[data-theme="casino"] .settings-group + .settings-group {
+  border-top: 1px solid var(--bronze);
+  box-shadow: none;
+}
+
+[data-theme="casino"] .settings-version {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--muted);
+}
+
+[data-theme="casino"] .log-viewer-shell {
+  border: 2px solid var(--gold-dark);
+  border-radius: 6px;
+  background: var(--glass);
+}
+
+[data-theme="casino"] .log-viewer-text {
+  background: var(--glass);
+  color: var(--cream);
+}
+
+[data-theme="casino"] .log-viewer-placeholder {
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion and mobile                                                    */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="casino"] .app-title-bar::before,
+  [data-theme="casino"] .app-title-bar::after,
+  [data-theme="casino"] .run-status-main .progress-indicator-bar,
+  [data-theme="casino"] .worker-panel.active {
+    animation: none;
+  }
+
+  [data-theme="casino"] .worker-panel.active {
+    outline-color: var(--gold);
+  }
+}
+
+@media (max-width: 640px) {
+  [data-theme="casino"] .app-shell {
+    padding: 8px;
+  }
+
+  [data-theme="casino"] .window.app-window {
+    height: calc(100vh - 16px);
+    border-width: 3px;
+    border-radius: 10px;
+    box-shadow:
+      inset 0 0 0 1px #ffe066,
+      0 0 0 1px var(--gold),
+      0 0 0 3px var(--bronze),
+      0 12px 30px rgba(0, 0, 0, 0.6);
+  }
+
+  [data-theme="casino"] .app-title-bar {
+    padding: 14px 12px;
+  }
+
+  [data-theme="casino"] .app-title-bar .title-bar-text {
+    font-size: 16px;
+    letter-spacing: 0.14em;
+  }
+
+  [data-theme="casino"] .app-window-body {
+    padding: 0 10px 10px;
+  }
+
+  [data-theme="casino"] .app-toolbar {
+    gap: 8px;
+    margin: 0 -10px;
+    padding: 8px 10px;
+  }
+
+  [data-theme="casino"] .app-toolbar-actions {
+    gap: 8px;
+  }
+
+  [data-theme="casino"] .app-toolbar button {
+    min-height: 40px;
+    padding: 4px 16px;
+    font-size: 13px;
+  }
+
+  [data-theme="casino"] button.default.start-next-button {
+    min-height: 48px;
+    padding: 4px 24px;
+    font-size: 17px;
+  }
+
+  [data-theme="casino"] .drop-zone {
+    min-height: 96px;
+  }
+
+  [data-theme="casino"] .run-status-main {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "label pct"
+      "bar pct"
+      "actions actions";
+    column-gap: 10px;
+  }
+
+  [data-theme="casino"] .run-status-main .status-bar-pct {
+    padding: 4px 8px;
+    font-size: 28px;
+  }
+
+  [data-theme="casino"] .run-status-main .status-bar-pct::before {
+    top: 4px;
+    right: 8px;
+  }
+
+  [data-theme="casino"] .run-status-main .status-bar-actions {
+    justify-content: center;
+  }
+
+  [data-theme="casino"] .worker-panel {
+    flex-basis: 140px;
+  }
+}

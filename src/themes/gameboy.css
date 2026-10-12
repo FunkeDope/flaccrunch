@@ -1,0 +1,923 @@
+/*
+ * Game Boy - the original DMG-01. The whole app is the LCD; the grey shell and
+ * dark screen plate frame it. Inside the screen only the four DMG shades exist:
+ *   #0f380f darkest   #306230 dark   #8bac0f light   #9bbc0f lightest (background)
+ * Failures are inverted blocks (darkest on light) in bold, never red.
+ *
+ * Layout differs from base: the toolbar becomes a bottom HUD menu
+ * (column-reverse), the run status is an RPG status window up top, workers are
+ * a 2-column party grid, and the files table is a scrolling inventory list.
+ */
+
+[data-theme="gameboy"] {
+  --font: "Courier New", "Lucida Console", monospace;
+  --mono: "Courier New", "Lucida Console", monospace;
+  --fs: 12px;
+
+  --gb-0: #0f380f;
+  --gb-1: #306230;
+  --gb-2: #8bac0f;
+  --gb-3: #9bbc0f;
+
+  --desktop: #c4bebb;
+  --bg: var(--gb-3);
+  --surface: var(--gb-3);
+  --surface-2: var(--gb-3);
+  --text: var(--gb-0);
+  --text-strong: var(--gb-0);
+  --muted: var(--gb-1);
+  --border: var(--gb-0);
+  --border-strong: var(--gb-0);
+  --accent: var(--gb-0);
+  --accent-text: var(--gb-3);
+  --title-bg: var(--gb-0);
+  --title-text: var(--gb-3);
+
+  --ok: var(--gb-0);
+  --warn: var(--gb-1);
+  --fail: var(--gb-0);
+  --stage-blue: var(--gb-0);
+  --stage-green: var(--gb-0);
+  --stage-amber: var(--gb-1);
+  --stage-purple: var(--gb-1);
+
+  --pane-bg: var(--gb-3);
+  --row-hover: var(--gb-0);
+  --row-fail-bg: var(--gb-0);
+  --row-fail-hover: var(--gb-1);
+  --worker-active-bg: var(--gb-0);
+  --drop-active-bg: var(--gb-0);
+  --progress-track: var(--gb-2);
+  --progress-fill: repeating-linear-gradient(90deg, var(--gb-0) 0 6px, var(--gb-1) 6px 8px);
+
+  --line: var(--gb-0);
+  --line-dark: var(--gb-1);
+  --line-highlight: transparent;
+  --radius: 0;
+  --radius-sm: 0;
+  --shadow: none;
+}
+
+@keyframes gameboy-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell: grey body, dark screen plate, green LCD                       */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] body {
+  font-weight: 700;
+  -webkit-font-smoothing: none;
+  background: #c4bebb;
+}
+
+[data-theme="gameboy"] .app-shell {
+  padding: 28px 28px 40px;
+  background: #c4bebb;
+}
+
+[data-theme="gameboy"] .app-window {
+  height: calc(100vh - 68px);
+  padding: 18px 24px 26px;
+  background: #2e2e30;
+  border: none;
+  border-radius: 10px 10px 40px 10px;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+/* "DOT MATRIX WITH STEREO SOUND" lettering on the screen plate. */
+[data-theme="gameboy"] .app-window::before {
+  content: "DOT MATRIX WITH STEREO SOUND";
+  position: absolute;
+  left: 24px;
+  bottom: 8px;
+  font: 700 10px / 1 "Courier New", "Lucida Console", monospace;
+  letter-spacing: 0.2em;
+  color: #9fa2ad;
+  pointer-events: none;
+}
+
+/* Power LED with its glow: the only shadow in the theme. */
+[data-theme="gameboy"] .app-window::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 30px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d0215d;
+  box-shadow: 0 0 6px 2px rgba(208, 33, 93, 0.55);
+  pointer-events: none;
+}
+
+/* The LCD has no chrome. */
+[data-theme="gameboy"] .app-title-bar {
+  display: none;
+}
+
+[data-theme="gameboy"] .app-window-body {
+  flex-direction: column-reverse;
+  gap: 0;
+  padding: 0;
+  background: #9bbc0f;
+  image-rendering: pixelated;
+  box-shadow: inset 0 0 0 2px #8bac0f;
+}
+
+[data-theme="gameboy"] .content {
+  padding: 10px 12px 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Typography                                                           */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] button,
+[data-theme="gameboy"] legend,
+[data-theme="gameboy"] label,
+[data-theme="gameboy"] th,
+[data-theme="gameboy"] .status-bar-label,
+[data-theme="gameboy"] .status-bar-field,
+[data-theme="gameboy"] .hash-label,
+[data-theme="gameboy"] .worker-stage,
+[data-theme="gameboy"] .worker-id,
+[data-theme="gameboy"] .drop-zone-title,
+[data-theme="gameboy"] .drop-zone-note,
+[data-theme="gameboy"] .section-kicker,
+[data-theme="gameboy"] .worker-summary,
+[data-theme="gameboy"] .bad-files-kicker,
+[data-theme="gameboy"] .queue-section-label,
+[data-theme="gameboy"] .events-table-footer,
+[data-theme="gameboy"] .title-bar-text,
+[data-theme="gameboy"] .app-toolbar-brand,
+[data-theme="gameboy"] .start-screen-copy {
+  text-transform: uppercase;
+}
+
+[data-theme="gameboy"] ::selection {
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+/* ------------------------------------------------------------------ */
+/* Bottom HUD menu (the toolbar, rendered last by column-reverse)       */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] .app-toolbar {
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 6px 12px;
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .app-toolbar-actions {
+  gap: 2px;
+}
+
+[data-theme="gameboy"] .app-toolbar button {
+  min-height: 24px;
+  padding: 2px 8px 2px 4px;
+  border: none;
+  background: transparent;
+  color: #9bbc0f;
+  letter-spacing: 0.08em;
+}
+
+[data-theme="gameboy"] .app-toolbar button::before {
+  content: "  ";
+  white-space: pre;
+}
+
+[data-theme="gameboy"] .app-toolbar button:hover:not(:disabled),
+[data-theme="gameboy"] .app-toolbar button:focus-visible {
+  background: transparent;
+  color: #9bbc0f;
+  outline: none;
+}
+
+[data-theme="gameboy"] .app-toolbar button:hover:not(:disabled)::before,
+[data-theme="gameboy"] .app-toolbar button:focus-visible::before {
+  content: "> ";
+}
+
+[data-theme="gameboy"] .app-toolbar .theme-cycle {
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .app-toolbar .theme-cycle-label {
+  opacity: 1;
+  color: #8bac0f;
+}
+
+[data-theme="gameboy"] .app-toolbar-brand {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: #8bac0f;
+}
+
+/* ------------------------------------------------------------------ */
+/* Controls                                                             */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] button {
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 2px solid #0f380f;
+  border-radius: 0;
+  background: transparent;
+  color: #0f380f;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+[data-theme="gameboy"] button:hover:not(:disabled) {
+  background: #0f380f;
+  color: #9bbc0f;
+  border-color: #0f380f;
+}
+
+[data-theme="gameboy"] button:focus-visible {
+  outline: 2px solid #0f380f;
+  outline-offset: 1px;
+}
+
+[data-theme="gameboy"] button:disabled {
+  opacity: 1;
+  color: #306230;
+  border-color: #306230;
+}
+
+[data-theme="gameboy"] button.default {
+  background: #0f380f;
+  border-color: #0f380f;
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] button.default:hover:not(:disabled) {
+  background: #306230;
+  border-color: #306230;
+}
+
+[data-theme="gameboy"] button.default:disabled {
+  background: #306230;
+  border-color: #306230;
+  color: #8bac0f;
+}
+
+[data-theme="gameboy"] input[type="text"],
+[data-theme="gameboy"] select {
+  min-height: 26px;
+  border: 2px solid #0f380f;
+  border-radius: 0;
+  background: #8bac0f;
+  color: #0f380f;
+  font-weight: 700;
+}
+
+[data-theme="gameboy"] input[type="text"]:focus,
+[data-theme="gameboy"] select:focus {
+  outline: 2px solid #0f380f;
+  outline-offset: 1px;
+  border-color: #0f380f;
+}
+
+[data-theme="gameboy"] input[type="text"]::placeholder {
+  color: #306230;
+}
+
+[data-theme="gameboy"] select option {
+  background: #8bac0f;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] input[type="checkbox"],
+[data-theme="gameboy"] input[type="range"] {
+  accent-color: #0f380f;
+}
+
+[data-theme="gameboy"] fieldset {
+  padding: 8px 10px 10px;
+  border: 4px double #0f380f;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="gameboy"] legend {
+  padding: 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .sunken-panel {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="gameboy"] .queue-list-panel {
+  border: 2px solid #0f380f;
+  background: #8bac0f;
+}
+
+[data-theme="gameboy"] .queue-badge-active {
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .error-banner {
+  border: 2px solid #0f380f;
+  border-radius: 0;
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+/* Status chips: outlined blocks; the failure chip is inverted. */
+[data-theme="gameboy"] .status-bar {
+  gap: 4px;
+}
+
+[data-theme="gameboy"] .status-bar-field {
+  padding: 1px 6px;
+  border: 2px solid #0f380f;
+  border-radius: 0;
+  background: transparent;
+  color: #0f380f;
+  font-size: 11px;
+}
+
+[data-theme="gameboy"] .status-bar-field strong {
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .status-bar-field.chip-error,
+[data-theme="gameboy"] .status-bar-field.chip-error strong {
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+/* Chunky 8px segment progress bars. */
+[data-theme="gameboy"] .progress-indicator {
+  border: 2px solid #0f380f;
+  border-radius: 0;
+  background: #8bac0f;
+}
+
+[data-theme="gameboy"] .progress-indicator-bar {
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, #0f380f 0 6px, #306230 6px 8px);
+  transition: none;
+}
+
+[data-theme="gameboy"] .resize-handle::after {
+  width: 48px;
+  height: 4px;
+  border: none;
+  background: #0f380f;
+}
+
+[data-theme="gameboy"] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+[data-theme="gameboy"] ::-webkit-scrollbar-thumb {
+  background: #0f380f;
+  border: 2px solid #9bbc0f;
+  border-radius: 0;
+}
+
+[data-theme="gameboy"] ::-webkit-scrollbar-track {
+  background: #8bac0f;
+}
+
+/* ------------------------------------------------------------------ */
+/* Top HUD: run status as an RPG status window                          */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] .window {
+  border: 4px double #0f380f;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-theme="gameboy"] .run-status-main {
+  gap: 10px;
+}
+
+[data-theme="gameboy"] .status-bar-label {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .status-bar-label::before {
+  content: "RUN: ";
+}
+
+[data-theme="gameboy"] .status-bar-label.label-processing,
+[data-theme="gameboy"] .status-bar-label.label-success {
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .status-bar-label.label-processing {
+  animation: gameboy-blink 1s steps(1) infinite;
+}
+
+[data-theme="gameboy"] .status-bar-label.label-cancelling,
+[data-theme="gameboy"] .status-bar-label.label-warning {
+  color: #306230;
+}
+
+[data-theme="gameboy"] .status-bar-label.label-error {
+  padding: 0 4px;
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .run-progress {
+  height: 16px;
+}
+
+[data-theme="gameboy"] .status-bar-pct {
+  font-size: 24px;
+  line-height: 1;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .run-status-window .status-bar {
+  padding: 0 6px 6px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Workers: party members in a 2-column grid                            */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] .pane-toolbar {
+  margin-bottom: 6px;
+}
+
+[data-theme="gameboy"] .section-kicker,
+[data-theme="gameboy"] .worker-summary {
+  font-size: 11px;
+  color: #306230;
+}
+
+[data-theme="gameboy"] .worker-toggle {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+[data-theme="gameboy"] .worker-body {
+  padding: 0;
+}
+
+[data-theme="gameboy"] .worker-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 2px;
+}
+
+[data-theme="gameboy"] .worker-panel {
+  gap: 4px;
+  padding: 6px 8px;
+  border: 4px double #0f380f;
+  border-radius: 0;
+  background: transparent;
+  background-clip: padding-box;
+  color: #0f380f;
+}
+
+/* Active party member: the whole box inverts, and every variable the
+   children read (stage, hash, text, muted) flips with it. */
+[data-theme="gameboy"] .worker-panel.active {
+  --text: #9bbc0f;
+  --text-strong: #9bbc0f;
+  --muted: #8bac0f;
+  --ok: #9bbc0f;
+  --warn: #8bac0f;
+  --fail: #9bbc0f;
+  --stage-blue: #9bbc0f;
+  --stage-green: #9bbc0f;
+  --stage-amber: #8bac0f;
+  --stage-purple: #8bac0f;
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .worker-id {
+  padding: 0 4px;
+  background: #0f380f;
+  color: #9bbc0f;
+  letter-spacing: 0.05em;
+}
+
+[data-theme="gameboy"] .worker-panel.active .worker-id {
+  background: #9bbc0f;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .worker-stage {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+[data-theme="gameboy"] .worker-card .file-name {
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .worker-panel.active .file-name {
+  color: #9bbc0f;
+}
+
+/* HP bar. */
+[data-theme="gameboy"] .worker-progress-row::before {
+  content: "HP";
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+[data-theme="gameboy"] .worker-progress {
+  height: 10px;
+}
+
+[data-theme="gameboy"] .worker-panel.active .progress-indicator {
+  border-color: #9bbc0f;
+  background: #306230;
+}
+
+[data-theme="gameboy"] .worker-panel.active .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, #9bbc0f 0 6px, #8bac0f 6px 8px);
+}
+
+[data-theme="gameboy"] .worker-percent {
+  font-size: 11px;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .worker-panel.active .worker-percent {
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .worker-hash-panel {
+  padding: 3px 0 0;
+  border: none;
+  border-top: 2px solid #0f380f;
+  background: transparent;
+  font-size: 9px;
+}
+
+[data-theme="gameboy"] .worker-panel.active .worker-hash-panel {
+  border-top-color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .hash-label {
+  min-width: 24px;
+  color: #306230;
+}
+
+[data-theme="gameboy"] .worker-panel.active .hash-label {
+  color: #8bac0f;
+}
+
+[data-theme="gameboy"] .hash-match,
+[data-theme="gameboy"] .hash-neutral {
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .hash-warn,
+[data-theme="gameboy"] .hash-missing,
+[data-theme="gameboy"] .hash-computing {
+  color: #306230;
+}
+
+[data-theme="gameboy"] .hash-mismatch {
+  padding: 0 2px;
+  background: #0f380f;
+  color: #9bbc0f;
+  font-weight: 700;
+}
+
+[data-theme="gameboy"] .worker-panel.active .hash-match,
+[data-theme="gameboy"] .worker-panel.active .hash-neutral {
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .worker-panel.active .hash-warn,
+[data-theme="gameboy"] .worker-panel.active .hash-missing,
+[data-theme="gameboy"] .worker-panel.active .hash-computing {
+  color: #8bac0f;
+}
+
+[data-theme="gameboy"] .worker-panel.active .hash-mismatch {
+  background: #9bbc0f;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .hash-saved-good {
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .hash-saved-low {
+  color: #306230;
+}
+
+/* ------------------------------------------------------------------ */
+/* Files: inventory list                                                */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] .events-table-wrap {
+  background: transparent;
+}
+
+[data-theme="gameboy"] table thead th {
+  background: #0f380f;
+  color: #9bbc0f;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  border-bottom: none;
+}
+
+[data-theme="gameboy"] .sort-arrow {
+  color: #8bac0f;
+}
+
+[data-theme="gameboy"] table td {
+  border-bottom: none;
+}
+
+[data-theme="gameboy"] .events-table th,
+[data-theme="gameboy"] .events-table td {
+  height: 20px;
+  padding: 0 6px;
+}
+
+/* Hovered row inverts; the inline var() colours in its cells flip with it. */
+[data-theme="gameboy"] .events-table tbody tr:hover {
+  --ok: #9bbc0f;
+  --warn: #8bac0f;
+  --fail: #9bbc0f;
+  --muted: #8bac0f;
+  --stage-purple: #8bac0f;
+}
+
+[data-theme="gameboy"] .events-table tbody tr:hover td {
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .events-table tr.row-fail {
+  --ok: #9bbc0f;
+  --warn: #8bac0f;
+  --fail: #9bbc0f;
+  --muted: #8bac0f;
+  --stage-purple: #8bac0f;
+}
+
+[data-theme="gameboy"] .events-table tr.row-fail td {
+  background: #0f380f;
+  color: #9bbc0f;
+  font-weight: 700;
+}
+
+[data-theme="gameboy"] .events-table tr.row-fail:hover td {
+  background: #306230;
+}
+
+[data-theme="gameboy"] .status-fail {
+  text-decoration: underline;
+}
+
+[data-theme="gameboy"] .events-table-footer {
+  font-size: 11px;
+  color: #306230;
+}
+
+[data-theme="gameboy"] .bad-files-kicker {
+  padding: 0 4px;
+  background: #0f380f;
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .bad-folders-panel {
+  border: 2px solid #0f380f;
+  background: #8bac0f;
+}
+
+[data-theme="gameboy"] .bad-folders-panel .queue-section-label,
+[data-theme="gameboy"] .bad-folder-count {
+  color: #0f380f;
+}
+
+/* ------------------------------------------------------------------ */
+/* Idle: PRESS START                                                    */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] .app-summary-bar {
+  gap: 6px;
+}
+
+[data-theme="gameboy"] .start-screen-copy {
+  font-size: 11px;
+  color: #306230;
+}
+
+[data-theme="gameboy"] .drop-zone-row {
+  gap: 10px;
+  margin-top: 8px;
+}
+
+[data-theme="gameboy"] .drop-zone {
+  min-height: 120px;
+  border: 4px double #0f380f;
+  border-radius: 0;
+  background: transparent;
+  background-clip: padding-box;
+}
+
+[data-theme="gameboy"] .drop-zone-title {
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .drop-zone-note {
+  margin-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: #0f380f;
+  animation: gameboy-blink 1s steps(1) infinite;
+}
+
+[data-theme="gameboy"] .drop-zone-note::before {
+  content: "> ";
+}
+
+[data-theme="gameboy"] .drop-zone.active {
+  background: #0f380f;
+}
+
+[data-theme="gameboy"] .drop-zone.active .drop-zone-title,
+[data-theme="gameboy"] .drop-zone.active .drop-zone-note {
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .intake-footer {
+  margin-top: 10px;
+}
+
+[data-theme="gameboy"] .start-footer-actions {
+  justify-content: stretch;
+}
+
+[data-theme="gameboy"] .start-next-button {
+  flex: 1;
+  justify-content: flex-start;
+  min-height: 32px;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+}
+
+[data-theme="gameboy"] .start-next-button::before {
+  content: "> ";
+  white-space: pre;
+}
+
+/* ------------------------------------------------------------------ */
+/* Modals: dialog boxes on the LCD                                      */
+/* ------------------------------------------------------------------ */
+
+[data-theme="gameboy"] .modal-overlay {
+  background: #c4bebbb3;
+}
+
+[data-theme="gameboy"] .modal {
+  background: #9bbc0f;
+  border: 4px double #0f380f;
+  box-shadow: none;
+}
+
+[data-theme="gameboy"] .modal .title-bar {
+  padding: 4px 8px;
+  background: #0f380f;
+  color: #9bbc0f;
+  border-bottom: none;
+}
+
+[data-theme="gameboy"] .modal .title-bar-text {
+  letter-spacing: 0.15em;
+}
+
+[data-theme="gameboy"] .modal .title-bar-text::before {
+  content: "> ";
+}
+
+[data-theme="gameboy"] .modal .title-bar-controls button {
+  min-width: 22px;
+  min-height: 20px;
+  border: 2px solid #9bbc0f;
+  background: transparent;
+  color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .modal .title-bar-controls button:hover:not(:disabled) {
+  background: #9bbc0f;
+  color: #0f380f;
+}
+
+[data-theme="gameboy"] .modal .title-bar-controls button:focus-visible {
+  outline-color: #9bbc0f;
+}
+
+[data-theme="gameboy"] .title-bar-controls button[aria-label="Close"]::before {
+  content: "X";
+  font-size: 12px;
+}
+
+[data-theme="gameboy"] .title-bar-controls button[aria-label="Maximize"]::before {
+  content: "+";
+}
+
+[data-theme="gameboy"] .title-bar-controls button[aria-label="Restore"]::before {
+  content: "-";
+}
+
+[data-theme="gameboy"] .modal-body {
+  padding: 10px;
+}
+
+[data-theme="gameboy"] .settings-hint {
+  font-size: 11px;
+  color: #306230;
+}
+
+[data-theme="gameboy"] .settings-group + .settings-group {
+  border-top: 2px solid #306230;
+  box-shadow: none;
+}
+
+[data-theme="gameboy"] .settings-version {
+  font-size: 11px;
+  color: #306230;
+}
+
+[data-theme="gameboy"] .log-viewer-shell {
+  border: 2px solid #0f380f;
+  background: #8bac0f;
+}
+
+[data-theme="gameboy"] .log-viewer-text {
+  background: #8bac0f;
+  color: #0f380f;
+  font-size: 11px;
+}
+
+[data-theme="gameboy"] .log-viewer-placeholder {
+  color: #306230;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mobile                                                               */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  [data-theme="gameboy"] .app-shell {
+    padding: 8px;
+  }
+
+  [data-theme="gameboy"] .app-window {
+    height: calc(100vh - 16px);
+    padding: 8px;
+    border-radius: 6px 6px 18px 6px;
+  }
+
+  [data-theme="gameboy"] .app-window::before,
+  [data-theme="gameboy"] .app-window::after {
+    display: none;
+  }
+
+  [data-theme="gameboy"] .content {
+    padding: 8px;
+  }
+
+  [data-theme="gameboy"] .app-toolbar {
+    padding: 4px 6px;
+  }
+
+  [data-theme="gameboy"] .worker-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-theme="gameboy"] .status-bar-pct {
+    font-size: 18px;
+  }
+}

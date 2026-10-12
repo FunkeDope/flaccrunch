@@ -6,8 +6,10 @@ import { ProcessingDashboard } from "./components/processing/ProcessingDashboard
 import { RunStatusBar } from "./components/processing/RunStatusBar";
 import { LogViewerModal } from "./components/processing/LogViewerModal";
 import { SettingsModal } from "./components/settings/SettingsPanel";
+import { ThemeMenu } from "./components/layout/ThemeMenu";
 import { useProcessing } from "./hooks/useProcessing";
 import { useSettings } from "./hooks/useSettings";
+import { useTheme } from "./hooks/useTheme";
 
 function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -18,6 +20,7 @@ function App() {
   const logRequestIdRef = useRef(0);
   const processing = useProcessing();
   const settings = useSettings();
+  const display = useTheme();
 
   const isActive = processing.status !== "idle";
   const queueCount = processing.folders.length;
@@ -94,6 +97,7 @@ function App() {
       onAddFolder={processing.addFolder}
       onAddFiles={processing.addFiles}
       showQueueActions={!isActive}
+      theme={display.theme}
     >
       <div className="app-stack">
         {!isActive && (
@@ -139,9 +143,12 @@ function App() {
             workers={processing.workers}
             recentEvents={processing.recentEvents}
             runFolders={processing.runFolders}
+            workerLayout={display.info.workers}
           />
         )}
       </div>
+
+      <ThemeMenu theme={display.theme} onSelect={display.setTheme} />
 
       {settingsOpen && (
         <SettingsModal
@@ -152,6 +159,8 @@ function App() {
           settingsPath={settings.settingsPath}
           saveError={settings.saveError}
           onUpdate={settings.updateSettings}
+          theme={display.theme}
+          onThemeChange={display.setTheme}
           onClose={() => setSettingsOpen(false)}
         />
       )}

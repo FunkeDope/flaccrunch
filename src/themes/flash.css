@@ -1,0 +1,491 @@
+/* Flash Game — 2000s browser-game HUD: thick outlines, candy gradients, gloss. */
+
+[data-theme="flash"] {
+  --font: "Trebuchet MS", Verdana, Tahoma, sans-serif;
+  --mono: "Courier New", monospace;
+  --fs: 13px;
+
+  --desktop: #1b6fd6;
+  --bg: #ffffff;
+  --surface: #f2f7ff;
+  --surface-2: #ffffff;
+  --text: #1b1b1b;
+  --text-strong: #000000;
+  --muted: #5b6b85;
+  --border: #1b1b1b;
+  --border-strong: #1b1b1b;
+  --accent: #2fb11a;
+  --accent-text: #ffffff;
+  --title-bg: linear-gradient(#ffd54a, #ff9a00);
+  --title-text: #ffffff;
+
+  --ok: #1a9f2e;
+  --warn: #d37a00;
+  --fail: #e0242e;
+  --stage-blue: #1f7ad6;
+  --stage-green: #1a9f2e;
+  --stage-amber: #d37a00;
+  --stage-purple: #8e3fd1;
+
+  --pane-bg: #ffffff;
+  --row-hover: #fff3c4;
+  --row-fail-bg: #ffd9db;
+  --row-fail-hover: #ffc2c6;
+  --worker-active-bg: #fff8d6;
+  --drop-active-bg: #fff3c4;
+  --progress-track: #2b2b2b;
+  --progress-fill: #ffb400;
+
+  --line: #c9d6ea;
+  --line-dark: #1b1b1b;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow: 0 8px 0 #0e3a73, 0 16px 30px rgba(0, 0, 0, 0.35);
+}
+
+@keyframes fl-stripes {
+  to {
+    background-position: 40px 0;
+  }
+}
+
+[data-theme="flash"] .app-shell {
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0 18px, transparent 18px 36px),
+    radial-gradient(circle at 50% 10%, #6fd0ff 0%, #1f7ad6 45%, #0c3f8f 100%);
+}
+
+[data-theme="flash"] .window {
+  border: 3px solid var(--border);
+}
+
+[data-theme="flash"] .title-bar {
+  padding: 8px 14px;
+  border-bottom: 3px solid var(--border);
+  background: var(--title-bg);
+  box-shadow: inset 0 10px 0 rgba(255, 255, 255, 0.35);
+}
+
+[data-theme="flash"] .title-bar-text {
+  font-family: Impact, "Arial Black", "Trebuchet MS", sans-serif;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #ffffff;
+  -webkit-text-stroke: 2px #1b1b1b;
+  paint-order: stroke fill;
+  text-shadow: 3px 3px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .app-title-bar .title-bar-text::after {
+  content: " \2605";
+  color: #ffd54a;
+}
+
+[data-theme="flash"] button {
+  position: relative;
+  overflow: hidden;
+  min-height: 32px;
+  padding: 4px 16px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(#6fc3ff, #1f7ad6);
+  color: #ffffff;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-shadow: 1px 1px 0 #1b1b1b;
+  box-shadow: 0 3px 0 #1b1b1b;
+}
+
+[data-theme="flash"] button::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  height: 45%;
+  border-radius: 8px 8px 3px 3px;
+  background: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+[data-theme="flash"] button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: var(--border);
+}
+
+[data-theme="flash"] button:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: none;
+}
+
+[data-theme="flash"] button.default {
+  background: linear-gradient(#9af36a, #2fb11a);
+  border-color: var(--border);
+}
+
+[data-theme="flash"] .start-next-button {
+  min-height: 40px;
+  padding: 4px 28px;
+  font-size: 16px;
+}
+
+[data-theme="flash"] .theme-cycle,
+[data-theme="flash"] .queue-peek,
+[data-theme="flash"] .worker-toggle {
+  background: linear-gradient(#d7b4ff, #8e3fd1);
+}
+
+[data-theme="flash"] .title-bar-controls button {
+  min-width: 30px;
+  min-height: 28px;
+  background: linear-gradient(#ff8a8a, #e0242e);
+}
+
+[data-theme="flash"] .app-toolbar-brand {
+  font-family: Impact, "Arial Black", sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1f7ad6;
+}
+
+[data-theme="flash"] fieldset {
+  border: 3px solid var(--border);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px #ffffff;
+}
+
+[data-theme="flash"] legend {
+  padding: 2px 12px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: #ffd54a;
+  color: #1b1b1b;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  box-shadow: 0 2px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .sunken-panel,
+[data-theme="flash"] input[type="text"],
+[data-theme="flash"] select {
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+}
+
+[data-theme="flash"] .status-bar-field {
+  border: 2px solid var(--border);
+  background: #ffe680;
+  color: #1b1b1b;
+  font-weight: 800;
+  box-shadow: 0 2px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .status-bar-field strong {
+  color: #1b1b1b;
+}
+
+[data-theme="flash"] .progress-indicator {
+  border: 2px solid var(--border);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.35);
+}
+
+[data-theme="flash"] .run-progress {
+  height: 22px;
+}
+
+[data-theme="flash"] .progress-indicator-bar {
+  background: repeating-linear-gradient(135deg, #ffd54a 0 10px, #ff9a00 10px 20px);
+  background-size: 40px 100%;
+  box-shadow: inset 0 6px 0 rgba(255, 255, 255, 0.35);
+  animation: fl-stripes 1s linear infinite;
+}
+
+[data-theme="flash"] table thead th {
+  background: #1f7ad6;
+  color: #ffffff;
+  font-weight: 900;
+  border-bottom: 2px solid var(--border);
+}
+
+[data-theme="flash"] table td {
+  border-bottom: 1px solid var(--line);
+}
+
+[data-theme="flash"] .events-table tbody tr:nth-child(even) td {
+  background: #eef5ff;
+}
+
+[data-theme="flash"] .drop-zone {
+  border: 3px dashed #1f7ad6;
+  border-radius: 12px;
+  background: #e9f4ff;
+}
+
+[data-theme="flash"] .drop-zone-title {
+  font-weight: 900;
+  text-transform: uppercase;
+  color: #1f7ad6;
+  font-size: 15px;
+}
+
+[data-theme="flash"] .worker-panel {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+[data-theme="flash"] .worker-id {
+  display: inline-block;
+  min-width: 24px;
+  padding: 0 6px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: #ffd54a;
+  color: #1b1b1b;
+  text-align: center;
+}
+
+[data-theme="flash"] .worker-hash-panel {
+  border-top: 2px solid var(--border);
+}
+
+[data-theme="flash"] .status-bar-label {
+  font-family: Impact, "Arial Black", sans-serif;
+  font-weight: 400;
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  -webkit-text-stroke: 1px #1b1b1b;
+  paint-order: stroke fill;
+}
+
+[data-theme="flash"] .error-banner {
+  border: 2px solid var(--fail);
+  background: #ffd9db;
+  font-weight: 700;
+}
+
+[data-theme="flash"] .modal-overlay {
+  background: rgba(12, 63, 143, 0.6);
+}
+
+[data-theme="flash"] .settings-group + .settings-group {
+  border-top: 2px dashed var(--line);
+}
+
+[data-theme="flash"] .resize-handle::after {
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: #ffd54a;
+  height: 7px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout: a game HUD. Giant centred progress + score strip on top,    */
+/* workers as a horizontal "level select" row, menu buttons at the     */
+/* bottom, results table underneath.                                   */
+/* ------------------------------------------------------------------ */
+
+[data-theme="flash"] .app-window-body {
+  flex-direction: column-reverse;
+  gap: 8px;
+}
+
+/* Toolbar becomes the bottom menu: big chunky buttons, centred. */
+[data-theme="flash"] .app-toolbar {
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 0 2px;
+  border-top: 3px solid var(--border);
+}
+
+[data-theme="flash"] .app-toolbar-actions {
+  gap: 10px;
+}
+
+[data-theme="flash"] .app-toolbar button {
+  min-height: 40px;
+  padding: 4px 22px;
+  font-size: 15px;
+}
+
+[data-theme="flash"] .app-toolbar-right {
+  margin-left: 0;
+  gap: 10px;
+}
+
+[data-theme="flash"] .app-toolbar-brand {
+  display: none;
+}
+
+/* Run status = the HUD header: score chips row above a giant bar. */
+[data-theme="flash"] .run-status-window {
+  border-width: 3px;
+  background: linear-gradient(#ffffff, #eaf3ff);
+}
+
+[data-theme="flash"] .run-status-body {
+  display: flex;
+  flex-direction: column;
+}
+
+[data-theme="flash"] .run-status-main {
+  grid-template-columns: 1fr;
+  grid-template-areas: "label" "pct" "bar" "actions";
+  justify-items: center;
+  gap: 4px;
+  padding: 4px 0 2px;
+}
+
+[data-theme="flash"] .run-status-main .status-bar-label {
+  grid-area: label;
+  font-size: 22px;
+}
+
+[data-theme="flash"] .run-status-main .status-bar-pct {
+  grid-area: pct;
+  font-family: Impact, "Arial Black", sans-serif;
+  font-size: 44px;
+  line-height: 1;
+  color: #ffd54a;
+  -webkit-text-stroke: 2px #1b1b1b;
+  paint-order: stroke fill;
+  text-shadow: 3px 3px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .run-status-main .run-progress {
+  grid-area: bar;
+  width: 100%;
+  height: 30px;
+}
+
+[data-theme="flash"] .run-status-main .status-bar-actions {
+  grid-area: actions;
+}
+
+[data-theme="flash"] .run-status-window .status-bar {
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 8px 10px;
+}
+
+[data-theme="flash"] .app-summary-bar {
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Workers: level-select cards in one horizontally scrolling row. */
+[data-theme="flash"] .worker-body {
+  padding: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+[data-theme="flash"] .worker-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 10px;
+  padding: 0;
+  min-height: 100%;
+}
+
+[data-theme="flash"] .worker-panel {
+  flex: 0 0 190px;
+  min-height: 150px;
+  padding: 8px;
+  border-width: 3px;
+  box-shadow: 0 4px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .worker-panel.active {
+  background: linear-gradient(#fff8d6, #ffe680);
+  transform: translateY(-3px);
+  box-shadow: 0 7px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .worker-panel.idle-card {
+  background: #e4e9f2;
+  box-shadow: 0 2px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .worker-panel-top {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+[data-theme="flash"] .worker-id {
+  width: 36px;
+  height: 36px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: Impact, "Arial Black", sans-serif;
+  font-size: 18px;
+  border-radius: 50%;
+}
+
+[data-theme="flash"] .worker-stage {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+[data-theme="flash"] .worker-card .file-name {
+  text-align: center;
+  font-weight: 700;
+}
+
+[data-theme="flash"] .worker-progress {
+  height: 14px;
+}
+
+[data-theme="flash"] .worker-hash-panel {
+  font-size: 10px;
+}
+
+[data-theme="flash"] .drop-zone {
+  min-height: 120px;
+}
+
+[data-theme="flash"] .drop-zone-title {
+  font-family: Impact, "Arial Black", sans-serif;
+  font-weight: 400;
+  font-size: 26px;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  -webkit-text-stroke: 1.5px #1b1b1b;
+  paint-order: stroke fill;
+  text-shadow: 2px 2px 0 #1b1b1b;
+}
+
+[data-theme="flash"] .start-footer-actions {
+  justify-content: center;
+}
+
+[data-theme="flash"] .start-next-button {
+  min-height: 52px;
+  padding: 4px 48px;
+  font-size: 22px;
+}
+
+@media (max-width: 640px) {
+  [data-theme="flash"] .app-toolbar {
+    flex-wrap: wrap;
+  }
+
+  [data-theme="flash"] .app-toolbar button {
+    min-height: 34px;
+    padding: 4px 12px;
+    font-size: 13px;
+  }
+
+  [data-theme="flash"] .run-status-main .status-bar-pct {
+    font-size: 32px;
+  }
+}

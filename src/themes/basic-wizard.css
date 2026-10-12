@@ -1,0 +1,288 @@
+/*
+ * Wizard — the Basic Windows application laid out like a classic Setup /
+ * "Copying..." wizard: a white header band with a bold title and a one-line
+ * subtitle, a grey page body with the content centred in a 760px column, and
+ * a bottom button bar separated from the page by an etched line.
+ *
+ * Every control style comes from basic.css ([data-theme^="basic"]); this file
+ * only adds layout and reuses the --b-* palette tokens. No cards, no rounded
+ * corners, no shadows, no gradients.
+ */
+
+/* Header band ------------------------------------------------------- */
+
+[data-theme="basic-wizard"] .app-title-bar {
+  min-height: 60px;
+  padding: 0 20px;
+  align-items: center;
+  background: var(--b-field);
+  color: var(--b-text);
+  border-bottom: 1px solid var(--b-line);
+}
+
+[data-theme="basic-wizard"] .title-bar-text {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+/* Subtitle: the \A forces the line break; the text stays generic because the
+   header cannot follow the run state. */
+[data-theme="basic-wizard"] .title-bar-text::after {
+  content: "\ALossless FLAC re-encode with verification.";
+  white-space: pre;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--b-muted);
+}
+
+/* Progressive enhancement: on the idle page the subtitle is the wizard
+   instruction. Dropped silently where :has() is unsupported. */
+[data-theme="basic-wizard"] .app-window:has(.start-fieldset) .title-bar-text::after {
+  content: "\ASelect the FLAC folders or files to optimise, then start.";
+}
+
+/* Page body --------------------------------------------------------- */
+
+[data-theme="basic-wizard"] .app-window-body {
+  flex-direction: column-reverse;
+  gap: 0;
+  padding: 20px 24px;
+  background: var(--b-window);
+}
+
+[data-theme="basic-wizard"] .content {
+  width: 100%;
+}
+
+[data-theme="basic-wizard"] .app-stack {
+  gap: 12px;
+}
+
+/* The wizard page is a centred column; the running dashboard keeps the
+   full width because .content wraps both views. */
+[data-theme="basic-wizard"] .start-fieldset,
+[data-theme="basic-wizard"] .app-summary-bar {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+[data-theme="basic-wizard"] .processing-section {
+  max-width: none;
+}
+
+/* Bottom button bar ------------------------------------------------- */
+
+[data-theme="basic-wizard"] .app-toolbar {
+  flex-wrap: nowrap;
+  align-items: center;
+  min-height: 56px;
+  margin: 16px -24px -20px;
+  padding: 0 24px;
+  border-top: 1px solid var(--b-line-strong);
+  border-bottom: none;
+  box-shadow: inset 0 1px 0 var(--b-field);
+  background: var(--b-window);
+}
+
+[data-theme="basic-wizard"] .app-toolbar-right {
+  order: -1;
+  margin-left: 0;
+  margin-right: auto;
+}
+
+[data-theme="basic-wizard"] .app-toolbar-brand {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--b-muted);
+}
+
+[data-theme="basic-wizard"] .app-toolbar-actions {
+  margin-left: auto;
+  gap: 6px;
+}
+
+[data-theme="basic-wizard"] .app-toolbar-actions button {
+  min-width: 90px;
+}
+
+/* Idle page: source selection --------------------------------------- */
+
+[data-theme="basic-wizard"] .start-fieldset {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+[data-theme="basic-wizard"] .start-fieldset > legend {
+  padding: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--b-text);
+}
+
+[data-theme="basic-wizard"] .start-screen-copy {
+  font-size: 12px;
+  color: var(--b-text);
+}
+
+[data-theme="basic-wizard"] .start-screen-copy p + p {
+  color: var(--b-muted);
+}
+
+[data-theme="basic-wizard"] .drop-zone-row {
+  gap: 12px;
+  margin-top: 12px;
+}
+
+[data-theme="basic-wizard"] .drop-zone {
+  min-height: 110px;
+  padding: 10px;
+  border: 1px dashed var(--b-line-strong);
+  background: var(--b-field);
+}
+
+[data-theme="basic-wizard"] .drop-zone-title {
+  font-size: 12px;
+}
+
+[data-theme="basic-wizard"] .drop-zone-note {
+  font-size: 12px;
+}
+
+[data-theme="basic-wizard"] .intake-footer {
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* Selected items: a white list view with a plain caption on top. */
+[data-theme="basic-wizard"] .queue-list-panel {
+  max-height: 180px;
+  padding: 4px;
+  border: 1px solid var(--b-list-border);
+  background: var(--b-field);
+}
+
+[data-theme="basic-wizard"] .queue-list-panel::before {
+  content: "Selected items:";
+  display: block;
+  padding: 4px;
+  font-size: 12px;
+  color: var(--b-text);
+}
+
+[data-theme="basic-wizard"] .queue-list-panel .folder-list {
+  padding: 0 4px 4px;
+}
+
+/* "Start >" acts as the wizard's Next button. */
+[data-theme="basic-wizard"] .start-footer-actions {
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--b-line);
+}
+
+[data-theme="basic-wizard"] .start-next-button {
+  min-width: 90px;
+}
+
+/* Running page: the "Copying..." dialog ------------------------------ */
+
+[data-theme="basic-wizard"] .run-status-window {
+  padding: 6px;
+  border: 1px solid var(--b-line-strong);
+  background: var(--b-field);
+}
+
+[data-theme="basic-wizard"] .run-status-main {
+  gap: 10px;
+}
+
+[data-theme="basic-wizard"] .status-bar-label {
+  font-weight: 700;
+  color: var(--b-text);
+}
+
+[data-theme="basic-wizard"] .run-progress {
+  height: 15px;
+}
+
+[data-theme="basic-wizard"] .status-bar-pct {
+  min-width: 36px;
+  text-align: right;
+}
+
+[data-theme="basic-wizard"] .run-status-window .status-bar {
+  gap: 0;
+  padding: 2px 6px 4px;
+  border-top: none;
+  font-size: 12px;
+}
+
+[data-theme="basic-wizard"] .run-status-window .status-bar-field {
+  padding: 0 12px 0 0;
+  border: none;
+  color: var(--b-text);
+  font-size: 12px;
+}
+
+/* Workers and Files: borderless page sections with bold captions. */
+[data-theme="basic-wizard"] .workers-pane,
+[data-theme="basic-wizard"] .files-pane {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+[data-theme="basic-wizard"] .workers-pane > legend,
+[data-theme="basic-wizard"] .files-pane > legend {
+  padding: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--b-text);
+}
+
+[data-theme="basic-wizard"] .pane-toolbar {
+  margin-bottom: 6px;
+}
+
+[data-theme="basic-wizard"] .events-table-footer {
+  font-size: 12px;
+  color: var(--b-muted);
+}
+
+/* Mobile ------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  [data-theme="basic-wizard"] .app-title-bar {
+    min-height: 54px;
+    padding: 0 12px;
+  }
+
+  [data-theme="basic-wizard"] .app-window-body {
+    padding: 10px;
+  }
+
+  [data-theme="basic-wizard"] .app-toolbar {
+    min-height: 48px;
+    margin: 10px -10px -10px;
+    padding: 0 10px;
+  }
+
+  [data-theme="basic-wizard"] .app-toolbar-actions button,
+  [data-theme="basic-wizard"] .start-next-button {
+    min-width: 80px;
+  }
+
+  [data-theme="basic-wizard"] .drop-zone {
+    min-height: 80px;
+  }
+}
+
+/* Keep the bottom-bar buttons clear of the floating theme dot. */
+[data-theme="basic-wizard"] .app-toolbar {
+  padding-right: 40px;
+}

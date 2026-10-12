@@ -1,0 +1,91 @@
+/* Windows 95 — the original look. 98.css is scoped to this theme at build time. */
+@import "98.css";
+
+[data-theme="win95"] {
+  --font: "Pixelated MS Sans Serif", Arial, sans-serif;
+  --mono: "Courier New", Courier, monospace;
+  --fs: 11px;
+
+  --desktop: #008080;
+  --bg: silver;
+  --surface: silver;
+  --surface-2: #ffffff;
+  --text: #222222;
+  --text-strong: #000000;
+  --muted: #666666;
+  --border: #c0c0c0;
+  --border-strong: #808080;
+  --accent: navy;
+  --accent-text: #ffffff;
+  --title-bg: navy;
+  --title-text: #ffffff;
+
+  --ok: #008000;
+  --warn: #7a5a00;
+  --fail: #800000;
+  --stage-blue: #000080;
+  --stage-green: #006400;
+  --stage-amber: #7a5a00;
+  --stage-purple: #5a2a83;
+
+  --pane-bg: #ffffff;
+  --row-hover: #efefef;
+  --row-fail-bg: #ffd6d6;
+  --row-fail-hover: #ffbdbd;
+  --worker-active-bg: #eef3ff;
+  --drop-active-bg: #e8f0ff;
+  --progress-track: #ffffff;
+  --progress-fill: navy;
+
+  --line: #c0c0c0;
+  --line-dark: #808080;
+  --line-highlight: #ffffff;
+  --radius: 0;
+  --radius-sm: 0;
+  --shadow: none;
+}
+
+[data-theme="win95"] .app-shell {
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+}
+
+[data-theme="win95"] .error-banner {
+  background: #ffffff;
+}
+
+[data-theme="win95"] .run-progress > .progress-indicator-bar {
+  background-size: 10px 100%;
+  background-image: linear-gradient(90deg, navy 8px, transparent 0 2px);
+}
+
+[data-theme="win95"] .worker-progress > .progress-indicator-bar {
+  background-color: navy;
+}
+
+[data-theme="win95"] .worker-grid {
+  gap: 1px;
+  background: #ffffff;
+}
+
+[data-theme="win95"] .worker-panel {
+  border: none !important;
+}
+
+[data-theme="win95"] .hash-saved-low {
+  color: #444444;
+}
+
+[data-theme="win95"] .resize-handle::after {
+  border-top-color: #dfdfdf;
+  border-bottom-color: #808080;
+  background: #c0c0c0;
+}
+
+[data-theme="win95"] .bad-folders-panel {
+  background: #fff4f4;
+}
+
+[data-theme="win95"] .theme-cycle {
+  min-width: 0;
+}

@@ -1,0 +1,1424 @@
+/*
+ * LimeWire - the 4.x Java client (2005-2007) running in a Windows XP Luna
+ * window. Layout follows the real Search tab: a row of big icon tabs across
+ * the top with the "Get LimeWire PRO" banner on the right, the Search side
+ * panel on the left (media types, search box, lime Search button), and the
+ * results area on the right. While a run is active the results area splits
+ * into the Search Results table (top) and the Downloads list (bottom), and the
+ * window ends in LimeWire's grey status bar ("Connected" + signal bars).
+ *
+ * The window chrome (3px #0855dd frame, 30px blue title gradient, red close
+ * button) is borrowed from the XP theme since the client ran inside XP.
+ */
+
+[data-theme="limewire"] {
+  --font: Tahoma, "Segoe UI", Verdana, sans-serif;
+  --mono: "Lucida Console", Consolas, monospace;
+  --fs: 11px;
+
+  --desktop: linear-gradient(180deg, #3a6ea5 0%, #7fb0e8 45%, #5e9e3e 46%, #2f7a2a 100%);
+  --bg: #ece9d8;
+  --surface: #ece9d8;
+  --surface-2: #ffffff;
+  --text: #000000;
+  --text-strong: #000000;
+  --muted: #5a5a5a;
+  --border: #a0a0a0;
+  --border-strong: #7f9db9;
+  --accent: #7dc242;
+  --accent-text: #ffffff;
+  --title-bg: linear-gradient(180deg, #0a5fe8 0%, #3d8ff4 10%, #1f6fe8 20%, #0b53d6 100%);
+  --title-text: #ffffff;
+
+  --ok: #2e8b2e;
+  --warn: #b07a00;
+  --fail: #c8231b;
+  --stage-blue: #4d8c2a;
+  --stage-green: #1f8f1f;
+  --stage-amber: #b07a00;
+  --stage-purple: #7a3cc7;
+
+  --pane-bg: #ffffff;
+  --row-hover: #eaf5df;
+  --row-fail-bg: #fde3e0;
+  --row-fail-hover: #f8cfc9;
+  --worker-active-bg: #ffffff;
+  --drop-active-bg: #eaf5df;
+  --progress-track: #ffffff;
+  --progress-fill: #7dc242;
+
+  --line: #c0c0c0;
+  --line-dark: #a0a0a0;
+  --line-highlight: #ffffff;
+  --radius: 3px;
+  --radius-sm: 0;
+  --shadow: 0 0 0 1px #00138c, 3px 3px 14px rgba(0, 0, 0, 0.45);
+
+  /* LimeWire palette. */
+  --lw-lime: #7dc242;
+  --lw-lime-light: #a7d96a;
+  --lw-lime-dark: #4d8c2a;
+  --lw-lime-pale: #eaf5df;
+  --lw-lime-line: #b9d99a;
+  --lw-lime-frame: #7fb84a;
+  --lw-panel: #f4f4f4;
+  --lw-xp-panel: #ece9d8;
+  --lw-grey-line: #a0a0a0;
+  --lw-grey-soft: #c0c0c0;
+  --lw-row-alt: #f7f9f4;
+  --lw-selection: #316ac5;
+}
+
+/* Desktop + XP window frame ----------------------------------------------- */
+
+[data-theme="limewire"] .app-shell {
+  padding: 10px;
+  background: var(--desktop);
+}
+
+[data-theme="limewire"] .app-window {
+  height: calc(100vh - 20px);
+}
+
+[data-theme="limewire"] ::selection {
+  background: var(--lw-selection);
+  color: #ffffff;
+}
+
+[data-theme="limewire"] .window {
+  background: var(--lw-xp-panel);
+  border: 3px solid #0855dd;
+  border-radius: 8px 8px 0 0;
+  box-shadow: var(--shadow);
+}
+
+[data-theme="limewire"] .title-bar {
+  min-height: 30px;
+  padding: 0 5px 0 8px;
+  gap: 8px;
+  background: var(--title-bg);
+  color: #ffffff;
+  border-bottom: 1px solid #1b4fb3;
+}
+
+[data-theme="limewire"] .title-bar-text {
+  display: inline-flex;
+  align-items: center;
+  font: 700 13px/1 "Trebuchet MS", Tahoma, sans-serif;
+  letter-spacing: 0;
+  color: #ffffff;
+  text-shadow: 1px 1px #0a2e73;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Lime-slice application icon in front of the window title. */
+[data-theme="limewire"] .title-bar-text::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border: 1px solid #2f5e1a;
+  border-radius: 50%;
+  background:
+    conic-gradient(from 0deg, transparent 0 8%, #ffffff 8% 10%, transparent 10% 33%, #ffffff 33% 35%, transparent 35% 58%, #ffffff 58% 60%, transparent 60% 83%, #ffffff 83% 85%, transparent 85%),
+    radial-gradient(circle, #eaf5df 0 22%, #a7d96a 24% 60%, #7dc242 62% 100%);
+}
+
+[data-theme="limewire"] .app-title-bar .title-bar-text::after {
+  content: " - LimeWire PRO 4.12.6";
+  white-space: pre;
+  font-weight: 400;
+}
+
+[data-theme="limewire"] .title-bar-controls {
+  gap: 2px;
+}
+
+[data-theme="limewire"] .title-bar-controls button {
+  width: 21px;
+  height: 21px;
+  min-width: 21px;
+  min-height: 21px;
+  padding: 0;
+  border: 1px solid #ffffff;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #5a95f7 0%, #3b7af5 45%, #2a66e0 100%);
+  color: #ffffff;
+  font: 700 12px/1 Tahoma, sans-serif;
+  box-shadow: 0 0 0 1px #1b4fb3, inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+[data-theme="limewire"] .title-bar-controls button:hover:not(:disabled) {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 1px #1b4fb3, inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  filter: brightness(1.12);
+}
+
+[data-theme="limewire"] .title-bar-controls button:active:not(:disabled) {
+  transform: none;
+  background: linear-gradient(180deg, #5a95f7 0%, #3b7af5 45%, #2a66e0 100%);
+  filter: brightness(0.9);
+}
+
+[data-theme="limewire"] .title-bar-controls button:focus-visible {
+  outline: none;
+}
+
+[data-theme="limewire"] .title-bar-controls button[aria-label="Close"] {
+  background: linear-gradient(180deg, #e8674a 0%, #d94a2b 45%, #c13b1d 100%);
+  box-shadow: 0 0 0 1px #7a1c0c, inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+[data-theme="limewire"] .title-bar-controls button[aria-label="Close"]:hover:not(:disabled),
+[data-theme="limewire"] .title-bar-controls button[aria-label="Close"]:active:not(:disabled) {
+  background: linear-gradient(180deg, #e8674a 0%, #d94a2b 45%, #c13b1d 100%);
+  box-shadow: 0 0 0 1px #7a1c0c, inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+[data-theme="limewire"] .title-bar-controls button[aria-label="Close"]::before {
+  content: "\2715";
+  font-size: 12px;
+}
+
+[data-theme="limewire"] .title-bar-controls button[aria-label="Maximize"]::before,
+[data-theme="limewire"] .title-bar-controls button[aria-label="Restore"]::before {
+  content: "\25A1";
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Client body: tab strip across the top, Search panel left, results right ---- */
+
+[data-theme="limewire"] .window-body {
+  padding: 10px;
+}
+
+[data-theme="limewire"] .app-window-body {
+  position: relative;
+  flex-direction: row;
+  gap: 0;
+  padding: 34px 0 0;
+  background:
+    linear-gradient(180deg, var(--lw-xp-panel) 0 33px, var(--lw-grey-line) 33px 34px, var(--lw-xp-panel) 34px);
+}
+
+/*
+ * The tab strip. Only pseudo-elements are available for it, so each tab is a
+ * pseudo-element positioned against .app-window-body: the body's own ::before
+ * is the selected "Search" tab, the side panel's and the content's pseudos are
+ * the four inactive tabs, and the body's ::after is the PRO banner.
+ */
+[data-theme="limewire"] .app-window-body::before,
+[data-theme="limewire"] .app-toolbar::before,
+[data-theme="limewire"] .app-toolbar::after,
+[data-theme="limewire"] .content::before,
+[data-theme="limewire"] .content::after {
+  position: absolute;
+  top: 5px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--lw-grey-line);
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  background: #e8e8e8;
+  color: #000000;
+  font: 11px/1 var(--font);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Every tab carries a small lime "icon" square before its label. */
+[data-theme="limewire"] .app-window-body::before,
+[data-theme="limewire"] .app-toolbar::before,
+[data-theme="limewire"] .app-toolbar::after,
+[data-theme="limewire"] .content::before,
+[data-theme="limewire"] .content::after {
+  padding-left: 24px;
+  background-image: linear-gradient(135deg, #c5e89a 0%, #7dc242 60%, #4d8c2a 100%);
+  background-size: 11px 11px;
+  background-position: 8px center;
+  background-repeat: no-repeat;
+}
+
+[data-theme="limewire"] .app-window-body::before {
+  content: "Search";
+  left: 6px;
+  width: 66px;
+  height: 29px;
+  background-color: #ffffff;
+  font-weight: 700;
+}
+
+[data-theme="limewire"] .app-toolbar::before {
+  content: "Monitor";
+  left: 74px;
+  width: 66px;
+}
+
+[data-theme="limewire"] .app-toolbar::after {
+  content: "Connections";
+  left: 142px;
+  width: 86px;
+}
+
+[data-theme="limewire"] .content::before {
+  content: "Library";
+  left: 230px;
+  width: 62px;
+}
+
+[data-theme="limewire"] .content::after {
+  content: "Console";
+  left: 294px;
+  width: 64px;
+}
+
+/* "Get LimeWire PRO" banner: lime pill inside a white framed box. */
+[data-theme="limewire"] .app-window-body::after {
+  content: "Get LimeWire PRO";
+  position: absolute;
+  top: 9px;
+  right: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 10px;
+  border: 1px solid var(--lw-lime-dark);
+  border-radius: 9px;
+  background: linear-gradient(180deg, var(--lw-lime-light), var(--lw-lime));
+  color: #ffffff;
+  font: 700 10px/1 var(--font);
+  text-shadow: 1px 1px 0 #3a6b1f;
+  white-space: nowrap;
+  box-shadow: 0 0 0 4px #ffffff;
+  outline: 1px solid var(--lw-lime-frame);
+  outline-offset: 4px;
+  pointer-events: none;
+}
+
+/* Search side panel ------------------------------------------------------- */
+
+[data-theme="limewire"] .app-toolbar {
+  display: flex;
+  flex: 0 0 190px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  width: 190px;
+  gap: 4px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--lw-grey-line);
+  border-top: none;
+  background: var(--lw-panel);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/*
+ * The brand wrapper dissolves so its pseudo-elements and the brand span become
+ * flex items of the panel: heading, brand line, media types, search box, then
+ * the lime Search button at the end.
+ */
+[data-theme="limewire"] .app-toolbar-right {
+  display: contents;
+}
+
+[data-theme="limewire"] .app-toolbar-right::before {
+  content: "Search";
+  order: 1;
+  display: block;
+  padding: 2px 2px 0;
+  color: #000000;
+  font: 700 13px/1.2 var(--font);
+}
+
+[data-theme="limewire"] .app-toolbar-brand {
+  order: 2;
+  display: block;
+  margin: 0 0 6px;
+  padding: 0 2px;
+  color: var(--muted);
+  font: 10px/1.3 var(--font);
+}
+
+[data-theme="limewire"] .app-toolbar-actions {
+  order: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  margin: 0;
+}
+
+/* Media-type rows: Any Type / Audio / Video... become Folder / Files / Settings. */
+[data-theme="limewire"] .app-toolbar-actions > button {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 7px;
+  min-height: 20px;
+  margin: 0;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: #000000;
+  font: 11px/1.2 var(--font);
+  text-align: left;
+  white-space: nowrap;
+}
+
+[data-theme="limewire"] .app-toolbar-actions > button:hover:not(:disabled) {
+  border-color: var(--lw-lime-frame);
+  background: var(--lw-lime-pale);
+  box-shadow: none;
+}
+
+[data-theme="limewire"] .app-toolbar-actions > button:active:not(:disabled) {
+  transform: none;
+  background: #dcefc7;
+  box-shadow: none;
+}
+
+[data-theme="limewire"] .app-toolbar-actions > button:focus-visible {
+  outline: 1px dotted #000000;
+  outline-offset: -2px;
+}
+
+/* Small coloured square icons in front of each media type. */
+[data-theme="limewire"] .app-toolbar-actions > button::before {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #5a5a5a;
+  background:
+    linear-gradient(180deg, transparent 0 4px, #ffffff 4px 5px, transparent 5px 7px, #ffffff 7px 8px, transparent 8px) 2px 0 / 6px 100% no-repeat,
+    linear-gradient(135deg, #d8d8d8, #8f8f8f);
+}
+
+/* Folder... = yellow folder. */
+[data-theme="limewire"] .app-toolbar-actions > button:first-child:not(:last-child)::before {
+  height: 10px;
+  margin-top: 1px;
+  border-color: #b8862a;
+  background: linear-gradient(180deg, #fff2a8 0 2px, #f6dc6f 2px, #e2b53b 100%);
+}
+
+/* Files... = white document. */
+[data-theme="limewire"] .app-toolbar-actions > button:nth-child(2):not(:last-child)::before {
+  width: 10px;
+  height: 12px;
+  border-color: #7f9db9;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 2px, #b9c4d9 2px 3px) 2px 3px / 5px 6px no-repeat,
+    #ffffff;
+}
+
+/* The "Search for:" text box (decorative: FlacCrunch has no query field). */
+[data-theme="limewire"] .app-toolbar-actions::after {
+  content: "*.flac";
+  display: flex;
+  align-items: center;
+  height: 21px;
+  margin-top: 8px;
+  padding: 0 4px;
+  border: 1px solid #7f9db9;
+  background: #ffffff;
+  color: #000000;
+  font: 11px/1 var(--font);
+  pointer-events: none;
+}
+
+/* The lime "Search" button under the box (decorative). */
+[data-theme="limewire"] .app-toolbar-right::after {
+  content: "Search";
+  order: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-end;
+  height: 23px;
+  margin-top: 2px;
+  padding: 0 14px;
+  border: 1px solid var(--lw-lime-dark);
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--lw-lime-light), var(--lw-lime));
+  color: #ffffff;
+  font: 700 11px/1 var(--font);
+  text-shadow: 1px 1px 0 #3a6b1f;
+  pointer-events: none;
+}
+
+/* Results area. */
+[data-theme="limewire"] .content {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 6px 0;
+  background: var(--lw-xp-panel);
+}
+
+[data-theme="limewire"] .app-stack {
+  gap: 4px;
+}
+
+/* Controls: standard XP buttons, lime for default ---------------------------- */
+
+[data-theme="limewire"] button {
+  min-height: 23px;
+  padding: 2px 12px;
+  border: 1px solid #003c74;
+  border-radius: 3px;
+  background: linear-gradient(#ffffff, #ecebe5);
+  color: #000000;
+  font: 11px/1.2 var(--font);
+  font-weight: 400;
+  box-shadow: none;
+}
+
+[data-theme="limewire"] button:hover:not(:disabled) {
+  border-color: #003c74;
+  box-shadow: inset 0 0 0 2px #f8d089;
+}
+
+[data-theme="limewire"] button:active:not(:disabled) {
+  transform: none;
+  background: linear-gradient(#e0dfd8, #f0efe8);
+  box-shadow: inset 0 0 0 2px #c2c1b7;
+}
+
+[data-theme="limewire"] button:disabled {
+  opacity: 1;
+  color: #a0a0a0;
+  border-color: #c9c7ba;
+  background: #f5f4ea;
+  box-shadow: none;
+}
+
+[data-theme="limewire"] button:focus-visible {
+  outline: 1px dotted #000000;
+  outline-offset: -4px;
+}
+
+[data-theme="limewire"] button.default {
+  border-color: var(--lw-lime-dark);
+  background: linear-gradient(180deg, var(--lw-lime-light), var(--lw-lime));
+  color: #ffffff;
+  font-weight: 700;
+  text-shadow: 1px 1px 0 #3a6b1f;
+  box-shadow: none;
+}
+
+[data-theme="limewire"] button.default:hover:not(:disabled) {
+  border-color: var(--lw-lime-dark);
+  background: linear-gradient(180deg, #b7e37e, #8acc52);
+  box-shadow: none;
+}
+
+[data-theme="limewire"] button.default:active:not(:disabled) {
+  background: linear-gradient(180deg, var(--lw-lime), var(--lw-lime-light));
+  box-shadow: none;
+}
+
+[data-theme="limewire"] button.default:disabled {
+  border-color: #c9c7ba;
+  background: #f5f4ea;
+  color: #a0a0a0;
+  text-shadow: none;
+}
+
+[data-theme="limewire"] input[type="text"],
+[data-theme="limewire"] select {
+  min-height: 21px;
+  padding: 2px 4px;
+  border: 1px solid #7f9db9;
+  border-radius: 0;
+  background: #ffffff;
+  color: #000000;
+}
+
+[data-theme="limewire"] input[type="text"]:focus,
+[data-theme="limewire"] select:focus {
+  border-color: var(--lw-lime-dark);
+}
+
+[data-theme="limewire"] input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--lw-lime-dark);
+}
+
+[data-theme="limewire"] input[type="range"] {
+  accent-color: var(--lw-lime);
+}
+
+[data-theme="limewire"] fieldset {
+  padding: 8px 10px 10px;
+  border: 1px solid #d0d0bf;
+  border-radius: 4px;
+  background: transparent;
+}
+
+[data-theme="limewire"] legend {
+  padding: 0 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #000000;
+}
+
+[data-theme="limewire"] .sunken-panel {
+  background: #ffffff;
+  border: 1px solid var(--lw-grey-line);
+  border-radius: 0;
+}
+
+[data-theme="limewire"] .error-banner {
+  border: 1px solid #d0231b;
+  border-radius: 0;
+  background: #fff4f2;
+  color: #b01a12;
+}
+
+/* Progress: 14px lime bar with a dark green frame ---------------------------- */
+
+[data-theme="limewire"] .progress-indicator {
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--lw-lime-dark);
+  border-radius: 0;
+  background: #ffffff;
+}
+
+[data-theme="limewire"] .progress-indicator-bar {
+  border-radius: 0;
+  background: linear-gradient(180deg, #c5e89a 0%, var(--lw-lime-light) 45%, var(--lw-lime) 55%, #6cb336 100%);
+}
+
+[data-theme="limewire"] .run-progress,
+[data-theme="limewire"] .worker-progress {
+  height: 14px;
+  padding: 0;
+}
+
+[data-theme="limewire"] .run-status-window.status-error .progress-indicator {
+  border-color: #8a1a10;
+}
+
+[data-theme="limewire"] .run-status-window.status-error .progress-indicator-bar {
+  background: linear-gradient(180deg, #f5b3ab 0%, #e45a4a 45%, #c13b1d 55%, #d44a2e 100%);
+}
+
+[data-theme="limewire"] .run-status-window.status-warning .progress-indicator {
+  border-color: #9a6a00;
+}
+
+[data-theme="limewire"] .run-status-window.status-warning .progress-indicator-bar {
+  background: linear-gradient(180deg, #ffe7a8 0%, #f8c14a 45%, #d99a12 55%, #e8ad2a 100%);
+}
+
+/* Table panes: Search Results / Downloads / the idle results view ------------- */
+
+[data-theme="limewire"] .start-fieldset,
+[data-theme="limewire"] .workers-pane,
+[data-theme="limewire"] .files-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 22px 0 0;
+  border: 1px solid var(--lw-grey-line);
+  border-radius: 0;
+  background: #ffffff;
+}
+
+/* Legends become the grey pane title strips. */
+[data-theme="limewire"] .start-fieldset > legend,
+[data-theme="limewire"] .workers-pane > legend,
+[data-theme="limewire"] .files-pane > legend {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  height: 22px;
+  margin: 0;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--lw-grey-line);
+  background: var(--lw-xp-panel);
+  color: #000000;
+  font: 700 11px/1 var(--font);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+[data-theme="limewire"] .start-fieldset > legend::before,
+[data-theme="limewire"] .files-pane > legend::before {
+  content: "Search Results: ";
+  white-space: pre;
+}
+
+[data-theme="limewire"] .workers-pane > legend::before {
+  content: "Downloads: ";
+  white-space: pre;
+}
+
+[data-theme="limewire"] .pane-toolbar {
+  flex-shrink: 0;
+  min-height: 24px;
+  margin: 0;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--lw-grey-soft);
+  background: var(--lw-panel);
+}
+
+[data-theme="limewire"] .section-kicker,
+[data-theme="limewire"] .worker-summary {
+  color: var(--muted);
+}
+
+[data-theme="limewire"] .worker-toggle {
+  min-height: 19px;
+  padding: 0 8px;
+}
+
+[data-theme="limewire"] .queue-list-panel,
+[data-theme="limewire"] .bad-folders-panel {
+  margin: 4px 6px;
+  border: 1px solid var(--lw-grey-soft);
+}
+
+[data-theme="limewire"] .bad-folders-panel {
+  border-color: #e3a59e;
+  background: #fde3e0;
+}
+
+[data-theme="limewire"] .folder-item .remove-btn {
+  min-height: 18px;
+  padding: 0 4px;
+}
+
+[data-theme="limewire"] .queue-badge-active {
+  border-radius: 2px;
+  background: var(--lw-lime-dark);
+}
+
+/* Idle view: the empty Search Results table ----------------------------------- */
+
+[data-theme="limewire"] .start-fieldset {
+  flex: 1 1 auto;
+}
+
+/* Column headers of the empty results table. */
+[data-theme="limewire"] .start-fieldset::before {
+  content: "Quality   Name   Type   Size   Speed";
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--lw-grey-soft);
+  background: var(--lw-panel);
+  color: #000000;
+  font: 11px/1 var(--font);
+  white-space: pre;
+  word-spacing: 18px;
+  overflow: hidden;
+}
+
+[data-theme="limewire"] .start-fieldset .error-banner {
+  margin: 6px 8px 0;
+}
+
+[data-theme="limewire"] .start-screen-copy {
+  padding: 10px 8px 4px;
+  color: var(--muted);
+  text-align: center;
+}
+
+[data-theme="limewire"] .drop-zone-row {
+  flex: 0 1 auto;
+  margin: 6px 8px 0;
+  gap: 8px;
+}
+
+[data-theme="limewire"] .drop-zone {
+  min-height: 72px;
+  max-height: 160px;
+  border: 1px solid var(--lw-grey-line);
+  border-radius: 0;
+  background: #ffffff;
+  color: #000000;
+}
+
+[data-theme="limewire"] .drop-zone.active {
+  border-color: var(--lw-lime-frame);
+  background: var(--lw-lime-pale);
+}
+
+[data-theme="limewire"] .drop-zone-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #000000;
+}
+
+[data-theme="limewire"] .drop-zone-note {
+  color: var(--muted);
+}
+
+[data-theme="limewire"] .intake-footer {
+  flex: 1 0 auto;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 6px 8px 8px;
+}
+
+[data-theme="limewire"] .intake-footer .queue-list-panel {
+  margin: 0;
+}
+
+[data-theme="limewire"] .start-footer-actions {
+  margin-top: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--lw-grey-soft);
+}
+
+[data-theme="limewire"] .start-next-button {
+  min-width: 110px;
+}
+
+/* Status bar: "Connected" + signal bars, then the counters ------------------- */
+
+[data-theme="limewire"] .app-summary-bar,
+[data-theme="limewire"] .run-status-window .status-bar {
+  order: 99;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  min-height: 22px;
+  margin: 0 -6px;
+  padding: 0;
+  border-top: 1px solid var(--lw-grey-line);
+  background: var(--lw-xp-panel);
+  overflow: hidden;
+}
+
+[data-theme="limewire"] .app-summary-bar {
+  margin-top: auto;
+}
+
+[data-theme="limewire"] .app-summary-bar .status-bar-field,
+[data-theme="limewire"] .run-status-window .status-bar-field {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 0 8px;
+  border: none;
+  border-left: 1px solid var(--lw-grey-line);
+  border-radius: 0;
+  background: none;
+  color: #000000;
+  font: 11px/1 var(--font);
+  white-space: nowrap;
+}
+
+[data-theme="limewire"] .app-summary-bar .status-bar-field:first-child,
+[data-theme="limewire"] .run-status-window .status-bar-field:first-child {
+  border-left: none;
+}
+
+/* "Connected" with five rising lime bars, drawn as background layers. */
+[data-theme="limewire"] .app-summary-bar .status-bar-field:first-child::before,
+[data-theme="limewire"] .run-status-window .status-bar-field:first-child::before {
+  content: "Connected";
+  display: inline-block;
+  height: 14px;
+  margin-right: 8px;
+  padding-right: 26px;
+  border-right: 1px solid var(--lw-grey-line);
+  line-height: 14px;
+  background:
+    linear-gradient(var(--lw-lime), var(--lw-lime)) right 20px bottom 1px / 2px 4px no-repeat,
+    linear-gradient(var(--lw-lime), var(--lw-lime)) right 17px bottom 1px / 2px 6px no-repeat,
+    linear-gradient(var(--lw-lime), var(--lw-lime)) right 14px bottom 1px / 2px 8px no-repeat,
+    linear-gradient(var(--lw-lime), var(--lw-lime)) right 11px bottom 1px / 2px 10px no-repeat,
+    linear-gradient(var(--lw-lime), var(--lw-lime)) right 8px bottom 1px / 2px 12px no-repeat;
+}
+
+[data-theme="limewire"] .status-bar-field strong {
+  margin-left: 3px;
+  color: #000000;
+}
+
+[data-theme="limewire"] .chip-success strong {
+  color: var(--ok);
+}
+
+[data-theme="limewire"] .chip-error strong {
+  color: var(--fail);
+}
+
+/* Run status: the lime-tinted strip above the status bar -------------------- */
+
+[data-theme="limewire"] .run-status-window {
+  order: 99;
+  display: flex;
+  flex-direction: column;
+  margin: 0 -6px;
+  margin-top: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+[data-theme="limewire"] .run-status-body {
+  margin: 0 6px 4px;
+  padding: 4px 8px !important;
+  border: 1px solid var(--lw-lime-line);
+  background: var(--lw-lime-pale);
+}
+
+[data-theme="limewire"] .run-status-main {
+  gap: 10px;
+}
+
+[data-theme="limewire"] .status-bar-label {
+  font-weight: 700;
+  text-transform: none;
+  color: #000000;
+}
+
+[data-theme="limewire"] .status-bar-label.label-processing {
+  color: #000000;
+}
+
+[data-theme="limewire"] .status-bar-label.label-success {
+  color: var(--lw-lime-dark);
+}
+
+[data-theme="limewire"] .status-bar-pct {
+  color: var(--lw-lime-dark);
+}
+
+[data-theme="limewire"] .status-bar-actions {
+  justify-content: flex-end;
+}
+
+/*
+ * Processing dashboard. The markup puts the workers first, but LimeWire has
+ * the Search Results on top and Downloads underneath. The section stays a grid
+ * (so the inline grid-template-rows from the resize handle keeps working) and
+ * the panes are re-ordered with `order`, which grid auto-placement honours.
+ */
+[data-theme="limewire"] .processing-section {
+  gap: 0;
+}
+
+[data-theme="limewire"] .files-pane {
+  order: 1;
+}
+
+[data-theme="limewire"] .resize-handle {
+  order: 2;
+  height: 5px;
+  background: var(--lw-xp-panel);
+}
+
+[data-theme="limewire"] .resize-handle::after {
+  width: 100%;
+  height: 1px;
+  border: none;
+  background: var(--lw-grey-line);
+}
+
+[data-theme="limewire"] .workers-pane {
+  order: 3;
+}
+
+/* Search Results table ---------------------------------------------------- */
+
+[data-theme="limewire"] .events-table-shell {
+  min-height: 0;
+}
+
+[data-theme="limewire"] .events-table-wrap {
+  border: none;
+  background: #ffffff;
+}
+
+[data-theme="limewire"] table {
+  color: #000000;
+}
+
+[data-theme="limewire"] table thead th {
+  height: 20px;
+  padding: 0 6px;
+  background: var(--lw-panel);
+  color: #000000;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  border-bottom: 1px solid var(--lw-grey-soft);
+  border-right: 1px solid var(--lw-grey-soft);
+}
+
+[data-theme="limewire"] table thead th:last-child {
+  border-right: none;
+}
+
+[data-theme="limewire"] .sortable-th:hover {
+  background: #fafafa;
+}
+
+[data-theme="limewire"] .sortable-th.sort-active {
+  background: #ececec;
+}
+
+[data-theme="limewire"] .sort-arrow {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+[data-theme="limewire"] table td {
+  border-bottom: none;
+}
+
+[data-theme="limewire"] .events-table th,
+[data-theme="limewire"] .events-table td {
+  height: 20px;
+  padding: 0 6px;
+}
+
+[data-theme="limewire"] .events-table tbody tr:nth-child(even) td {
+  background: var(--lw-row-alt);
+}
+
+/* The Time column stands in for LimeWire's "Quality" stars. */
+[data-theme="limewire"] .events-table tbody td:first-child {
+  color: var(--muted);
+}
+
+[data-theme="limewire"] .events-table tbody tr:not(.placeholder-row) td:first-child::before {
+  content: "***";
+  margin-right: 5px;
+  color: var(--lw-lime);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+[data-theme="limewire"] .events-table tbody tr.row-fail td:first-child::before {
+  content: "*";
+  color: var(--fail);
+}
+
+[data-theme="limewire"] .events-table tbody tr:hover td {
+  background: var(--lw-lime-pale);
+}
+
+[data-theme="limewire"] .events-table tr.row-fail td {
+  background: var(--row-fail-bg);
+  color: var(--fail);
+}
+
+[data-theme="limewire"] .events-table tr.row-fail:hover td {
+  background: var(--row-fail-hover);
+}
+
+[data-theme="limewire"] .placeholder-row td {
+  color: var(--muted);
+}
+
+[data-theme="limewire"] .events-table-footer {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-top: 1px solid var(--lw-grey-soft);
+  background: var(--lw-panel);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+/* Downloads list: one row per worker -------------------------------------- */
+
+[data-theme="limewire"] .worker-body {
+  padding: 0;
+  border: none;
+  background: #ffffff;
+}
+
+[data-theme="limewire"] .worker-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+/* Column header for the Downloads list. */
+[data-theme="limewire"] .worker-grid::before {
+  content: "#   Name   Status   Progress   Hashes";
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--lw-grey-soft);
+  background: var(--lw-panel);
+  color: #000000;
+  font: 11px/1 var(--font);
+  white-space: pre;
+  word-spacing: 24px;
+  overflow: hidden;
+}
+
+[data-theme="limewire"] .worker-panel {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1.3fr) 88px minmax(90px, 0.8fr) minmax(0, 1.5fr);
+  column-gap: 8px;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 6px;
+  border: none;
+  border-bottom: 1px solid #e5e5e5;
+  border-radius: 0;
+  background: #ffffff;
+  color: #000000;
+}
+
+/* Dissolve the card wrappers so their children become row cells. */
+[data-theme="limewire"] .worker-panel-top,
+[data-theme="limewire"] .worker-file-cell {
+  display: contents;
+}
+
+[data-theme="limewire"] .worker-id {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+[data-theme="limewire"] .worker-card .file-name {
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+  font-weight: 700;
+  font-size: 11px;
+  color: #000000;
+}
+
+[data-theme="limewire"] .worker-stage-cell {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme="limewire"] .worker-stage {
+  font-weight: 400;
+  font-size: 11px;
+}
+
+/* Progress cell: 14px lime bar, percent centred on the bar in dark green. */
+[data-theme="limewire"] .worker-progress-row {
+  grid-column: 4;
+  grid-row: 1;
+  position: relative;
+  gap: 0;
+}
+
+[data-theme="limewire"] .worker-progress {
+  flex: 1;
+  height: 14px;
+}
+
+[data-theme="limewire"] .worker-percent {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  color: #2d5a16;
+  pointer-events: none;
+}
+
+/* Hashes: a muted 10px monospace strip at the right. */
+[data-theme="limewire"] .worker-hash-panel {
+  grid-column: 5;
+  grid-row: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font: 10px/1.2 var(--mono);
+  color: var(--muted);
+  overflow: hidden;
+}
+
+[data-theme="limewire"] .worker-hashes {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-theme="limewire"] .hash-row {
+  flex: 1 1 0;
+  min-width: 0;
+  gap: 3px;
+}
+
+[data-theme="limewire"] .hash-label {
+  min-width: 0;
+  font-weight: 400;
+  color: #9a9a9a;
+}
+
+[data-theme="limewire"] .hash-val,
+[data-theme="limewire"] .hash-extra {
+  font-size: 10px;
+}
+
+[data-theme="limewire"] .hash-neutral {
+  color: var(--muted);
+}
+
+[data-theme="limewire"] .hash-missing,
+[data-theme="limewire"] .hash-computing {
+  color: #9a9a9a;
+}
+
+[data-theme="limewire"] .hash-mismatch {
+  font-weight: 700;
+}
+
+/* Idle rows: light grey with grey text. */
+[data-theme="limewire"] .worker-panel.idle-card {
+  --muted: #9a9a9a;
+  background: #f7f7f7;
+  color: #9a9a9a;
+}
+
+[data-theme="limewire"] .worker-panel.idle-card .file-name {
+  font-weight: 400;
+  color: #9a9a9a;
+}
+
+/* Dialogs: XP chrome, LimeWire Options look ------------------------------- */
+
+[data-theme="limewire"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="limewire"] .window.modal {
+  background: var(--lw-xp-panel);
+}
+
+[data-theme="limewire"] .modal-body {
+  padding: 12px;
+}
+
+[data-theme="limewire"] .settings-section {
+  padding: 8px 10px 10px;
+  border: 1px solid #d0d0bf;
+  border-radius: 4px;
+  background: transparent;
+}
+
+[data-theme="limewire"] .settings-section > legend {
+  color: #000000;
+  font-weight: 700;
+}
+
+[data-theme="limewire"] .settings-group + .settings-group {
+  border-top-color: #d0d0bf;
+  box-shadow: inset 0 1px 0 #ffffff;
+}
+
+[data-theme="limewire"] .settings-hint,
+[data-theme="limewire"] .settings-version {
+  color: var(--muted);
+}
+
+[data-theme="limewire"] .settings-actions {
+  gap: 6px;
+}
+
+[data-theme="limewire"] .settings-actions button {
+  min-width: 75px;
+}
+
+[data-theme="limewire"] .log-viewer-shell {
+  padding: 0;
+  border: 1px solid var(--lw-grey-line);
+  background: #ffffff;
+}
+
+[data-theme="limewire"] .log-viewer-text {
+  background: #ffffff;
+  color: #000000;
+  font: 11px/1.35 var(--mono);
+}
+
+[data-theme="limewire"] .log-viewer-placeholder {
+  color: var(--muted);
+}
+
+/* Scrollbars: XP-style grey ---------------------------------------------- */
+
+[data-theme="limewire"] ::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+[data-theme="limewire"] ::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  box-shadow: inset 1px 0 0 #e0e0e0;
+}
+
+[data-theme="limewire"] ::-webkit-scrollbar-thumb {
+  border: 1px solid var(--lw-grey-line);
+  border-radius: 2px;
+  background: #c6c6c6;
+  box-shadow: inset 1px 1px 0 #ffffff;
+}
+
+[data-theme="limewire"] ::-webkit-scrollbar-thumb:hover {
+  background: #d4d4d4;
+}
+
+[data-theme="limewire"] ::-webkit-scrollbar-corner {
+  background: #f0f0f0;
+}
+
+/* Mobile: the Search panel becomes a top row, tables scroll sideways -------- */
+
+@media (max-width: 640px) {
+  [data-theme="limewire"] .app-shell {
+    padding: 4px;
+  }
+
+  [data-theme="limewire"] .app-window {
+    height: calc(100vh - 8px);
+  }
+
+  [data-theme="limewire"] .app-window-body {
+    flex-direction: column;
+  }
+
+  /* Only Search + Monitor tabs and the banner fit on a phone. */
+  [data-theme="limewire"] .app-toolbar::after,
+  [data-theme="limewire"] .content::before,
+  [data-theme="limewire"] .content::after {
+    display: none;
+  }
+
+  [data-theme="limewire"] .app-window-body::after {
+    right: 10px;
+    padding: 0 8px;
+  }
+
+  [data-theme="limewire"] .app-toolbar {
+    flex: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    width: auto;
+    gap: 4px;
+    padding: 4px 6px;
+    border-left: none;
+    border-right: none;
+    overflow: visible;
+  }
+
+  [data-theme="limewire"] .app-toolbar-right::before,
+  [data-theme="limewire"] .app-toolbar-right::after,
+  [data-theme="limewire"] .app-toolbar-actions::after,
+  [data-theme="limewire"] .app-toolbar-brand {
+    display: none;
+  }
+
+  [data-theme="limewire"] .app-toolbar-actions {
+    flex: 1 1 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+
+  [data-theme="limewire"] .app-toolbar-actions > button {
+    padding: 2px 8px;
+  }
+
+  [data-theme="limewire"] .content {
+    padding: 4px 4px 0;
+  }
+
+  [data-theme="limewire"] .app-summary-bar,
+  [data-theme="limewire"] .run-status-window {
+    margin-left: -4px;
+    margin-right: -4px;
+  }
+
+  [data-theme="limewire"] .run-status-body {
+    margin: 0 4px 4px;
+  }
+
+  [data-theme="limewire"] .app-summary-bar,
+  [data-theme="limewire"] .run-status-window .status-bar {
+    overflow-x: auto;
+  }
+
+  [data-theme="limewire"] .run-status-main {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  [data-theme="limewire"] .status-bar-actions {
+    grid-column: 1 / -1;
+  }
+
+  [data-theme="limewire"] .events-table {
+    min-width: 560px;
+  }
+
+  [data-theme="limewire"] .worker-grid::before {
+    content: "#   Name   Status   Progress";
+  }
+
+  [data-theme="limewire"] .worker-panel {
+    grid-template-columns: 24px minmax(0, 1fr) 72px 80px;
+    padding: 2px 6px;
+  }
+
+  [data-theme="limewire"] .worker-hash-panel {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  [data-theme="limewire"] .worker-panel.idle-card .worker-hash-panel {
+    display: none;
+  }
+}

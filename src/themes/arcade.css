@@ -1,0 +1,1066 @@
+/*
+ * Arcade - a 1980s coin-op cabinet. The app shell is the black bezel with a
+ * lit marquee on top; the window is the CRT (scanlines, phosphor glow).
+ *
+ * Palette: screen black #06060a, text #f4f4f4, yellow #ffe600 (accent),
+ * cyan #35f0ff, magenta #ff2bd6, green #39ff14 (ok), red #ff3b3b (fail),
+ * orange #ff9f1c (warn).
+ *
+ * Layout differs from base: the title bar is gone (the marquee replaces it),
+ * the toolbar is a HUD strip of blinking START buttons with HI-SCORE at the
+ * right, the run status is a score bar with a giant centred percentage over a
+ * segmented energy bar, workers are one horizontal row of player cards, and
+ * the files table is the high score table.
+ */
+
+[data-theme="arcade"] {
+  --font: "Lucida Console", Consolas, monospace;
+  --mono: "Lucida Console", Consolas, monospace;
+  --fs: 12px;
+
+  --arc-black: #06060a;
+  --arc-bezel: #0b0b0f;
+  --arc-yellow: #ffe600;
+  --arc-cyan: #35f0ff;
+  --arc-magenta: #ff2bd6;
+  --arc-green: #39ff14;
+  --arc-red: #ff3b3b;
+  --arc-orange: #ff9f1c;
+  --arc-dim: #6a6a7a;
+  --arc-cyan-dim: #1b7f88;
+
+  --desktop: var(--arc-bezel);
+  --bg: var(--arc-black);
+  --surface: var(--arc-black);
+  --surface-2: #000000;
+  --text: #f4f4f4;
+  --text-strong: #ffffff;
+  --muted: var(--arc-dim);
+  --border: var(--arc-cyan);
+  --border-strong: var(--arc-cyan);
+  --accent: var(--arc-yellow);
+  --accent-text: var(--arc-black);
+  --title-bg: var(--arc-black);
+  --title-text: var(--arc-yellow);
+
+  --ok: var(--arc-green);
+  --warn: var(--arc-orange);
+  --fail: var(--arc-red);
+  --stage-blue: var(--arc-cyan);
+  --stage-green: var(--arc-green);
+  --stage-amber: var(--arc-orange);
+  --stage-purple: var(--arc-magenta);
+
+  --pane-bg: var(--arc-black);
+  --row-hover: rgba(53, 240, 255, 0.08);
+  --row-fail-bg: rgba(255, 59, 59, 0.12);
+  --row-fail-hover: rgba(255, 59, 59, 0.2);
+  --worker-active-bg: #0d0d18;
+  --drop-active-bg: rgba(53, 240, 255, 0.1);
+  --progress-track: #111111;
+  --progress-fill: repeating-linear-gradient(90deg, #39ff14 0 10px, transparent 10px 12px);
+
+  --line: #1c1c28;
+  --line-dark: #1c1c28;
+  --line-highlight: transparent;
+  --radius: 0;
+  --radius-sm: 0;
+  --shadow: none;
+}
+
+@keyframes arcade-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes arcade-border-blink {
+  0%,
+  100% {
+    border-color: #ffe600;
+  }
+
+  50% {
+    border-color: #ff2bd6;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Cabinet: bezel, marquee, CRT                                         */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] body {
+  background: #0b0b0f;
+}
+
+[data-theme="arcade"] ::selection {
+  background: #ffe600;
+  color: #06060a;
+}
+
+[data-theme="arcade"] .app-shell {
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px 26px;
+  background: #0b0b0f;
+}
+
+/* Lit marquee above the screen. */
+[data-theme="arcade"] .app-shell::before {
+  content: "FLACCRUNCH";
+  display: block;
+  flex-shrink: 0;
+  margin: 0 0 14px;
+  padding: 9px 0 8px;
+  text-align: center;
+  font: 400 22px / 1 Impact, "Arial Black", "Arial Narrow", sans-serif;
+  letter-spacing: 0.25em;
+  text-indent: 0.25em;
+  color: #ffe600;
+  text-shadow: 3px 3px 0 #ff2bd6, 0 0 18px rgba(255, 230, 0, 0.45);
+  background: #1a1030;
+  border-bottom: 2px solid #ff2bd6;
+  border-radius: 6px 6px 0 0;
+  box-shadow: 0 0 26px rgba(255, 43, 214, 0.25);
+}
+
+/* The CRT. */
+[data-theme="arcade"] .app-window {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  border: none;
+  border-radius: 18px;
+  background: #06060a;
+  box-shadow:
+    inset 0 0 60px rgba(0, 0, 0, 0.9),
+    0 0 0 6px #22222a,
+    0 0 0 8px #0b0b0f;
+  text-shadow: 0 0 4px currentColor;
+}
+
+/* Scanlines over the whole tube, never over the bezel. */
+[data-theme="arcade"] .app-window::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  border-radius: inherit;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.25) 0 1px,
+    transparent 1px 3px
+  );
+  pointer-events: none;
+}
+
+[data-theme="arcade"] .app-title-bar {
+  display: none;
+}
+
+[data-theme="arcade"] .app-window-body {
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Typography                                                           */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] button,
+[data-theme="arcade"] legend,
+[data-theme="arcade"] label,
+[data-theme="arcade"] th,
+[data-theme="arcade"] .status-bar-label,
+[data-theme="arcade"] .status-bar-field,
+[data-theme="arcade"] .hash-label,
+[data-theme="arcade"] .worker-stage,
+[data-theme="arcade"] .drop-zone-title,
+[data-theme="arcade"] .drop-zone-note,
+[data-theme="arcade"] .section-kicker,
+[data-theme="arcade"] .worker-summary,
+[data-theme="arcade"] .bad-files-kicker,
+[data-theme="arcade"] .queue-section-label,
+[data-theme="arcade"] .events-table-footer,
+[data-theme="arcade"] .title-bar-text,
+[data-theme="arcade"] .app-toolbar-brand,
+[data-theme="arcade"] .start-screen-copy,
+[data-theme="arcade"] .error-banner,
+[data-theme="arcade"] .settings-version {
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------------ */
+/* Controls                                                             */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] button {
+  min-height: 28px;
+  padding: 3px 14px;
+  border: 2px solid #35f0ff;
+  border-radius: 0;
+  background: transparent;
+  color: #35f0ff;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 4px currentColor;
+}
+
+[data-theme="arcade"] button:hover:not(:disabled) {
+  border-color: #35f0ff;
+  background: #35f0ff;
+  color: #06060a;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] button:active:not(:disabled) {
+  transform: none;
+  filter: brightness(0.85);
+}
+
+[data-theme="arcade"] button:focus-visible {
+  outline: 2px solid #ffe600;
+  outline-offset: 2px;
+}
+
+[data-theme="arcade"] button:disabled {
+  opacity: 1;
+  border-color: #2a2a38;
+  color: #6a6a7a;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] button.default {
+  border-color: #ffe600;
+  background: #ffe600;
+  color: #06060a;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] button.default:hover:not(:disabled) {
+  border-color: #ff2bd6;
+  background: #ffe600;
+  color: #06060a;
+}
+
+[data-theme="arcade"] button.default:disabled {
+  border-color: #2a2a38;
+  background: #1a1a22;
+  color: #6a6a7a;
+}
+
+[data-theme="arcade"] input[type="text"],
+[data-theme="arcade"] select {
+  min-height: 28px;
+  border: 2px solid #35f0ff;
+  border-radius: 0;
+  background: #000000;
+  color: #f4f4f4;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] input[type="text"]:focus,
+[data-theme="arcade"] select:focus {
+  outline: none;
+  border-color: #ffe600;
+}
+
+[data-theme="arcade"] input[type="text"]::placeholder {
+  color: #6a6a7a;
+}
+
+[data-theme="arcade"] select option {
+  background: #000000;
+  color: #f4f4f4;
+}
+
+[data-theme="arcade"] input[type="checkbox"],
+[data-theme="arcade"] input[type="range"] {
+  accent-color: #ffe600;
+}
+
+[data-theme="arcade"] fieldset {
+  padding: 8px 10px 10px;
+  border: 2px solid #35f0ff;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="arcade"] legend {
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  color: #ffe600;
+}
+
+[data-theme="arcade"] .sunken-panel {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="arcade"] .error-banner {
+  padding: 4px 8px;
+  border: 2px solid #ff3b3b;
+  border-radius: 0;
+  background: rgba(255, 59, 59, 0.1);
+  color: #ff3b3b;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+/* Readouts: "SCORE 139.62MB  LIVES 60" - labels cyan, values yellow. */
+[data-theme="arcade"] .status-bar {
+  gap: 4px 18px;
+}
+
+[data-theme="arcade"] .status-bar-field {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #35f0ff;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+[data-theme="arcade"] .status-bar-field strong {
+  margin-left: 2px;
+  color: #ffe600;
+  font-weight: 400;
+}
+
+[data-theme="arcade"] .status-bar-field.chip-error,
+[data-theme="arcade"] .status-bar-field.chip-error strong {
+  color: #ff3b3b;
+}
+
+/* Energy bars: segmented green on a dark track inside a cyan frame. */
+[data-theme="arcade"] .progress-indicator {
+  border: 2px solid #35f0ff;
+  border-radius: 0;
+  background: #111111;
+}
+
+[data-theme="arcade"] .progress-indicator-bar {
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, #39ff14 0 10px, transparent 10px 12px);
+  box-shadow: 0 0 8px rgba(57, 255, 20, 0.45);
+  transition: width 0.25s steps(4);
+}
+
+[data-theme="arcade"] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+[data-theme="arcade"] ::-webkit-scrollbar-thumb {
+  background: #35f0ff;
+  border-radius: 0;
+}
+
+[data-theme="arcade"] ::-webkit-scrollbar-track {
+  background: #0b0b0f;
+}
+
+/* ------------------------------------------------------------------ */
+/* Top HUD strip: 1P START / 2P START buttons left, HI-SCORE right      */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] .app-toolbar {
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 2px solid #35f0ff;
+  background: #0a0a12;
+}
+
+[data-theme="arcade"] .app-toolbar-actions {
+  gap: 8px;
+}
+
+[data-theme="arcade"] .app-toolbar button {
+  min-height: 28px;
+  padding: 2px 14px;
+  border-color: #ffe600;
+  color: #ffe600;
+  animation: arcade-border-blink 1.6s steps(1) infinite;
+}
+
+[data-theme="arcade"] .app-toolbar button:hover:not(:disabled) {
+  border-color: #ffe600;
+  background: #ffe600;
+  color: #06060a;
+  animation: none;
+}
+
+[data-theme="arcade"] .app-toolbar-right {
+  gap: 10px;
+}
+
+[data-theme="arcade"] .app-toolbar-brand {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  color: #ffe600;
+  text-shadow: 1px 1px 0 #ff2bd6, 0 0 6px rgba(255, 230, 0, 0.5);
+}
+
+/* ------------------------------------------------------------------ */
+/* Idle: INSERT COIN / PRESS START                                      */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] .app-summary-bar {
+  justify-content: center;
+  gap: 4px 22px;
+  padding: 2px 0;
+}
+
+[data-theme="arcade"] .start-fieldset {
+  padding-top: 10px;
+}
+
+[data-theme="arcade"] .start-screen-copy {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: #35f0ff;
+}
+
+[data-theme="arcade"] .start-screen-copy p + p {
+  margin-top: 4px;
+  color: #ffe600;
+}
+
+[data-theme="arcade"] .drop-zone-row {
+  gap: 12px;
+  margin-top: 10px;
+}
+
+[data-theme="arcade"] .drop-zone {
+  min-height: 132px;
+  gap: 2px;
+  border: 3px dashed #35f0ff;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="arcade"] .drop-zone-mobile {
+  margin-top: 10px;
+}
+
+[data-theme="arcade"] .drop-zone:hover {
+  background: rgba(53, 240, 255, 0.06);
+}
+
+[data-theme="arcade"] .drop-zone.active {
+  border-color: #ffe600;
+  border-style: solid;
+  background: rgba(53, 240, 255, 0.1);
+}
+
+[data-theme="arcade"] .drop-zone-title {
+  font: 400 24px / 1.1 Impact, "Arial Black", "Arial Narrow", sans-serif;
+  letter-spacing: 0.08em;
+  color: #f4f4f4;
+  text-shadow: 2px 2px 0 #ff2bd6, 0 0 8px rgba(244, 244, 244, 0.4);
+}
+
+[data-theme="arcade"] .drop-zone-note {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: #ffe600;
+  animation: arcade-blink 1s steps(1) infinite;
+}
+
+[data-theme="arcade"] .intake-footer {
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* Queue: white on black, one entry per line. */
+[data-theme="arcade"] .queue-list-panel {
+  padding: 6px 8px;
+  border: 2px solid #35f0ff;
+  background: #000000;
+  font-size: 11px;
+  color: #f4f4f4;
+}
+
+[data-theme="arcade"] .folder-item {
+  gap: 8px;
+  padding: 2px 0;
+}
+
+[data-theme="arcade"] .folder-item .path {
+  color: #f4f4f4;
+}
+
+[data-theme="arcade"] .folder-item .path::before {
+  content: "> ";
+  color: #35f0ff;
+}
+
+[data-theme="arcade"] .folder-item .remove-btn {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 4px;
+  border-width: 1px;
+  border-color: #ff3b3b;
+  color: #ff3b3b;
+  font-size: 12px;
+  line-height: 1;
+}
+
+[data-theme="arcade"] .folder-item .remove-btn:hover:not(:disabled) {
+  border-color: #ff3b3b;
+  background: #ff3b3b;
+  color: #06060a;
+}
+
+[data-theme="arcade"] .queue-badge-active {
+  background: #39ff14;
+  color: #06060a;
+}
+
+[data-theme="arcade"] .start-footer-actions {
+  justify-content: center;
+  margin-top: 4px;
+}
+
+/* PRESS START: a huge yellow block with a chasing border. */
+[data-theme="arcade"] .start-next-button {
+  min-width: min(420px, 100%);
+  min-height: 56px;
+  padding: 4px 40px;
+  border: 3px solid #ffe600;
+  font: 400 22px / 1 Impact, "Arial Black", "Arial Narrow", sans-serif;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  animation: arcade-border-blink 0.8s steps(1) infinite;
+}
+
+[data-theme="arcade"] .start-next-button::before {
+  content: "PRESS ";
+  white-space: pre;
+}
+
+[data-theme="arcade"] .start-next-button:hover:not(:disabled) {
+  border-color: #ff2bd6;
+  background: #ffe600;
+  animation: none;
+}
+
+[data-theme="arcade"] .start-next-button:disabled {
+  border-color: #2a2a38;
+  background: #1a1a22;
+  color: #6a6a7a;
+  animation: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Running: the SCORE BAR                                               */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] .run-status-window {
+  border: 2px solid #35f0ff;
+  border-radius: 0;
+  background: #06060a;
+  box-shadow: none;
+}
+
+[data-theme="arcade"] .run-status-main {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas:
+    "label pct actions"
+    "bar bar bar";
+  gap: 4px 10px;
+  padding: 2px 4px 2px;
+}
+
+[data-theme="arcade"] .status-bar-label {
+  grid-area: label;
+  justify-self: start;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+[data-theme="arcade"] .status-bar-label.label-processing {
+  color: #ffe600;
+  animation: arcade-blink 0.8s steps(1) infinite;
+}
+
+[data-theme="arcade"] .status-bar-label.label-cancelling,
+[data-theme="arcade"] .status-bar-label.label-warning {
+  color: #ff9f1c;
+}
+
+[data-theme="arcade"] .status-bar-label.label-success {
+  color: #39ff14;
+}
+
+[data-theme="arcade"] .status-bar-label.label-error {
+  color: #ff3b3b;
+}
+
+[data-theme="arcade"] .status-bar-pct {
+  grid-area: pct;
+  justify-self: center;
+  font: 400 42px / 1 Impact, "Arial Black", "Arial Narrow", sans-serif;
+  letter-spacing: 0.04em;
+  color: #ffe600;
+  text-shadow: 3px 3px 0 #ff2bd6, 0 0 14px rgba(255, 230, 0, 0.45);
+}
+
+[data-theme="arcade"] .run-progress {
+  grid-area: bar;
+  width: 100%;
+  height: 20px;
+  padding: 0;
+}
+
+[data-theme="arcade"] .status-bar-actions {
+  grid-area: actions;
+  justify-self: end;
+  gap: 8px;
+}
+
+/* The energy bar recolours with the outcome. */
+[data-theme="arcade"] .run-status-window.status-error .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, #ff3b3b 0 10px, transparent 10px 12px);
+  box-shadow: 0 0 8px rgba(255, 59, 59, 0.45);
+}
+
+[data-theme="arcade"] .run-status-window.status-warning .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, #ff9f1c 0 10px, transparent 10px 12px);
+  box-shadow: 0 0 8px rgba(255, 159, 28, 0.45);
+}
+
+[data-theme="arcade"] .run-status-window .status-bar {
+  justify-content: center;
+  gap: 4px 18px;
+  padding: 4px 10px 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Workers: one horizontal row of player cards                          */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] .pane-toolbar {
+  margin-bottom: 6px;
+}
+
+[data-theme="arcade"] .section-kicker,
+[data-theme="arcade"] .worker-summary {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #1fb6c4;
+}
+
+[data-theme="arcade"] .worker-summary {
+  color: #35f0ff;
+}
+
+[data-theme="arcade"] .worker-toggle {
+  min-height: 22px;
+  padding: 0 10px;
+  font-size: 10px;
+}
+
+[data-theme="arcade"] .worker-body {
+  padding: 0;
+  overflow: auto;
+}
+
+[data-theme="arcade"] .worker-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 6px 6px 8px;
+  min-width: max-content;
+}
+
+[data-theme="arcade"] .worker-panel {
+  flex: 0 0 180px;
+  width: 180px;
+  min-height: 0;
+  gap: 5px;
+  padding: 6px 8px 7px;
+  border: 2px solid #35f0ff;
+  border-radius: 0;
+  background: #06060a;
+}
+
+[data-theme="arcade"] .worker-panel.active {
+  border-color: #ffe600;
+  background: #0d0d18;
+  box-shadow: 0 0 12px rgba(255, 230, 0, 0.2);
+}
+
+[data-theme="arcade"] .worker-panel.idle-card {
+  border-color: #2a2a38;
+}
+
+[data-theme="arcade"] .worker-panel-top {
+  align-items: center;
+}
+
+/* Player badge: yellow block, Impact digits. */
+[data-theme="arcade"] .worker-id {
+  display: inline-block;
+  min-width: 30px;
+  padding: 1px 6px;
+  background: #ffe600;
+  color: #06060a;
+  font: 400 13px / 1.2 Impact, "Arial Black", "Arial Narrow", sans-serif;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] .worker-panel.idle-card .worker-id {
+  background: #2a2a38;
+  color: #6a6a7a;
+}
+
+[data-theme="arcade"] .worker-stage {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+[data-theme="arcade"] .worker-card .file-name {
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #f4f4f4;
+}
+
+[data-theme="arcade"] .worker-panel.idle-card .file-name {
+  color: #6a6a7a;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+[data-theme="arcade"] .worker-progress {
+  height: 12px;
+  padding: 0;
+}
+
+[data-theme="arcade"] .worker-progress .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, #39ff14 0 6px, transparent 6px 8px);
+}
+
+[data-theme="arcade"] .worker-percent {
+  min-width: 30px;
+  font-size: 11px;
+  color: #ffe600;
+}
+
+/* Hashes: 9px mono, dim, no glow so the digits stay readable. */
+[data-theme="arcade"] .worker-hash-panel {
+  padding: 4px 0 0;
+  border: none;
+  border-top: 1px dashed #233a40;
+  background: transparent;
+  font-size: 9px;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] .hash-label {
+  min-width: 24px;
+  color: #1fb6c4;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+}
+
+[data-theme="arcade"] .hash-neutral {
+  color: #9a9aa8;
+}
+
+[data-theme="arcade"] .hash-missing,
+[data-theme="arcade"] .hash-computing {
+  color: #55556a;
+}
+
+[data-theme="arcade"] .hash-saved-low {
+  color: #9a9aa8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Files: HIGH SCORES table                                             */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] .files-pane legend::before {
+  content: "HIGH SCORES - ";
+  color: #ff2bd6;
+}
+
+[data-theme="arcade"] .events-table-wrap {
+  background: transparent;
+}
+
+[data-theme="arcade"] table thead th {
+  background: #06060a;
+  color: #ffe600;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  border-bottom: 2px solid #ffe600;
+}
+
+[data-theme="arcade"] .sort-arrow {
+  color: #ff2bd6;
+}
+
+[data-theme="arcade"] .sort-active {
+  color: #ffffff;
+}
+
+[data-theme="arcade"] table td {
+  border-bottom: none;
+}
+
+[data-theme="arcade"] .events-table th,
+[data-theme="arcade"] .events-table td {
+  height: 20px;
+  padding: 0 8px;
+}
+
+[data-theme="arcade"] .events-table tbody tr:nth-child(odd) td {
+  color: #f4f4f4;
+}
+
+[data-theme="arcade"] .events-table tbody tr:nth-child(even) td {
+  color: #35f0ff;
+}
+
+[data-theme="arcade"] .events-table tbody tr:hover td {
+  background: rgba(53, 240, 255, 0.08);
+}
+
+[data-theme="arcade"] .events-table tr.row-fail td,
+[data-theme="arcade"] .events-table tr.row-fail:nth-child(even) td {
+  background: rgba(255, 59, 59, 0.12);
+  color: #ff3b3b;
+  font-weight: 400;
+}
+
+[data-theme="arcade"] .events-table tr.row-fail:hover td {
+  background: rgba(255, 59, 59, 0.2);
+}
+
+[data-theme="arcade"] .placeholder-row td {
+  color: #6a6a7a;
+}
+
+[data-theme="arcade"] .events-table-footer {
+  padding: 4px 40px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #1fb6c4;
+}
+
+[data-theme="arcade"] .bad-files-kicker {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #ff3b3b;
+}
+
+[data-theme="arcade"] .bad-folders-panel {
+  padding: 4px 8px;
+  border: 2px solid #ff3b3b;
+  background: rgba(255, 59, 59, 0.1);
+  font-size: 11px;
+}
+
+[data-theme="arcade"] .bad-folders-panel .queue-section-label,
+[data-theme="arcade"] .bad-folder-count {
+  color: #ff3b3b;
+}
+
+/* Resize handle: a dotted cyan line. */
+[data-theme="arcade"] .resize-handle {
+  height: 11px;
+}
+
+[data-theme="arcade"] .resize-handle::after {
+  width: 120px;
+  height: 0;
+  border: none;
+  border-top: 3px dotted #35f0ff;
+  background: transparent;
+}
+
+[data-theme="arcade"] .resize-handle:hover::after {
+  border-top-color: #ffe600;
+}
+
+/* ------------------------------------------------------------------ */
+/* Modals: CRT panels                                                   */
+/* ------------------------------------------------------------------ */
+
+[data-theme="arcade"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+[data-theme="arcade"] .modal {
+  border: 2px solid #ffe600;
+  border-radius: 0;
+  background: #06060a;
+  box-shadow: 0 0 0 6px #22222a, 0 0 32px rgba(255, 230, 0, 0.2);
+  text-shadow: 0 0 4px currentColor;
+}
+
+[data-theme="arcade"] .modal .title-bar {
+  padding: 6px 10px;
+  background: #06060a;
+  color: #ffe600;
+  border-bottom: 2px solid #ffe600;
+}
+
+[data-theme="arcade"] .modal .title-bar-text {
+  font: 400 16px / 1 Impact, "Arial Black", "Arial Narrow", sans-serif;
+  letter-spacing: 0.15em;
+  text-shadow: 2px 2px 0 #ff2bd6;
+}
+
+[data-theme="arcade"] .modal .title-bar-controls button {
+  min-width: 24px;
+  min-height: 22px;
+  border-color: #ffe600;
+  color: #ffe600;
+}
+
+[data-theme="arcade"] .modal .title-bar-controls button:hover:not(:disabled) {
+  border-color: #ffe600;
+  background: #ffe600;
+  color: #06060a;
+}
+
+[data-theme="arcade"] .modal-body {
+  padding: 12px;
+}
+
+[data-theme="arcade"] .settings-section {
+  border-color: #35f0ff;
+}
+
+[data-theme="arcade"] .settings-hint {
+  font-size: 11px;
+  color: #9a9aa8;
+  text-shadow: none;
+}
+
+[data-theme="arcade"] .settings-group + .settings-group {
+  border-top: 1px dashed #233a40;
+  box-shadow: none;
+}
+
+[data-theme="arcade"] .settings-value {
+  color: #ffe600;
+}
+
+[data-theme="arcade"] .settings-version {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #1fb6c4;
+}
+
+[data-theme="arcade"] .settings-path {
+  text-transform: none;
+}
+
+[data-theme="arcade"] .log-viewer-shell {
+  border: 2px solid #35f0ff;
+  background: #000000;
+}
+
+[data-theme="arcade"] .log-viewer-text {
+  background: #000000;
+  color: #39ff14;
+  font-size: 11px;
+  text-shadow: 0 0 3px rgba(57, 255, 20, 0.5);
+}
+
+[data-theme="arcade"] .log-viewer-placeholder {
+  color: #6a6a7a;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mobile                                                               */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  [data-theme="arcade"] .app-shell {
+    padding: 8px;
+  }
+
+  [data-theme="arcade"] .app-shell::before {
+    margin-bottom: 8px;
+    padding: 6px 0 5px;
+    font-size: 16px;
+    text-shadow: 2px 2px 0 #ff2bd6;
+  }
+
+  [data-theme="arcade"] .app-window {
+    border-radius: 10px;
+    box-shadow:
+      inset 0 0 40px rgba(0, 0, 0, 0.9),
+      0 0 0 4px #22222a,
+      0 0 0 5px #0b0b0f;
+  }
+
+  [data-theme="arcade"] .app-window-body {
+    padding: 8px;
+  }
+
+  [data-theme="arcade"] .app-toolbar {
+    padding: 4px 6px;
+  }
+
+  [data-theme="arcade"] .app-toolbar button {
+    padding: 2px 8px;
+  }
+
+  [data-theme="arcade"] .run-status-main {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "label pct"
+      "bar bar"
+      "actions actions";
+  }
+
+  [data-theme="arcade"] .status-bar-pct {
+    font-size: 30px;
+    justify-self: end;
+  }
+
+  [data-theme="arcade"] .status-bar-actions {
+    justify-self: stretch;
+  }
+
+  [data-theme="arcade"] .status-bar-actions button {
+    flex: 1;
+  }
+
+  [data-theme="arcade"] .worker-panel {
+    flex-basis: 150px;
+    width: 150px;
+  }
+
+  [data-theme="arcade"] .drop-zone {
+    min-height: 96px;
+  }
+
+  [data-theme="arcade"] .drop-zone-title {
+    font-size: 20px;
+  }
+
+  [data-theme="arcade"] .start-next-button {
+    min-width: 0;
+    font-size: 18px;
+  }
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-theme="basic-dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>FlacCrunch UI preview</title>
+    <script>
+      (function () {
+        var ids = ["win95", "basic", "basic-dark", "basic-wizard", "winamp", "matrix", "flash", "arcade", "casino", "comic", "dos", "gameboy", "limewire"];
+        var fromQuery = new URLSearchParams(window.location.search).get("theme");
+        var theme = "basic-dark";
+        try {
+          var stored = window.localStorage.getItem("flaccrunch.theme");
+          if (stored && ids.indexOf(stored) !== -1) theme = stored;
+        } catch (e) {}
+        if (fromQuery && ids.indexOf(fromQuery) !== -1) theme = fromQuery;
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/dev/preview.tsx"></script>
+  </body>
+</html>

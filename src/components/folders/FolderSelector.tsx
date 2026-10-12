@@ -31,7 +31,6 @@ export function FolderSelector({
   const [localFolderDragOver, setLocalFolderDragOver] = useState(false);
   const [localFileDragOver, setLocalFileDragOver] = useState(false);
   const [mobile, setMobile] = useState(false);
-  const [showQueue, setShowQueue] = useState(false);
 
   // Native OS drag highlights both zones (we can't detect file vs folder until drop)
   const folderDragOver = nativeDragOver || localFolderDragOver;
@@ -97,39 +96,24 @@ export function FolderSelector({
 
       <div className="intake-footer" style={mobile ? { marginTop: 20 } : undefined}>
         {folders.length > 0 && (
-          <>
-            <div className="field-row queue-toggle-row">
-              <button
-                type="button"
-                className="queue-peek"
-                aria-expanded={showQueue}
-                onClick={() => setShowQueue((value) => !value)}
-              >
-                {showQueue ? "Hide queue" : `Show queue (${folders.length})`}
-              </button>
-            </div>
-
-            {showQueue && (
-              <div className="sunken-panel queue-list-panel">
-                <ul className="folder-list">
-                  {folders.map((folder) => (
-                    <li key={folder} className="folder-item">
-                      <span className="path" title={folder}>
-                        {mobile ? (folder.split("/").pop() || folder) : folder}
-                      </span>
-                      <button
-                        className="remove-btn"
-                        onClick={() => onRemoveFolder(folder)}
-                        title="Remove"
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </>
+          <div className="sunken-panel queue-list-panel">
+            <ul className="folder-list">
+              {folders.map((folder) => (
+                <li key={folder} className="folder-item">
+                  <span className="path" title={folder}>
+                    {mobile ? (folder.split("/").pop() || folder) : folder}
+                  </span>
+                  <button
+                    className="remove-btn"
+                    onClick={() => onRemoveFolder(folder)}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         <div className="start-footer-actions">
           {mobile && (

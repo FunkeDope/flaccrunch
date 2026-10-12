@@ -1,0 +1,449 @@
+/* Matrix — phosphor green on black, falling code, scanlines. */
+
+[data-theme="matrix"] {
+  --font: Consolas, "Cascadia Mono", "Lucida Console", monospace;
+  --mono: Consolas, "Cascadia Mono", "Lucida Console", monospace;
+  --fs: 12px;
+
+  --desktop: #000000;
+  --bg: rgba(0, 8, 2, 0.9);
+  --surface: rgba(0, 24, 8, 0.55);
+  --surface-2: #000a03;
+  --text: #7dff9a;
+  --text-strong: #d2ffdc;
+  --muted: #2f9a4f;
+  --border: #0d4d22;
+  --border-strong: #15843c;
+  --accent: #00ff41;
+  --accent-text: #001a07;
+  --title-bg: #000000;
+  --title-text: #00ff41;
+
+  --ok: #00ff41;
+  --warn: #e5ff00;
+  --fail: #ff3b3b;
+  --stage-blue: #39d9ff;
+  --stage-green: #00ff41;
+  --stage-amber: #e5ff00;
+  --stage-purple: #d86bff;
+
+  --pane-bg: #000a03;
+  --row-hover: rgba(0, 255, 65, 0.08);
+  --row-fail-bg: rgba(255, 59, 59, 0.16);
+  --row-fail-hover: rgba(255, 59, 59, 0.26);
+  --worker-active-bg: rgba(0, 255, 65, 0.08);
+  --drop-active-bg: rgba(0, 255, 65, 0.14);
+  --progress-track: #001a07;
+  --progress-fill: #00ff41;
+
+  --radius: 0;
+  --radius-sm: 0;
+  --shadow: 0 0 48px rgba(0, 255, 65, 0.12);
+}
+
+@keyframes mx-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+[data-theme="matrix"] .app-shell {
+  background: #000000;
+}
+
+/* Scanlines over everything, including modals. */
+[data-theme="matrix"] .app-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px);
+}
+
+[data-theme="matrix"] .window {
+  border-color: var(--border-strong);
+  text-shadow: 0 0 6px rgba(0, 255, 65, 0.35);
+  backdrop-filter: blur(2px);
+}
+
+[data-theme="matrix"] .title-bar {
+  border-bottom: 1px solid var(--border-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+
+[data-theme="matrix"] .title-bar-text::before {
+  content: "> ";
+}
+
+[data-theme="matrix"] .app-title-bar .title-bar-text::after {
+  content: "_";
+  animation: mx-blink 1s steps(1) infinite;
+}
+
+[data-theme="matrix"] button {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+[data-theme="matrix"] button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
+  text-shadow: none;
+  box-shadow: 0 0 14px rgba(0, 255, 65, 0.55);
+}
+
+[data-theme="matrix"] button.default {
+  background: var(--accent);
+  color: var(--accent-text);
+  text-shadow: none;
+  box-shadow: 0 0 14px rgba(0, 255, 65, 0.35);
+}
+
+[data-theme="matrix"] .theme-cycle {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+[data-theme="matrix"] fieldset {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="matrix"] legend {
+  color: var(--accent);
+  letter-spacing: 0.2em;
+}
+
+[data-theme="matrix"] legend::before {
+  content: "[ ";
+}
+
+[data-theme="matrix"] legend::after {
+  content: " ]";
+}
+
+[data-theme="matrix"] input[type="text"],
+[data-theme="matrix"] select {
+  background: #000000;
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+
+[data-theme="matrix"] .progress-indicator {
+  border-color: var(--border-strong);
+}
+
+[data-theme="matrix"] .progress-indicator-bar {
+  background: repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 8px);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+[data-theme="matrix"] .status-bar-field {
+  border-color: var(--border-strong);
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text);
+}
+
+[data-theme="matrix"] table thead th {
+  background: #001a07;
+  color: var(--accent);
+}
+
+[data-theme="matrix"] .status-bar-label.label-processing {
+  color: var(--accent);
+  animation: mx-blink 1.4s steps(1) infinite;
+}
+
+[data-theme="matrix"] .worker-id {
+  color: var(--accent);
+}
+
+[data-theme="matrix"] .app-toolbar-brand {
+  color: var(--muted);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-weight: 400;
+}
+
+[data-theme="matrix"] ::selection {
+  background: var(--accent);
+  color: #000000;
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout: a full-bleed terminal. No window chrome; a prompt line as the */
+/* toolbar; workers as a `top`-style process list; files as the log.    */
+/* ------------------------------------------------------------------ */
+
+[data-theme="matrix"] .app-shell {
+  padding: 0;
+}
+
+[data-theme="matrix"] .app-window {
+  height: 100vh;
+  border: none;
+  box-shadow: none;
+  background: rgba(0, 6, 2, 0.86);
+}
+
+[data-theme="matrix"] .app-title-bar {
+  min-height: 22px;
+  padding: 2px 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+[data-theme="matrix"] .app-window-body {
+  padding: 8px 12px 10px;
+  gap: 4px;
+}
+
+/* Toolbar reads as a shell prompt with the commands after it. */
+[data-theme="matrix"] .app-toolbar {
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+}
+
+[data-theme="matrix"] .app-toolbar::before {
+  content: "root@flaccrunch:~$";
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+[data-theme="matrix"] .app-toolbar button {
+  min-height: 20px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+[data-theme="matrix"] .app-toolbar button::before {
+  content: "./";
+  color: var(--muted);
+}
+
+[data-theme="matrix"] .app-toolbar button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: none;
+}
+
+[data-theme="matrix"] .app-toolbar button:hover:not(:disabled)::before {
+  color: var(--accent-text);
+}
+
+[data-theme="matrix"] .app-toolbar-brand {
+  font-size: 10px;
+}
+
+[data-theme="matrix"] fieldset {
+  padding: 6px 0 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+}
+
+[data-theme="matrix"] .sunken-panel {
+  border: none;
+  background: transparent;
+}
+
+/* Workers: one process per line, fixed mono columns. */
+[data-theme="matrix"] .worker-grid {
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 0;
+}
+
+[data-theme="matrix"] .worker-grid::before {
+  content: "PID  STATE        FILE                                      PROGRESS        EMB / PRE / OUT";
+  display: block;
+  padding: 2px 6px;
+  color: var(--muted);
+  white-space: pre;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+
+[data-theme="matrix"] .worker-panel {
+  display: grid;
+  grid-template-columns: 40px 110px minmax(0, 1fr) 170px minmax(0, 1.1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 3px 6px;
+  border: none;
+  border-bottom: 1px solid rgba(13, 77, 34, 0.5);
+  background: transparent;
+}
+
+[data-theme="matrix"] .worker-panel.active {
+  background: rgba(0, 255, 65, 0.05);
+}
+
+[data-theme="matrix"] .worker-panel.active .worker-id::after {
+  content: "_";
+  animation: mx-blink 1s steps(1) infinite;
+}
+
+[data-theme="matrix"] .worker-panel-top,
+[data-theme="matrix"] .worker-file-cell {
+  display: contents;
+}
+
+[data-theme="matrix"] .worker-card .file-name {
+  margin: 0;
+}
+
+[data-theme="matrix"] .worker-progress-row {
+  gap: 6px;
+}
+
+[data-theme="matrix"] .worker-progress {
+  height: 10px;
+  border: 1px solid var(--border-strong);
+}
+
+[data-theme="matrix"] .worker-hash-panel {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+[data-theme="matrix"] .worker-hashes {
+  flex-direction: row;
+  gap: 8px;
+}
+
+[data-theme="matrix"] .hash-row {
+  flex: 1;
+  min-width: 0;
+}
+
+[data-theme="matrix"] .hash-label {
+  min-width: 0;
+  font-weight: 400;
+}
+
+[data-theme="matrix"] .hash-val,
+[data-theme="matrix"] .hash-extra {
+  font-size: 10px;
+}
+
+/* Run status: a single status line with a block-character bar. */
+[data-theme="matrix"] .run-status-window {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+[data-theme="matrix"] .run-status-main {
+  gap: 10px;
+}
+
+[data-theme="matrix"] .status-bar-label::before {
+  content: "[";
+  color: var(--muted);
+}
+
+[data-theme="matrix"] .status-bar-label::after {
+  content: "]";
+  color: var(--muted);
+}
+
+[data-theme="matrix"] .run-progress {
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+}
+
+[data-theme="matrix"] .status-bar-pct {
+  min-width: 48px;
+  text-align: right;
+}
+
+[data-theme="matrix"] .run-status-window .status-bar {
+  padding: 2px 0 4px;
+  gap: 0;
+}
+
+[data-theme="matrix"] .run-status-window .status-bar-field,
+[data-theme="matrix"] .app-summary-bar .status-bar-field {
+  border: none;
+  background: transparent;
+  padding: 0 10px 0 0;
+}
+
+[data-theme="matrix"] .run-status-window .status-bar-field + .status-bar-field::before,
+[data-theme="matrix"] .app-summary-bar .status-bar-field + .status-bar-field::before {
+  content: "| ";
+  color: var(--muted);
+}
+
+/* Files: the tail of the log. */
+[data-theme="matrix"] .events-table-wrap {
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+[data-theme="matrix"] table thead th {
+  background: #000a03;
+  border-bottom: 1px solid var(--border);
+}
+
+[data-theme="matrix"] .events-table th,
+[data-theme="matrix"] .events-table td {
+  height: 20px;
+  padding: 0 6px;
+}
+
+[data-theme="matrix"] .events-table-footer::before {
+  content: "$ tail -f run.log  # ";
+  color: var(--muted);
+}
+
+[data-theme="matrix"] .drop-zone {
+  min-height: 96px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+}
+
+[data-theme="matrix"] .drop-zone-title::before {
+  content: "> ";
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  [data-theme="matrix"] .worker-grid::before {
+    display: none;
+  }
+
+  [data-theme="matrix"] .worker-panel {
+    grid-template-columns: 40px 1fr;
+  }
+
+  [data-theme="matrix"] .worker-panel .worker-progress-row,
+  [data-theme="matrix"] .worker-panel .worker-hash-panel {
+    grid-column: 1 / -1;
+  }
+
+  [data-theme="matrix"] .worker-hashes {
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  [data-theme="matrix"] .app-toolbar::before {
+    display: none;
+  }
+}

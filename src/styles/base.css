@@ -1,0 +1,1339 @@
+/*
+ * Base layer: layout that every theme shares, plus a neutral skin driven by
+ * CSS variables. Themes override the variables (and anything else) in the
+ * higher "theme" layer. The neutral skin is not applied to the Windows 95
+ * theme, which gets its element styling from 98.css instead.
+ */
+
+:root {
+  --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: Consolas, "Cascadia Mono", "Lucida Console", monospace;
+  --fs: 13px;
+
+  --desktop: #0b0d12;
+  --bg: #14171d;
+  --surface: #1a1e26;
+  --surface-2: #0f1115;
+  --text: #e6e8ee;
+  --text-strong: #ffffff;
+  --muted: #8a90a0;
+  --border: #2a2f3a;
+  --border-strong: #3b4252;
+  --accent: #5b8def;
+  --accent-text: #ffffff;
+  --title-bg: #1a1e26;
+  --title-text: #e6e8ee;
+
+  --ok: #3fb950;
+  --warn: #d29922;
+  --fail: #f85149;
+  --stage-blue: #5b8def;
+  --stage-green: #3fb950;
+  --stage-amber: #d29922;
+  --stage-purple: #a371f7;
+
+  --pane-bg: var(--surface-2);
+  --row-hover: rgba(255, 255, 255, 0.04);
+  --row-fail-bg: rgba(248, 81, 73, 0.14);
+  --row-fail-hover: rgba(248, 81, 73, 0.22);
+  --worker-active-bg: rgba(91, 141, 239, 0.1);
+  --drop-active-bg: rgba(91, 141, 239, 0.14);
+  --progress-track: #0f1115;
+  --progress-fill: var(--accent);
+
+  --line: var(--border);
+  --line-dark: var(--border-strong);
+  --line-highlight: transparent;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout shared by every theme                                        */
+/* ------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  position: relative;
+  height: 100vh;
+  padding: 8px;
+  background: var(--desktop);
+}
+
+.matrix-rain {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.app-window {
+  position: relative;
+  z-index: 1;
+  height: calc(100vh - 16px);
+  display: flex;
+  flex-direction: column;
+}
+
+.app-window-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 6px;
+}
+
+.app-toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+
+.app-toolbar-actions {
+  margin-left: 0;
+}
+
+.app-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.app-toolbar-brand {
+  font-weight: 700;
+}
+
+.theme-cycle-label {
+  opacity: 0.7;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-summary-bar {
+  flex-shrink: 0;
+}
+
+.status-bar-field {
+  white-space: nowrap;
+}
+
+.error-banner {
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--fail);
+  background: var(--surface-2);
+  color: var(--fail);
+}
+
+/* Modals ------------------------------------------------------------ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  z-index: 200;
+}
+
+.settings-window {
+  width: min(520px, calc(100vw - 20px));
+}
+
+.log-viewer-window {
+  width: min(80vw, 1120px);
+  height: min(80vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+
+.log-viewer-window.is-maximized {
+  width: calc(100vw - 16px);
+  height: calc(100vh - 16px);
+}
+
+.log-viewer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.log-viewer-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 2px;
+  background: var(--pane-bg);
+  overflow: hidden;
+}
+
+.log-viewer-text {
+  margin: 0;
+  display: block;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  padding: 6px;
+  border: none;
+  box-shadow: none;
+  color: var(--text);
+  background: var(--pane-bg);
+  white-space: pre;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: auto;
+}
+
+.log-viewer-placeholder {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  color: var(--muted);
+  overflow: auto;
+}
+
+/* Settings dialog --------------------------------------------------- */
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 60px);
+}
+
+.settings-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.settings-section {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+/* One setting = its control plus its hint. Groups inside a fieldset are
+   separated by an etched rule so neighbouring controls never read as paired. */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settings-group + .settings-group {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-dark);
+  box-shadow: inset 0 1px 0 var(--line-highlight);
+}
+
+/* Checkbox settings: the hint lines up with the label text, not the box. */
+.settings-check .settings-hint {
+  margin-left: 19px;
+}
+
+/* Slider settings: name on the left, current value on the right. */
+.settings-slider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  width: 100%;
+}
+
+.settings-value {
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.settings-slider {
+  margin: 8px 0 2px;
+}
+
+.settings-hint {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.settings-input {
+  width: 100%;
+}
+
+.settings-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.settings-actions {
+  justify-content: flex-end;
+}
+
+.settings-version {
+  margin-right: auto;
+  color: var(--muted);
+}
+
+.settings-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Source selection -------------------------------------------------- */
+
+.folder-section,
+.start-fieldset {
+  margin: 0;
+}
+
+/* The source-selection box and its queue list shrink with the window and only
+   scroll when there is genuinely no room. */
+.start-fieldset {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.drop-zone-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.drop-zone-row .drop-zone {
+  flex: 1;
+}
+
+.drop-zone {
+  min-height: 54px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  cursor: pointer;
+  background: var(--pane-bg);
+}
+
+.drop-zone.active {
+  background: var(--drop-active-bg);
+}
+
+.drop-zone-title {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.drop-zone-note {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.intake-footer {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.start-screen-copy p {
+  margin: 0;
+}
+
+.start-screen-copy p + p {
+  margin-top: 3px;
+}
+
+.queue-toggle-row {
+  margin-top: 0;
+}
+
+.queue-peek {
+  min-width: 92px;
+}
+
+.queue-list-panel {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 6px;
+}
+
+.queue-section-label {
+  font-weight: bold;
+  font-size: 11px;
+  margin: 4px 0 2px;
+  color: var(--muted);
+}
+
+.queue-section-label:first-child {
+  margin-top: 0;
+}
+
+.queue-empty {
+  font-style: italic;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+.queue-badge-active {
+  font-size: 10px;
+  padding: 0 4px;
+  background: var(--ok);
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+.folder-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.folder-item .path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-item .remove-btn {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 4px;
+}
+
+.start-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.start-next-button {
+  min-width: 98px;
+}
+
+/* Run status -------------------------------------------------------- */
+
+.run-status-window {
+  flex-shrink: 0;
+}
+
+.run-status-body {
+  padding: 6px !important;
+}
+
+.run-status-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.status-bar-label {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.status-bar-label.label-processing {
+  color: var(--stage-blue);
+}
+
+.status-bar-label.label-cancelling,
+.status-bar-label.label-warning {
+  color: var(--stage-amber);
+}
+
+.status-bar-label.label-success {
+  color: var(--stage-green);
+}
+
+.status-bar-label.label-error {
+  color: var(--fail);
+}
+
+.run-progress {
+  width: 100%;
+  height: 18px;
+  padding: 2px;
+}
+
+.status-bar-pct {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-bar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.chip-success strong {
+  color: var(--ok);
+}
+
+.chip-error strong {
+  color: var(--fail);
+}
+
+/* Processing dashboard ---------------------------------------------- */
+
+.processing-section {
+  display: grid;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+  /* Lets the panes size themselves against the dashboard's own height. */
+  container-type: size;
+}
+
+.resize-handle {
+  height: 7px;
+  cursor: row-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resize-handle::after {
+  content: "";
+  width: 36px;
+  height: 3px;
+  border-top: 1px solid var(--line-highlight);
+  border-bottom: 1px solid var(--line-dark);
+  background: var(--border);
+}
+
+.workers-pane,
+.files-pane {
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Automatic split: the workers pane is as tall as its cards need, but never
+   more than about half the window, so the files table always gets room. */
+.workers-pane.is-auto {
+  /* As tall as its cards need, but never more than 55% of the dashboard and
+     always leaving at least ~220px for the files table underneath. */
+  max-height: clamp(140px, calc(100cqh - 230px), 55cqh);
+}
+
+.pane-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 6px;
+  margin-bottom: 4px;
+}
+
+.workers-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.section-kicker,
+.worker-summary {
+  color: var(--muted);
+}
+
+.worker-body {
+  flex: 1;
+  min-height: 0;
+  padding: 1px;
+  overflow: auto;
+}
+
+.worker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 200px);
+  gap: 1px;
+  align-content: start;
+}
+
+.worker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 96px;
+  padding: 5px 6px;
+  background: var(--pane-bg);
+}
+
+.worker-panel.active {
+  background: var(--worker-active-bg);
+}
+
+.worker-panel-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.worker-id {
+  font-weight: 700;
+  color: var(--stage-blue);
+}
+
+.worker-stage-cell {
+  flex-shrink: 0;
+}
+
+.worker-stage {
+  font-weight: 700;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.stage-converting {
+  color: var(--stage-blue) !important;
+}
+
+.stage-hashing-source,
+.stage-hashing-output {
+  color: var(--stage-amber) !important;
+}
+
+.stage-artwork {
+  color: var(--stage-purple) !important;
+}
+
+.stage-finalizing {
+  color: var(--stage-green) !important;
+}
+
+.stage-idle {
+  color: var(--muted) !important;
+}
+
+.worker-file-cell {
+  min-width: 0;
+}
+
+.worker-card .file-name {
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: inherit;
+  color: var(--text-strong);
+  cursor: default;
+}
+
+.worker-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.worker-progress {
+  flex: 1;
+  height: 12px;
+  padding: 1px;
+}
+
+.worker-percent {
+  min-width: 28px;
+  text-align: right;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.worker-hash-panel {
+  padding: 3px 4px;
+  background: var(--pane-bg);
+}
+
+.worker-hashes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.hash-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hash-row .hash-val {
+  flex: 1;
+}
+
+.hash-metric-lane {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.hash-label {
+  min-width: 22px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.hash-val,
+.hash-extra {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: inherit;
+  cursor: default;
+}
+
+.hash-saved {
+  font-weight: 700;
+}
+
+.hash-saved-good {
+  color: var(--ok);
+}
+
+.hash-saved-low {
+  color: var(--text);
+}
+
+.hash-match {
+  color: var(--ok);
+}
+
+.hash-mismatch {
+  color: var(--fail);
+}
+
+.hash-warn {
+  color: var(--warn);
+}
+
+.hash-neutral {
+  color: var(--text);
+}
+
+.hash-missing,
+.hash-computing {
+  color: var(--muted);
+}
+
+/* Workers table (plain-app themes) ---------------------------------- */
+
+.workers-table {
+  width: 100%;
+}
+
+.workers-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.workers-table th,
+.workers-table td {
+  padding: 0 6px;
+  height: 20px;
+}
+
+.workers-table .col-id {
+  width: 40px;
+}
+
+.workers-table .col-stage {
+  width: 100px;
+}
+
+.workers-table .col-file {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workers-table .col-progress {
+  width: 190px;
+}
+
+.workers-table .col-hash {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.workers-table .col-saved {
+  width: 70px;
+  text-align: right;
+}
+
+.workers-table .worker-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workers-table .worker-progress {
+  flex: 1;
+  height: 11px;
+}
+
+.workers-table .worker-percent {
+  min-width: 32px;
+  text-align: right;
+}
+
+.workers-table .idle-row td {
+  color: var(--muted);
+}
+
+.workers-table .active td {
+  background: var(--worker-active-bg);
+}
+
+/* Results table ----------------------------------------------------- */
+
+.events-table-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.events-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--pane-bg);
+}
+
+.events-table {
+  width: 100%;
+}
+
+.events-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.events-table th,
+.events-table td {
+  padding: 0 6px;
+  height: 16px;
+}
+
+.events-table tbody tr:hover td {
+  background: var(--row-hover);
+}
+
+.events-table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+}
+
+.sortable-th {
+  user-select: none;
+  cursor: pointer;
+}
+
+.sort-arrow {
+  color: var(--muted);
+}
+
+.saved-audio {
+  color: var(--ok);
+}
+
+.saved-art {
+  color: var(--stage-purple);
+}
+
+.saved-zero {
+  color: var(--muted);
+}
+
+.status-ok {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.status-warn,
+.status-retry {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.status-fail {
+  color: var(--fail);
+  font-weight: 700;
+}
+
+.placeholder-row td {
+  color: var(--muted);
+  text-align: center;
+}
+
+/* Failed files: the whole row lights up, not just the status cell. */
+.events-table tr.row-fail td {
+  background: var(--row-fail-bg);
+  color: var(--fail);
+  font-weight: 700;
+}
+
+.events-table tr.row-fail:hover td {
+  background: var(--row-fail-hover);
+}
+
+.bad-files-kicker {
+  color: var(--fail);
+  font-weight: 700;
+  margin-left: 10px;
+}
+
+.bad-folders-panel {
+  flex: 0 1 auto;
+  max-height: 40%;
+  overflow-y: auto;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  background: var(--row-fail-bg);
+}
+
+.bad-folders-panel .queue-section-label {
+  color: var(--fail);
+}
+
+.bad-folder-count {
+  color: var(--fail);
+  font-weight: 700;
+  margin-left: 8px;
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 4px;
+  }
+
+  .app-window {
+    height: calc(100vh - 8px);
+  }
+
+  .drop-zone-row {
+    flex-direction: column;
+  }
+
+  .start-footer-actions {
+    justify-content: stretch;
+  }
+
+  .start-next-button {
+    flex: 1;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Neutral skin for every theme except Windows 95 (which uses 98.css)  */
+/* ------------------------------------------------------------------ */
+
+:root:not([data-theme="win95"]) {
+  body {
+    font: var(--fs) / 1.4 var(--font);
+    color: var(--text);
+    background: var(--desktop);
+  }
+
+  button,
+  input,
+  select,
+  textarea,
+  label,
+  legend,
+  table {
+    font: inherit;
+    color: inherit;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  .window {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .title-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--title-bg);
+    color: var(--title-text);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .title-bar-text {
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .title-bar-controls {
+    display: flex;
+    gap: 4px;
+  }
+
+  .title-bar-controls button {
+    min-width: 26px;
+    min-height: 24px;
+    padding: 0;
+    line-height: 1;
+  }
+
+  .title-bar-controls button[aria-label="Close"]::before {
+    content: "\00d7";
+    font-size: 16px;
+  }
+
+  .title-bar-controls button[aria-label="Maximize"]::before {
+    content: "\25a1";
+  }
+
+  .title-bar-controls button[aria-label="Restore"]::before {
+    content: "\2750";
+  }
+
+  .window-body {
+    padding: 10px;
+  }
+
+  .modal-body {
+    padding: 12px;
+  }
+
+  button {
+    appearance: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 28px;
+    padding: 4px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  button:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  button:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  button.default {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .theme-cycle {
+    font-weight: 500;
+    color: var(--muted);
+  }
+
+  input[type="text"],
+  select {
+    width: 100%;
+    min-height: 28px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text);
+  }
+
+  input[type="text"]:focus,
+  select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  input[type="range"] {
+    width: 100%;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+  }
+
+  fieldset {
+    margin: 0;
+    padding: 10px 12px 12px;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+
+  legend {
+    padding: 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .field-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  [class^="field-row"] + [class^="field-row"] {
+    margin-top: 6px;
+  }
+
+  .sunken-panel {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: auto;
+  }
+
+  .status-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .status-bar-field {
+    margin: 0;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .status-bar-field strong {
+    color: var(--text);
+  }
+
+  .run-status-window .status-bar {
+    padding: 0 8px 8px;
+  }
+
+  .progress-indicator {
+    position: relative;
+    display: block;
+    height: 10px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: var(--progress-track);
+    overflow: hidden;
+  }
+
+  .progress-indicator-bar {
+    display: block;
+    height: 100%;
+    background: var(--progress-fill);
+    border-radius: inherit;
+    transition: width 0.25s ease;
+  }
+
+  .run-progress {
+    height: 14px;
+    padding: 0;
+  }
+
+  .worker-progress {
+    height: 8px;
+    padding: 0;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    white-space: nowrap;
+    text-align: left;
+  }
+
+  table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+  }
+
+  table td {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .events-table th,
+  .events-table td {
+    height: 24px;
+    padding: 0 8px;
+  }
+
+  .worker-grid {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .worker-panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .worker-hash-panel {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    padding-top: 4px;
+  }
+
+  .drop-zone {
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    min-height: 64px;
+  }
+
+  .drop-zone-title {
+    font-size: 13px;
+  }
+
+  .error-banner {
+    border-radius: var(--radius-sm);
+  }
+
+  .modal-overlay {
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  pre {
+    margin: 0;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
