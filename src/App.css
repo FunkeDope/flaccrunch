@@ -18,6 +18,7 @@
 @import "./themes/win95.css" layer(theme);
 @import "./themes/basic.css" layer(theme);
 @import "./themes/basic-wizard.css" layer(theme);
+@import "./themes/material.css" layer(theme);
 @import "./themes/winamp.css" layer(theme);
 @import "./themes/matrix.css" layer(theme);
 @import "./themes/flash.css" layer(theme);

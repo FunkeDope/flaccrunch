@@ -13,7 +13,7 @@ use crate::pipeline::stages::PipelineEvent;
 use crate::pipeline::worker_pool::run_worker_pool;
 use crate::state::run_state::{FileStatus, ProcessingStatus, RunState, RunSummary};
 use crate::util::format::{format_bytes, format_elapsed};
-use crate::util::platform::{default_log_folder, default_thread_count};
+use crate::util::platform::default_thread_count;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,25 +29,18 @@ pub const EXIT_INTERRUPTED: i32 = 130;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CliArgs {
     pub paths: Vec<String>,
-    /// Legacy flag understood by the GUI binary: run headless.
+    /// GUI binary only: run headless instead of opening the window.
     pub silent: bool,
     pub threads: Option<usize>,
     pub retries: u32,
-    /// Directory to drop a timestamped EFC log into.
-    pub log_dir: Option<String>,
-    /// Exact file to write the EFC log to (takes precedence over `log_dir`).
-    pub log_file: Option<String>,
-    pub mark_as_crunched: bool,
-    pub skip_crunched: bool,
+    /// `--log`: a file to write, or a folder to drop a timestamped log into.
+    pub log: Option<String>,
+    /// `--tag`: tag re-encoded files as crunched (FLACCRUNCH_INFO).
+    pub tag: bool,
+    /// `--skip-tagged`: skip files that already carry the tag.
+    pub skip_tagged: bool,
     /// `--max`: non-subset maximum compression preset.
     pub max_compression: bool,
-    /// Advanced encoder knobs (each implies lax when beyond the subset).
-    pub lpc_order: Option<u32>,
-    pub blocksize: Option<u32>,
-    pub apodization: Option<String>,
-    pub rice_order: Option<u32>,
-    /// libFLAC threads per file; None = auto (cores ÷ workers).
-    pub encoder_threads: Option<u32>,
     /// Suppress per-file output; only print the final summary.
     pub quiet: bool,
     /// Scan and report what would be processed, then exit.
@@ -65,22 +58,30 @@ impl Default for CliArgs {
             silent: false,
             threads: None,
             retries: 3,
-            log_dir: None,
-            log_file: None,
-            mark_as_crunched: false,
-            skip_crunched: false,
+            log: None,
+            tag: false,
+            skip_tagged: false,
             max_compression: false,
-            lpc_order: None,
-            blocksize: None,
-            apodization: None,
-            rice_order: None,
-            encoder_threads: None,
             quiet: false,
             dry_run: false,
             help: false,
             version: false,
             errors: Vec::new(),
         }
+    }
+}
+
+/// Options that existed before v1.5.0, with what to use instead.
+fn removed_option_hint(flag: &str) -> Option<&'static str> {
+    match flag {
+        "mark" | "mark-crunched" => Some("use --tag"),
+        "skip-crunched" | "skip" => Some("use --skip-tagged"),
+        "logdir" | "log-dir" | "logfile" | "log-file" => Some("use --log <file or folder>"),
+        "lax" => Some("use --max"),
+        "j" => Some("use -t"),
+        "lpc-order" | "l" | "blocksize" | "b" | "apodization" | "A" | "rice-order"
+        | "encoder-threads" => Some("removed; --max is the only compression switch"),
+        _ => None,
     }
 }
 
@@ -114,7 +115,7 @@ pub fn parse_cli_args(args: &[String]) -> CliArgs {
                 None => {
                     result
                         .errors
-                        .push(format!("Option -{name} requires a value"));
+                        .push(format!("Option --{name} requires a value"));
                     None
                 }
             }
@@ -123,57 +124,14 @@ pub fn parse_cli_args(args: &[String]) -> CliArgs {
         match flag {
             "" => only_paths = true,
             "silent" => result.silent = true,
-            "help" | "h" | "?" => result.help = true,
+            "help" | "h" => result.help = true,
             "version" | "V" => result.version = true,
             "quiet" | "q" => result.quiet = true,
-            "dry-run" | "dryrun" | "n" => result.dry_run = true,
-            "mark" | "mark-crunched" => result.mark_as_crunched = true,
-            "skip-crunched" | "skip" => result.skip_crunched = true,
-            "max" | "lax" => result.max_compression = true,
-            "lpc-order" | "l" => {
-                if let Some(v) = take_value(&mut i, "lpc-order") {
-                    match v.parse::<u32>() {
-                        Ok(n) if (1..=32).contains(&n) => result.lpc_order = Some(n),
-                        _ => result.errors.push(format!("Invalid LPC order (1-32): {v}")),
-                    }
-                }
-            }
-            "blocksize" | "b" => {
-                if let Some(v) = take_value(&mut i, "blocksize") {
-                    match v.parse::<u32>() {
-                        Ok(n) if (16..=65535).contains(&n) => result.blocksize = Some(n),
-                        _ => result
-                            .errors
-                            .push(format!("Invalid block size (16-65535): {v}")),
-                    }
-                }
-            }
-            "apodization" | "A" => {
-                if let Some(v) = take_value(&mut i, "apodization") {
-                    result.apodization = Some(v);
-                }
-            }
-            "encoder-threads" => {
-                if let Some(v) = take_value(&mut i, "encoder-threads") {
-                    match v.parse::<u32>() {
-                        Ok(n) if (1..=128).contains(&n) => result.encoder_threads = Some(n),
-                        _ => result
-                            .errors
-                            .push(format!("Invalid encoder thread count (1-128): {v}")),
-                    }
-                }
-            }
-            "rice-order" => {
-                if let Some(v) = take_value(&mut i, "rice-order") {
-                    match v.parse::<u32>() {
-                        Ok(n) if n <= 8 => result.rice_order = Some(n),
-                        _ => result
-                            .errors
-                            .push(format!("Invalid Rice partition order (0-8): {v}")),
-                    }
-                }
-            }
-            "threads" | "t" | "j" => {
+            "dry-run" | "n" => result.dry_run = true,
+            "tag" => result.tag = true,
+            "skip-tagged" => result.skip_tagged = true,
+            "max" => result.max_compression = true,
+            "threads" | "t" => {
                 if let Some(v) = take_value(&mut i, "threads") {
                     match v.parse::<usize>() {
                         Ok(n) => result.threads = Some(n.max(1)),
@@ -189,17 +147,17 @@ pub fn parse_cli_args(args: &[String]) -> CliArgs {
                     }
                 }
             }
-            "logdir" | "log-dir" => {
-                if let Some(v) = take_value(&mut i, "logdir") {
-                    result.log_dir = Some(v);
-                }
-            }
-            "log" | "logfile" | "log-file" => {
+            "log" => {
                 if let Some(v) = take_value(&mut i, "log") {
-                    result.log_file = Some(v);
+                    result.log = Some(v);
                 }
             }
-            _ => result.errors.push(format!("Unknown option: {arg}")),
+            other => match removed_option_hint(other) {
+                Some(hint) => result
+                    .errors
+                    .push(format!("Unknown option: {arg} ({hint})")),
+                None => result.errors.push(format!("Unknown option: {arg}")),
+            },
         }
         i += 1;
     }
@@ -225,9 +183,9 @@ pub fn print_version() {
 
 pub fn print_help(bin_name: &str) {
     println!("FlacCrunch v{}", env!("CARGO_PKG_VERSION"));
-    println!("Lossless FLAC recompression (level 8, exhaustive) with verified audio and");
-    println!("album-art optimization. Files are replaced in place only after the decoded");
-    println!("audio of the output matches the original.");
+    println!("Lossless FLAC recompression with verified audio and album-art optimization.");
+    println!("A file is replaced only after the decoded audio of the output matches the");
+    println!("original.");
     println!();
     println!("USAGE:");
     println!("  {bin_name} [options] <path>...");
@@ -235,29 +193,20 @@ pub fn print_help(bin_name: &str) {
     println!("  <path> may be a folder (scanned recursively) or a .flac file.");
     println!();
     println!("OPTIONS:");
-    println!("  -t, --threads <N>     Worker threads (default: CPU count - 1)");
-    println!("  -r, --retries <N>     Max retries per file (default: 3)");
-    println!("      --mark            Stamp output with a FLACCRUNCH_INFO marker tag");
-    println!("      --skip-crunched   Skip files that already carry the marker");
-    println!("      --max             Maximum compression: non-subset (--lax -l 32 -r 8,");
-    println!("                        denser window search). Smaller files, slower, and");
-    println!("                        some older hardware players reject non-subset FLAC");
-    println!("      --lpc-order <N>   Max LPC order 1-32 (12 = subset limit)");
-    println!("      --blocksize <N>   Block size in samples (default 4096; >4608 = non-subset)");
-    println!("      --apodization <S> libFLAC window spec, e.g. subdivide_tukey(5)");
-    println!("      --rice-order <N>  Max Rice partition order 0-8 (default 6)");
-    println!("      --encoder-threads <N>  libFLAC threads per file (default: cores / workers;");
-    println!(
-        "                        Linux/macOS builds only, Windows libFLAC is single-threaded)"
-    );
-    println!("      --log <file>      Write an EFC-format log to <file>");
-    println!("      --logdir <dir>    Write a timestamped EFC-format log into <dir>");
-    println!("  -n, --dry-run         Scan only: list what would be processed");
-    println!("  -q, --quiet           Only print the final summary");
-    println!("  -V, --version         Show version");
-    println!("  -h, --help            Show this help");
+    println!("  -t, --threads <N>   Files processed at once (default: CPU count - 1)");
+    println!("  -r, --retries <N>   Retries per failed file (default: 3)");
+    println!("      --max           Maximum compression (non-subset FLAC: smaller, much");
+    println!("                      slower; some old hardware players can't play it)");
+    println!("      --tag           Tag processed files as crunched");
+    println!("      --skip-tagged   Skip files that are already tagged");
+    println!("      --log <path>    Write a log file; if <path> is a folder, a timestamped");
+    println!("                      log is created inside it");
+    println!("  -n, --dry-run       List the files that would be processed, change nothing");
+    println!("  -q, --quiet         Only print the final summary");
+    println!("  -V, --version       Show version");
+    println!("  -h, --help          Show this help");
     if bin_name == "flaccrunch" {
-        println!("      --silent          Run headless instead of opening the GUI");
+        println!("      --silent        Run headless instead of opening the GUI");
     }
     println!();
     println!("EXIT CODES:");
@@ -267,31 +216,31 @@ pub fn print_help(bin_name: &str) {
     println!();
     println!("EXAMPLES:");
     println!("  {bin_name} ~/Music");
-    println!("  {bin_name} --threads 4 --mark --skip-crunched ~/Music /mnt/nas/More");
-    println!("  {bin_name} --log run.log \"D:\\Music\\Album\"");
+    println!("  {bin_name} --tag --skip-tagged --log ~/logs ~/Music /mnt/nas/More");
+    println!("  {bin_name} --max -t 4 \"D:\\Music\\Album\"");
 }
 
-/// Build the encoder profile from `--max` and the advanced knobs.
+/// The encoder profile: the subset preset, or the non-subset one for `--max`.
 pub fn compression_profile(args: &CliArgs) -> CompressionProfile {
-    let mut p = if args.max_compression {
+    if args.max_compression {
         CompressionProfile::max()
     } else {
         CompressionProfile::subset()
-    };
-    if let Some(n) = args.lpc_order {
-        p.max_lpc_order = n;
     }
-    if let Some(n) = args.blocksize {
-        p.blocksize = n;
+}
+
+/// Where `--log` writes: the path itself, or a timestamped file inside it when
+/// it is an existing folder or ends with a path separator.
+fn resolve_log_path(log: &str) -> PathBuf {
+    let path = PathBuf::from(log);
+    if path.is_dir() || log.ends_with('/') || log.ends_with('\\') {
+        path.join(format!(
+            "flaccrunch_{}.log",
+            chrono::Local::now().format("%Y%m%d_%H%M%S")
+        ))
+    } else {
+        path
     }
-    if let Some(a) = &args.apodization {
-        p.apodization = Some(a.clone());
-    }
-    if let Some(n) = args.rice_order {
-        p.rice_partition_order = n;
-    }
-    p.lax = p.is_non_subset();
-    p
 }
 
 /// Prints pipeline events to the terminal.
@@ -479,45 +428,25 @@ async fn run_cli_async(args: CliArgs) -> i32 {
     println!(
         "Processing {total_files} file(s) ({}) with {thread_count} worker(s){}{}",
         format_bytes(total_size as i64, false),
-        if args.mark_as_crunched {
-            " | marking"
-        } else {
-            ""
-        },
-        if args.skip_crunched {
-            " | skipping crunched"
+        if args.tag { " | tagging" } else { "" },
+        if args.skip_tagged {
+            " | skipping tagged"
         } else {
             ""
         },
     );
     let profile = compression_profile(&args);
     if profile.is_non_subset() {
-        println!(
-            "Maximum compression: non-subset stream (LPC order {}, block size {}, Rice order {}{})",
-            profile.max_lpc_order,
-            if profile.blocksize == 0 {
-                4096
-            } else {
-                profile.blocksize
-            },
-            profile.rice_partition_order,
-            profile
-                .apodization
-                .as_deref()
-                .map(|a| format!(", apodization {a}"))
-                .unwrap_or_default()
-        );
+        println!("Maximum compression: non-subset FLAC");
     }
     println!("{}", "-".repeat(72));
 
     let context = Arc::new(ProcessingContext {
         max_retries: args.retries,
-        mark_as_crunched: args.mark_as_crunched,
-        skip_crunched: args.skip_crunched,
-        profile: compression_profile(&args),
-        encoder_threads: args
-            .encoder_threads
-            .unwrap_or_else(|| crate::util::platform::encoder_threads_for(thread_count)),
+        mark_as_crunched: args.tag,
+        skip_crunched: args.skip_tagged,
+        profile,
+        encoder_threads: crate::util::platform::encoder_threads_for(thread_count),
     });
     let queue = Arc::new(JobQueue::new(scan.files));
     // No live appends in CLI mode: close now so workers exit once drained.
@@ -612,14 +541,7 @@ async fn run_cli_async(args: CliArgs) -> i32 {
     }
 
     // Optional EFC log.
-    let log_path: Option<PathBuf> = match (&args.log_file, &args.log_dir) {
-        (Some(file), _) => Some(PathBuf::from(file)),
-        (None, Some(dir)) => Some(PathBuf::from(dir).join(format!(
-            "flaccrunch_{}.log",
-            chrono::Local::now().format("%Y%m%d_%H%M%S")
-        ))),
-        (None, None) => None,
-    };
+    let log_path = args.log.as_deref().map(resolve_log_path);
     if let Some(path) = log_path {
         let summary = RunSummary {
             counters: counters.clone(),
@@ -655,12 +577,6 @@ async fn run_cli_async(args: CliArgs) -> i32 {
     }
 }
 
-/// Where logs go when `--logdir` is given without a value. Exposed so the
-/// help text and the GUI agree.
-pub fn default_cli_log_dir() -> PathBuf {
-    default_log_folder()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -686,36 +602,35 @@ mod tests {
         assert!(parse_cli_args(&args(&["--version"])).version);
         assert!(parse_cli_args(&args(&["-q"])).quiet);
         assert!(parse_cli_args(&args(&["--dry-run"])).dry_run);
-        assert!(parse_cli_args(&args(&["--mark"])).mark_as_crunched);
-        assert!(parse_cli_args(&args(&["--skip-crunched"])).skip_crunched);
+        assert!(parse_cli_args(&args(&["--tag"])).tag);
+        assert!(parse_cli_args(&args(&["--skip-tagged"])).skip_tagged);
         assert!(parse_cli_args(&args(&["--max"])).max_compression);
-        let adv = parse_cli_args(&args(&[
-            "--lpc-order",
-            "32",
+        assert!(compression_profile(&parse_cli_args(&args(&["--max"]))).lax);
+        assert!(!compression_profile(&CliArgs::default()).lax);
+    }
+
+    #[test]
+    fn test_removed_options_point_to_their_replacement() {
+        let r = parse_cli_args(&args(&[
+            "--mark",
+            "--skip-crunched",
+            "--logdir",
+            "/l",
             "-b",
-            "8192",
-            "-A",
-            "tukey(0.5)",
-            "--rice-order",
             "8",
         ]));
-        assert!(adv.errors.is_empty(), "{:?}", adv.errors);
-        let p = compression_profile(&adv);
-        assert!(
-            p.lax && p.max_lpc_order == 32 && p.blocksize == 8192 && p.rice_partition_order == 8
-        );
-        assert_eq!(p.apodization.as_deref(), Some("tukey(0.5)"));
-        assert!(!compression_profile(&parse_cli_args(&args(&["-l", "12"]))).lax);
-        assert!(!parse_cli_args(&args(&["--lpc-order", "40"]))
-            .errors
-            .is_empty());
+        assert_eq!(r.errors.len(), 4, "{:?}", r.errors);
+        assert!(r.errors[0].contains("use --tag"));
+        assert!(r.errors[1].contains("use --skip-tagged"));
+        assert!(r.errors[2].contains("use --log"));
+        assert!(r.errors[3].contains("--max is the only compression switch"));
     }
 
     #[test]
     fn test_threads_parsing() {
         assert_eq!(parse_cli_args(&args(&["-threads", "4"])).threads, Some(4));
         assert_eq!(parse_cli_args(&args(&["--threads=8"])).threads, Some(8));
-        assert_eq!(parse_cli_args(&args(&["-j", "2"])).threads, Some(2));
+        assert_eq!(parse_cli_args(&args(&["-t", "2"])).threads, Some(2));
         assert_eq!(parse_cli_args(&args(&["-threads", "0"])).threads, Some(1));
         let r = parse_cli_args(&args(&["-threads"]));
         assert!(r.threads.is_none());
@@ -727,13 +642,25 @@ mod tests {
 
     #[test]
     fn test_retries_and_logs() {
-        let r = parse_cli_args(&args(&[
-            "-retries", "5", "-logdir", "/logs", "--log", "x.log",
-        ]));
+        let r = parse_cli_args(&args(&["-retries", "5", "--log", "x.log"]));
         assert_eq!(r.retries, 5);
-        assert_eq!(r.log_dir.as_deref(), Some("/logs"));
-        assert_eq!(r.log_file.as_deref(), Some("x.log"));
+        assert_eq!(r.log.as_deref(), Some("x.log"));
         assert_eq!(parse_cli_args(&args(&["-retries", "0"])).retries, 0);
+    }
+
+    #[test]
+    fn test_log_path_file_or_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("run.log");
+        assert_eq!(resolve_log_path(&file.to_string_lossy()), file);
+        let inside = resolve_log_path(&dir.path().to_string_lossy());
+        assert_eq!(inside.parent(), Some(dir.path()));
+        assert!(inside
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("flaccrunch_"));
+        assert!(resolve_log_path("not-yet/").starts_with("not-yet"));
     }
 
     #[test]
@@ -761,14 +688,14 @@ mod tests {
             "4",
             "-retries",
             "7",
-            "--mark",
+            "--tag",
             "/path/to/music",
             "D:\\More",
         ]));
         assert!(r.silent);
         assert_eq!(r.threads, Some(4));
         assert_eq!(r.retries, 7);
-        assert!(r.mark_as_crunched);
+        assert!(r.tag);
         assert_eq!(
             r.paths,
             vec!["/path/to/music".to_string(), "D:\\More".to_string()]
@@ -827,7 +754,7 @@ mod tests {
             paths: vec![dir.path().to_string_lossy().to_string()],
             retries: 1,
             quiet: true,
-            log_file: Some(log.to_string_lossy().to_string()),
+            log: Some(log.to_string_lossy().to_string()),
             ..CliArgs::default()
         };
         assert_eq!(run_cli(a), EXIT_FAILURES);
@@ -851,8 +778,8 @@ mod tests {
             paths: vec![copy.to_string_lossy().to_string()],
             threads: Some(1),
             quiet: true,
-            mark_as_crunched: true,
-            log_dir: Some(logdir.to_string_lossy().to_string()),
+            tag: true,
+            log: Some(format!("{}/", logdir.to_string_lossy())),
             ..CliArgs::default()
         };
         assert_eq!(run_cli(a), EXIT_OK);
@@ -865,12 +792,12 @@ mod tests {
             .unwrap()
             .contains("All files processed successfully"));
 
-        // Second pass with --skip-crunched is a no-op.
+        // Second pass with --skip-tagged is a no-op.
         let a = CliArgs {
             paths: vec![copy.to_string_lossy().to_string()],
             threads: Some(1),
             quiet: true,
-            skip_crunched: true,
+            skip_tagged: true,
             ..CliArgs::default()
         };
         assert_eq!(run_cli(a), EXIT_OK);

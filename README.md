@@ -52,28 +52,23 @@ flaccrunch-cli [options] <path>...
   <path> may be a folder (scanned recursively) or a .flac file.
 
 Options:
-  -t, --threads <N>     Worker threads (default: CPU count - 1)
-  -r, --retries <N>     Max retries per file (default: 3)
-      --mark            Stamp output with a FLACCRUNCH_INFO marker tag
-      --skip-crunched   Skip files that already carry the marker
-      --max             Maximum compression: non-subset (--lax -l 32 -r 8,
-                        denser window search). Smaller files, much slower, and
-                        some older hardware players reject non-subset FLAC
-      --lpc-order <N>   Max LPC order 1-32 (12 = subset limit)
-      --blocksize <N>   Block size in samples (default 4096; >4608 = non-subset)
-      --apodization <S> libFLAC window spec, e.g. subdivide_tukey(5)
-      --rice-order <N>  Max Rice partition order 0-8 (default 6)
-      --log <file>      Write an EFC-format log to <file>
-      --logdir <dir>    Write a timestamped EFC-format log into <dir>
-  -n, --dry-run         Scan only: list what would be processed
-  -q, --quiet           Only print the final summary
-  -V, --version         Show version
-  -h, --help            Show this help
+  -t, --threads <N>   Files processed at once (default: CPU count - 1)
+  -r, --retries <N>   Retries per failed file (default: 3)
+      --max           Maximum compression (non-subset FLAC: smaller, much
+                      slower; some old hardware players can't play it)
+      --tag           Tag processed files as crunched
+      --skip-tagged   Skip files that are already tagged
+      --log <path>    Write a log file; if <path> is a folder, a timestamped
+                      log is created inside it
+  -n, --dry-run       List the files that would be processed, change nothing
+  -q, --quiet         Only print the final summary
+  -V, --version       Show version
+  -h, --help          Show this help
 
 Examples:
   flaccrunch-cli ~/Music
-  flaccrunch-cli --threads 4 --mark --skip-crunched ~/Music /mnt/nas/More
-  flaccrunch-cli --log run.log "D:\Music\Album"
+  flaccrunch-cli --tag --skip-tagged --log ~/logs ~/Music /mnt/nas/More
+  flaccrunch-cli --max -t 4 "D:\Music\Album"
 ```
 
 Both `-flag` and `--flag` spellings work; `--` ends option parsing. Ctrl+C cancels cleanly (in-flight temp files are removed, originals untouched). The GUI binary accepts the same options plus `-silent` to run headless, e.g. `FlacCrunch.exe -silent "D:\Music"`; without `-silent` it opens the GUI with the paths pre-loaded.
@@ -118,7 +113,7 @@ Measured on a 2:15 24-bit/44.1 kHz track whose source had been encoded with orde
 
 FLAC is close to its floor; beyond the subset you are buying tenths of a percent with minutes of CPU. Whatever the mode, a re-encode that is not smaller never replaces the original (`MATCH|KEPT`).
 
-**CPU use.** Files are processed in parallel, one encoder per worker (default: cores − 1), which keeps every core busy as long as the queue is longer than the worker count. On Linux/macOS builds libFLAC 1.5's own multithreading is used on top of that: each worker gets `cores ÷ workers` encoder threads (`--encoder-threads` to override), so a short queue, or the tail of a run, still fills the machine. The Windows build of libFLAC is compiled without pthreads and therefore encodes each file on one thread; parallelism there comes from the worker count only.
+**CPU use.** Files are processed in parallel, one encoder per worker (default: cores − 1), which keeps every core busy as long as the queue is longer than the worker count. On Linux/macOS builds libFLAC 1.5's own multithreading is used on top of that: each worker gets `cores ÷ workers` encoder threads, so a short queue, or the tail of a run, still fills the machine. The Windows build of libFLAC is compiled without pthreads and therefore encodes each file on one thread; parallelism there comes from the worker count only.
 
 ## Verification Result Codes
 
@@ -211,7 +206,7 @@ The EFC summary includes: per-file results, total/success/fail counts, elapsed t
 
 The log also lists **Folders with bad files** (deduplicated, with counts) when any file failed, and an **EFC Savings** block with the audio / artwork / padding breakdown.
 
-The CLI prints one line per file as it completes, a live progress line on stderr, and a full summary on completion; `--log` / `--logdir` write the same EFC log the GUI exports.
+The CLI prints one line per file as it completes, a live progress line on stderr, and a full summary on completion; `--log` writes the same EFC log the GUI exports.
 
 ---
 

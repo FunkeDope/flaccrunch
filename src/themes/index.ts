@@ -8,6 +8,7 @@ export type ThemeId =
   | "basic"
   | "basic-dark"
   | "basic-wizard"
+  | "material"
   | "winamp"
   | "matrix"
   | "flash"
@@ -33,6 +34,7 @@ export const THEMES: readonly ThemeInfo[] = [
   { id: "basic", name: "Basic", tagline: "A plain Windows app: grey dialog, group boxes, list views, standard buttons.", workers: "table" },
   { id: "basic-dark", name: "Basic (Dark)", tagline: "The plain Windows app in Windows dark mode.", workers: "table" },
   { id: "basic-wizard", name: "Wizard", tagline: "The plain app laid out as an installer wizard: header band, centred page, bottom button bar.", workers: "table" },
+  { id: "material", name: "Material", tagline: "Android's Material You: top app bar, tonal buttons, list rows, wallpaper colours on Android 12+.", workers: "cards" },
   { id: "winamp", name: "Winamp", tagline: "Winamp 2 classic skin, copied from the real thing.", workers: "cards" },
   { id: "matrix", name: "Matrix", tagline: "A terminal: phosphor green on black, falling code, process list.", workers: "cards" },
   { id: "flash", name: "Flash Game", tagline: "2000s browser-game HUD: thick outlines, candy buttons, level cards.", workers: "cards" },
@@ -44,7 +46,9 @@ export const THEMES: readonly ThemeInfo[] = [
   { id: "limewire", name: "LimeWire", tagline: "LimeWire 4 on Windows XP: search pane, results table, downloads.", workers: "cards" },
 ];
 
-export const DEFAULT_THEME: ThemeId = "basic-dark";
+/** Material on Android phones, the plain Windows dark app everywhere else. */
+export const DEFAULT_THEME: ThemeId =
+  typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent) ? "material" : "basic-dark";
 
 export function isThemeId(value: unknown): value is ThemeId {
   return typeof value === "string" && THEMES.some((t) => t.id === value);

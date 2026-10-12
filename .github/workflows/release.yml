@@ -155,7 +155,7 @@ jobs:
 
             ## Quick start (CLI)
             ```
-            flaccrunch-cli --threads 4 --mark ~/Music
+            flaccrunch-cli --threads 4 --tag ~/Music
             FlacCrunch.exe -silent "D:\Music"
             ```
           releaseDraft: false

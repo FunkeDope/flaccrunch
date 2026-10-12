@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.5.0 — 2026-10-11
+
+### Fixed: Android layout under the status bar and camera cutout
+
+- On Android 15 (e.g. Pixel 9a) apps are drawn edge-to-edge, so the toolbar sat under the status bar and the camera cutout and could not be tapped. The app now keeps its content clear of the status bar, display cutout, gesture bar and on-screen keyboard, and tints the system bars to match the active theme (light or dark icons as needed). This applies to every theme.
+
+### New: Material theme (default on Android)
+
+- A Material 3 / Material You look built for phones: top app bar with a settings icon, large **Add folder** / **Add files** buttons, the queue as a list with remove buttons, a big **Start** button pinned above the gesture bar, a single scrolling page while running, results as two-line rows with sort chips, full-screen Settings with switches.
+- Uses your wallpaper colours on Android 12+ and follows the system light/dark setting. Selectable on desktop too, where it keeps the panel layout.
+- New Android installs start on Material. If a theme was already saved, pick **Settings → Theme → Material**.
+
+### Changed: simpler command-line switches
+
+- The CLI now has just: `-t/--threads`, `-r/--retries`, `--max`, `--tag`, `--skip-tagged`, `--log <file or folder>`, `-n/--dry-run`, `-q/--quiet`, `-V/--version`, `-h/--help` (plus `--silent` on the GUI binary).
+- Renamed so tagging and skipping use the same word: `--mark` → `--tag`, `--skip-crunched` → `--skip-tagged`. `--logdir` is folded into `--log`: give it a folder and a timestamped log is created inside.
+- Removed the libFLAC tuning switches (`--lpc-order`, `--blocksize`, `--apodization`, `--rice-order`, `--encoder-threads`) and the extra aliases (`-j`, `--lax`, `--skip`, `--logfile`, …). `--max` is the only compression switch. Old names stop with an error that says what to use instead.
+
+### Changed
+
+- Settings: clearer description of **Maximum compression**.
+
+---
+
 ## v1.4.1 — 2026-10-11
 
 ### Changed: display settings are saved with the other settings

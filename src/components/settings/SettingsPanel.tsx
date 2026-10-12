@@ -113,9 +113,8 @@ export function SettingsModal({ settings, cpuCount, defaultLogFolder, appVersion
                   <label htmlFor="max-compression">Maximum compression (non-subset)</label>
                 </div>
                 <div className="settings-hint">
-                  Uses prediction order 32 and a denser window search (like flac --lax). Smaller
-                  files, slower encode. Still lossless and verified, but some older hardware
-                  players cannot play non-subset FLAC.
+                  Uses FLAC's non-subset mode (prediction order 32, like flac --lax) for slightly
+                  smaller files. Encoding is much slower. Still lossless and verified.
                 </div>
               </div>
             </fieldset>

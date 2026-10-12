@@ -1,0 +1,1450 @@
+/*
+ * Material — Android's Material 3 / Material You, built to the M3 spec
+ * (m3.material.io): a 64dp top app bar with the title on the left and an icon
+ * action on the right, tonal buttons, assist chips, list rows with leading
+ * icons and trailing icon buttons, a filled Start button pinned above the
+ * gesture bar, full-screen dialogs on phones, switches instead of checkboxes.
+ * Tonal surfaces only: no drop shadows, no gradients.
+ *
+ * Colour: on Android 12+ src/lib/android.ts publishes the wallpaper palette as
+ * --you-<palette>-<tone> on <html> (inline, so it beats the fallbacks below).
+ * Elsewhere a teal seed palette in OKLCH stands in. Light and dark follow the
+ * system setting. Phones (and short landscape windows) get a single scrolling
+ * page; wide windows keep the shared fixed-pane dashboard.
+ *
+ * Touch targets are at least 48px. Everything is scoped to [data-theme="material"].
+ */
+
+[data-theme="material"] {
+  /* Fallback tonal palettes (tone ≈ OKLCH lightness). */
+  --you-hue: 182;
+  --you-a1-0: oklch(0 0 0);
+  --you-a1-10: oklch(0.21 0.05 var(--you-hue));
+  --you-a1-20: oklch(0.31 0.07 var(--you-hue));
+  --you-a1-30: oklch(0.4 0.085 var(--you-hue));
+  --you-a1-40: oklch(0.5 0.1 var(--you-hue));
+  --you-a1-80: oklch(0.83 0.1 var(--you-hue));
+  --you-a1-90: oklch(0.91 0.07 var(--you-hue));
+  --you-a1-100: oklch(1 0 0);
+  --you-a2-10: oklch(0.21 0.025 var(--you-hue));
+  --you-a2-20: oklch(0.31 0.03 var(--you-hue));
+  --you-a2-30: oklch(0.4 0.035 var(--you-hue));
+  --you-a2-80: oklch(0.83 0.035 var(--you-hue));
+  --you-a2-90: oklch(0.91 0.03 var(--you-hue));
+  --you-a3-30: oklch(0.4 0.07 calc(var(--you-hue) + 60));
+  --you-a3-80: oklch(0.83 0.08 calc(var(--you-hue) + 60));
+  --you-a3-90: oklch(0.91 0.05 calc(var(--you-hue) + 60));
+  --you-a3-40: oklch(0.5 0.08 calc(var(--you-hue) + 60));
+  --you-n1-0: oklch(0 0 0);
+  --you-n1-10: oklch(0.2 0.006 var(--you-hue));
+  --you-n1-20: oklch(0.3 0.006 var(--you-hue));
+  --you-n1-30: oklch(0.39 0.006 var(--you-hue));
+  --you-n1-90: oklch(0.91 0.005 var(--you-hue));
+  --you-n1-95: oklch(0.955 0.004 var(--you-hue));
+  --you-n1-99: oklch(0.99 0.003 var(--you-hue));
+  --you-n2-30: oklch(0.39 0.012 var(--you-hue));
+  --you-n2-50: oklch(0.56 0.012 var(--you-hue));
+  --you-n2-60: oklch(0.65 0.012 var(--you-hue));
+  --you-n2-80: oklch(0.83 0.012 var(--you-hue));
+
+  /* M3 colour roles, light scheme. */
+  --md-primary: var(--you-a1-40);
+  --md-on-primary: var(--you-a1-100);
+  --md-primary-container: var(--you-a1-90);
+  --md-on-primary-container: var(--you-a1-10);
+  --md-secondary-container: var(--you-a2-90);
+  --md-on-secondary-container: var(--you-a2-10);
+  --md-tertiary: var(--you-a3-40);
+  --md-surface: color-mix(in oklab, var(--you-n1-99) 75%, var(--you-n1-95));
+  --md-surface-container-low: color-mix(in oklab, var(--you-n1-95) 75%, var(--you-n1-99));
+  --md-surface-container: color-mix(in oklab, var(--you-n1-95) 80%, var(--you-n1-90));
+  --md-surface-container-high: color-mix(in oklab, var(--you-n1-90) 60%, var(--you-n1-95));
+  --md-surface-container-highest: var(--you-n1-90);
+  --md-on-surface: var(--you-n1-10);
+  --md-on-surface-variant: var(--you-n2-30);
+  --md-outline: var(--you-n2-50);
+  --md-outline-variant: var(--you-n2-80);
+  --md-error: #b3261e;
+  --md-on-error: #ffffff;
+  --md-error-container: #f9dedc;
+  --md-on-error-container: #410e0b;
+  --md-success: #1e6c35;
+  --md-warning: #845400;
+
+  --font: Roboto, "Google Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Roboto Mono", "Cascadia Mono", Consolas, monospace;
+  --fs: 14px;
+
+  /* Shared variables used by base.css. */
+  --desktop: var(--md-surface);
+  --bg: var(--md-surface);
+  --surface: var(--md-surface);
+  --surface-2: var(--md-surface-container-low);
+  --text: var(--md-on-surface);
+  --text-strong: var(--md-on-surface);
+  --muted: var(--md-on-surface-variant);
+  --border: var(--md-outline-variant);
+  --border-strong: var(--md-outline);
+  --accent: var(--md-primary);
+  --accent-text: var(--md-on-primary);
+  --title-bg: var(--md-surface);
+  --title-text: var(--md-on-surface);
+  --ok: var(--md-success);
+  --warn: var(--md-warning);
+  --fail: var(--md-error);
+  --stage-blue: var(--md-primary);
+  --stage-green: var(--md-success);
+  --stage-amber: var(--md-warning);
+  --stage-purple: var(--md-tertiary);
+  --pane-bg: var(--md-surface-container-low);
+  --row-hover: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  --row-fail-bg: var(--md-error-container);
+  --row-fail-hover: var(--md-error-container);
+  --worker-active-bg: var(--md-surface-container-high);
+  --drop-active-bg: var(--md-primary-container);
+  --progress-track: var(--md-secondary-container);
+  --progress-fill: var(--md-primary);
+  --line: var(--md-outline-variant);
+  --line-dark: var(--md-outline-variant);
+  --line-highlight: transparent;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: none;
+
+  /* Material icons (24px grid) used as CSS masks. */
+  --md-icon-settings: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z'/%3E%3C/svg%3E");
+  --md-icon-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'/%3E%3C/svg%3E");
+  --md-icon-new-folder: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z'/%3E%3C/svg%3E");
+  --md-icon-folder: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z'/%3E%3C/svg%3E");
+  --md-icon-music-note: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/%3E%3C/svg%3E");
+  --md-icon-queue-music: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z'/%3E%3C/svg%3E");
+  --md-icon-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E");
+  --md-icon-upload: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z'/%3E%3C/svg%3E");
+  --md-icon-fullscreen: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'/%3E%3C/svg%3E");
+  --md-icon-fullscreen-exit: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z'/%3E%3C/svg%3E");
+}
+
+/* M3 colour roles, dark scheme. */
+@media (prefers-color-scheme: dark) {
+  [data-theme="material"] {
+    --md-primary: var(--you-a1-80);
+    --md-on-primary: var(--you-a1-20);
+    --md-primary-container: var(--you-a1-30);
+    --md-on-primary-container: var(--you-a1-90);
+    --md-secondary-container: var(--you-a2-30);
+    --md-on-secondary-container: var(--you-a2-90);
+    --md-tertiary: var(--you-a3-80);
+    --md-surface: color-mix(in oklab, var(--you-n1-10) 60%, var(--you-n1-0));
+    --md-surface-container-low: var(--you-n1-10);
+    --md-surface-container: color-mix(in oklab, var(--you-n1-10) 80%, var(--you-n1-20));
+    --md-surface-container-high: color-mix(in oklab, var(--you-n1-10) 30%, var(--you-n1-20));
+    --md-surface-container-highest: color-mix(in oklab, var(--you-n1-20) 80%, var(--you-n1-30));
+    --md-on-surface: var(--you-n1-90);
+    --md-on-surface-variant: var(--you-n2-80);
+    --md-outline: var(--you-n2-60);
+    --md-outline-variant: var(--you-n2-30);
+    --md-error: #f2b8b5;
+    --md-on-error: #601410;
+    --md-error-container: #8c1d18;
+    --md-on-error-container: #f9dedc;
+    --md-success: #8fd7a1;
+    --md-warning: #f6c26b;
+    color-scheme: dark;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Base type and controls                                              */
+/* ------------------------------------------------------------------ */
+
+[data-theme="material"] body {
+  font: 400 14px/20px var(--font);
+  letter-spacing: 0.016em;
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-theme="material"] ::selection {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+/* Buttons: M3 outlined button by default. */
+[data-theme="material"] button {
+  position: relative;
+  min-height: 40px;
+  padding: 0 24px;
+  gap: 8px;
+  border: 1px solid var(--md-outline);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--md-primary);
+  font: 500 14px/20px var(--font);
+  letter-spacing: 0.007em;
+  overflow: hidden;
+  transition: background-color 0.15s ease;
+}
+
+/* State layer: 8% hover, 10% pressed, in the content colour. */
+[data-theme="material"] button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+[data-theme="material"] button:hover:not(:disabled)::after {
+  opacity: 0.08;
+}
+
+[data-theme="material"] button:active:not(:disabled)::after {
+  opacity: 0.12;
+}
+
+[data-theme="material"] button:hover:not(:disabled) {
+  border-color: var(--md-outline);
+}
+
+[data-theme="material"] button:active:not(:disabled) {
+  transform: none;
+}
+
+[data-theme="material"] button:focus-visible {
+  outline: 3px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+[data-theme="material"] button:disabled {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+  color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+}
+
+/* Filled button. */
+[data-theme="material"] button.default {
+  border-color: transparent;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+
+[data-theme="material"] button.default:disabled {
+  background: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+  color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+}
+
+/* Icon helper: buttons and rows draw their icon as a masked ::before. */
+[data-theme="material"] .app-toolbar-actions button::before,
+[data-theme="material"] .start-next-button::before,
+[data-theme="material"] .remove-btn::before,
+[data-theme="material"] .title-bar-controls button::before,
+[data-theme="material"] .drop-zone::before,
+[data-theme="material"] .folder-item::before {
+  content: "";
+  flex: none;
+  width: 18px;
+  height: 18px;
+  background: currentColor;
+  -webkit-mask: var(--md-icon) center / contain no-repeat;
+  mask: var(--md-icon) center / contain no-repeat;
+}
+
+/* Text fields: M3 outlined text field. */
+[data-theme="material"] input[type="text"],
+[data-theme="material"] select {
+  min-height: 56px;
+  padding: 0 16px;
+  border: 1px solid var(--md-outline);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--md-on-surface);
+  font: 400 16px/24px var(--font);
+}
+
+[data-theme="material"] select {
+  appearance: none;
+  padding-right: 48px;
+  background-color: transparent;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--md-on-surface-variant) 50%),
+    linear-gradient(-45deg, transparent 50%, var(--md-on-surface-variant) 50%);
+  background-position: right 23px center, right 18px center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+[data-theme="material"] select option {
+  background: var(--md-surface-container);
+  color: var(--md-on-surface);
+}
+
+[data-theme="material"] input[type="text"]:focus,
+[data-theme="material"] select:focus {
+  outline: none;
+  border: 2px solid var(--md-primary);
+  padding-left: 15px;
+}
+
+/* Switches instead of checkboxes. */
+[data-theme="material"] input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  width: 52px;
+  height: 32px;
+  margin: 0;
+  border: 2px solid var(--md-outline);
+  border-radius: 16px;
+  cursor: pointer;
+  background:
+    radial-gradient(circle at 14px 50%, var(--md-outline) 7.5px, transparent 8px),
+    var(--md-surface-container-highest);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+[data-theme="material"] input[type="checkbox"]:checked {
+  border-color: var(--md-primary);
+  background:
+    radial-gradient(circle at calc(100% - 14px) 50%, var(--md-on-primary) 11.5px, transparent 12px),
+    var(--md-primary);
+}
+
+[data-theme="material"] input[type="checkbox"]:focus-visible {
+  outline: 3px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+[data-theme="material"] input[type="range"] {
+  height: 44px;
+  accent-color: var(--md-primary);
+  cursor: pointer;
+}
+
+[data-theme="material"] label {
+  gap: 16px;
+}
+
+[data-theme="material"] .progress-indicator {
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--md-secondary-container);
+}
+
+[data-theme="material"] .progress-indicator-bar {
+  background: var(--md-primary);
+  border-radius: 3px;
+}
+
+[data-theme="material"] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+[data-theme="material"] ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--md-on-surface) 24%, transparent);
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* App frame: edge-to-edge surface with a top app bar                  */
+/* ------------------------------------------------------------------ */
+
+[data-theme="material"] .app-shell {
+  padding: 0;
+  background: var(--md-surface);
+}
+
+[data-theme="material"] .app-window {
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--md-surface);
+}
+
+[data-theme="material"] .app-title-bar {
+  flex: none;
+  height: 64px;
+  padding: 0 64px 0 16px;
+  border: 0;
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+}
+
+[data-theme="material"] .app-title-bar .title-bar-text {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+[data-theme="material"] .app-window-body {
+  padding: 0;
+  gap: 0;
+}
+
+/* Toolbar: tonal buttons under the app bar; Settings becomes the app bar's
+   trailing icon button. */
+[data-theme="material"] .app-toolbar {
+  flex: none;
+  flex-wrap: nowrap;
+  margin: 0;
+  padding: 0 16px 8px;
+}
+
+[data-theme="material"] .app-toolbar:has(.app-toolbar-actions > button:only-child) {
+  padding: 0;
+}
+
+[data-theme="material"] .app-toolbar-actions {
+  flex: 1;
+  gap: 8px;
+}
+
+[data-theme="material"] .app-toolbar-actions > button:not(:last-child) {
+  flex: 1;
+  max-width: 220px;
+  min-height: 48px;
+  padding: 0 20px 0 16px;
+  border: 0;
+  border-radius: 24px;
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  font-size: 0;
+}
+
+[data-theme="material"] .app-toolbar-actions > button:first-child:not(:last-child) {
+  --md-icon: var(--md-icon-new-folder);
+}
+
+[data-theme="material"] .app-toolbar-actions > button:nth-child(2):not(:last-child) {
+  --md-icon: var(--md-icon-queue-music);
+}
+
+[data-theme="material"] .app-toolbar-actions > button:not(:last-child)::after {
+  position: static;
+  inset: auto;
+  border-radius: 0;
+  background: none;
+  opacity: 1;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+[data-theme="material"] .app-toolbar-actions > button:first-child:not(:last-child)::after {
+  content: "Add folder";
+}
+
+[data-theme="material"] .app-toolbar-actions > button:nth-child(2):not(:last-child)::after {
+  content: "Add files";
+}
+
+/* Tonal buttons draw their state layer with box-shadow (::after holds the label). */
+[data-theme="material"] .app-toolbar-actions > button:not(:last-child):hover {
+  box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--md-on-secondary-container) 8%, transparent);
+}
+
+[data-theme="material"] .app-toolbar-actions > button:not(:last-child):active {
+  box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--md-on-secondary-container) 12%, transparent);
+}
+
+[data-theme="material"] .app-toolbar-actions > button:last-child {
+  --md-icon: var(--md-icon-settings);
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 48px;
+  min-height: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--md-on-surface-variant);
+  font-size: 0;
+}
+
+[data-theme="material"] .app-toolbar-actions > button:last-child::before {
+  width: 24px;
+  height: 24px;
+}
+
+[data-theme="material"] .app-toolbar-right {
+  display: none;
+}
+
+[data-theme="material"] .content {
+  padding: 0 16px 16px;
+}
+
+[data-theme="material"] .app-stack {
+  gap: 16px;
+}
+
+/* Summary: a row of assist chips. */
+[data-theme="material"] .app-summary-bar {
+  gap: 8px;
+  padding-top: 4px;
+}
+
+[data-theme="material"] .status-bar-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font: 500 14px/20px var(--font);
+  letter-spacing: 0.007em;
+}
+
+[data-theme="material"] .status-bar-field strong {
+  color: var(--md-on-surface);
+  font-weight: 500;
+}
+
+[data-theme="material"] .error-banner {
+  margin: 0 0 12px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--md-error-container);
+  color: var(--md-on-error-container);
+}
+
+/* Fieldsets are page sections: no box, the legend is an M3 list subheader. */
+[data-theme="material"] fieldset {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="material"] legend {
+  float: left;
+  width: 100%;
+  padding: 8px 0;
+  color: var(--md-primary);
+  font: 500 14px/20px var(--font);
+  letter-spacing: 0.007em;
+  text-transform: none;
+}
+
+[data-theme="material"] legend + * {
+  clear: both;
+}
+
+[data-theme="material"] .sunken-panel {
+  border: 0;
+  border-radius: 16px;
+  background: var(--md-surface-container-low);
+}
+
+/* ------------------------------------------------------------------ */
+/* Source selection                                                    */
+/* ------------------------------------------------------------------ */
+
+[data-theme="material"] .start-screen-copy {
+  color: var(--md-on-surface-variant);
+}
+
+[data-theme="material"] .start-screen-copy p + p {
+  margin-top: 4px;
+  color: var(--md-on-surface);
+  font-weight: 500;
+}
+
+[data-theme="material"] .drop-zone-row {
+  gap: 12px;
+  margin-top: 16px;
+}
+
+[data-theme="material"] .drop-zone {
+  --md-icon: var(--md-icon-upload);
+  gap: 4px;
+  min-height: 112px;
+  border: 1px dashed var(--md-outline);
+  border-radius: 16px;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+
+[data-theme="material"] .drop-zone::before {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 4px;
+  color: var(--md-primary);
+}
+
+[data-theme="material"] .drop-zone:hover {
+  background: color-mix(in srgb, var(--md-primary) 6%, transparent);
+}
+
+[data-theme="material"] .drop-zone:active,
+[data-theme="material"] .drop-zone.active {
+  border-style: solid;
+  border-color: var(--md-primary);
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+[data-theme="material"] .drop-zone-title {
+  font: 500 16px/24px var(--font);
+}
+
+[data-theme="material"] .drop-zone-note {
+  color: var(--md-on-surface-variant);
+}
+
+[data-theme="material"] .drop-zone-mobile {
+  margin-top: 16px;
+  min-height: 140px;
+}
+
+/* Overrides the inline marginTop the mobile layout sets. */
+[data-theme="material"] .intake-footer {
+  gap: 12px;
+  margin-top: 16px !important;
+}
+
+/* Queue: an M3 list with leading icons and trailing remove buttons. */
+[data-theme="material"] .queue-list-panel {
+  padding: 4px 0;
+  overflow: visible;
+}
+
+[data-theme="material"] .folder-item {
+  --md-icon: var(--md-icon-folder);
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 4px 4px 4px 16px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+[data-theme="material"] .folder-item:has(.path[title$=".flac" i]) {
+  --md-icon: var(--md-icon-music-note);
+}
+
+[data-theme="material"] .folder-item::before {
+  width: 24px;
+  height: 24px;
+  color: var(--md-on-surface-variant);
+}
+
+[data-theme="material"] .folder-item .path {
+  white-space: nowrap;
+}
+
+[data-theme="material"] .folder-item .remove-btn {
+  --md-icon: var(--md-icon-close);
+  flex: none;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--md-on-surface-variant);
+  font-size: 0;
+}
+
+[data-theme="material"] .folder-item .remove-btn::before {
+  width: 24px;
+  height: 24px;
+}
+
+/* Start: a large filled button, pinned above the gesture bar on phones. */
+[data-theme="material"] .start-footer-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 0;
+}
+
+[data-theme="material"] .start-footer-actions > button:not(.start-next-button) {
+  border-color: transparent;
+}
+
+[data-theme="material"] .start-next-button {
+  --md-icon: var(--md-icon-play);
+  min-width: 160px;
+  min-height: 56px;
+  padding: 0 28px 0 20px;
+  border-radius: 28px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+[data-theme="material"] .start-next-button::before {
+  width: 24px;
+  height: 24px;
+}
+
+/* "Start >" reads as "Start"; ::after holds the label, so the state layer
+   moves to box-shadow. */
+[data-theme="material"] .start-next-button {
+  font-size: 0;
+}
+
+[data-theme="material"] .start-next-button::after {
+  content: "Start";
+  position: static;
+  inset: auto;
+  border-radius: 0;
+  background: none;
+  opacity: 1;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+[data-theme="material"] .start-next-button:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--md-on-primary) 8%, transparent);
+}
+
+[data-theme="material"] .start-next-button:active:not(:disabled) {
+  box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--md-on-primary) 12%, transparent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Run status card                                                     */
+/* ------------------------------------------------------------------ */
+
+[data-theme="material"] .run-status-window {
+  border: 0;
+  border-radius: 16px;
+  background: var(--md-surface-container);
+  overflow: visible;
+}
+
+/* base.css pins .run-status-body to 6px with !important, which a later layer
+   cannot override, so the rest of the card padding goes on the grid. */
+[data-theme="material"] .run-status-main {
+  padding: 10px 10px 6px;
+}
+
+[data-theme="material"] .run-status-main {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label pct"
+    "bar bar"
+    "actions actions";
+  gap: 12px 16px;
+}
+
+[data-theme="material"] .status-bar-label {
+  grid-area: label;
+  align-self: end;
+  font: 500 16px/24px var(--font);
+  text-transform: none;
+}
+
+[data-theme="material"] .status-bar-pct {
+  grid-area: pct;
+  font: 400 32px/40px var(--font);
+  color: var(--md-on-surface);
+}
+
+[data-theme="material"] .run-progress {
+  grid-area: bar;
+  height: 8px;
+  border-radius: 4px;
+}
+
+[data-theme="material"] .status-success .run-progress .progress-indicator-bar {
+  background: var(--md-success);
+}
+
+[data-theme="material"] .status-warning .run-progress .progress-indicator-bar {
+  background: var(--md-warning);
+}
+
+[data-theme="material"] .status-error .run-progress .progress-indicator-bar {
+  background: var(--md-error);
+}
+
+[data-theme="material"] .status-bar-actions {
+  grid-area: actions;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* "Show Full Log" and "Export Log" are text buttons next to the filled one. */
+[data-theme="material"] .status-bar-actions button:not(.default):not(:only-child) {
+  padding: 0 12px;
+  border-color: transparent;
+}
+
+[data-theme="material"] .run-status-window .status-bar {
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+
+[data-theme="material"] .run-status-window .status-bar-field {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  background: var(--md-surface-container-highest);
+  font-size: 13px;
+}
+
+[data-theme="material"] .chip-success strong {
+  color: var(--md-success);
+}
+
+[data-theme="material"] .chip-error {
+  background: var(--md-error-container) !important;
+  color: var(--md-on-error-container) !important;
+}
+
+[data-theme="material"] .chip-error strong {
+  color: inherit;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard: workers and results                                      */
+/* ------------------------------------------------------------------ */
+
+[data-theme="material"] .processing-section {
+  gap: 8px;
+}
+
+[data-theme="material"] .resize-handle::after {
+  width: 32px;
+  height: 4px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--md-outline-variant);
+}
+
+[data-theme="material"] .pane-toolbar {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+[data-theme="material"] .workers-heading {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+[data-theme="material"] .bad-files-kicker {
+  margin-left: 0;
+}
+
+[data-theme="material"] .section-kicker,
+[data-theme="material"] .worker-summary {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.033em;
+}
+
+[data-theme="material"] .worker-toggle {
+  min-height: 40px;
+  padding: 0 12px;
+  border-color: transparent;
+}
+
+[data-theme="material"] .worker-body {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+[data-theme="material"] .worker-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  padding: 0;
+}
+
+/* Worker: a list row on a low surface; active rows sit one tone higher. */
+[data-theme="material"] .worker-panel {
+  gap: 6px;
+  min-height: 0;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--md-surface-container-low);
+}
+
+[data-theme="material"] .worker-panel.active {
+  background: var(--md-surface-container-high);
+}
+
+[data-theme="material"] .worker-panel-top {
+  align-items: center;
+}
+
+[data-theme="material"] .worker-id {
+  color: var(--md-on-surface-variant);
+  font: 500 12px/16px var(--font);
+  letter-spacing: 0.04em;
+}
+
+/* Stage as a small tonal pill (the label colour itself comes from base). */
+[data-theme="material"] .worker-stage-cell {
+  padding: 2px 8px;
+  border-radius: 8px;
+  font: 500 12px/16px var(--font);
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+[data-theme="material"] .worker-stage-cell:has(.stage-converting) {
+  background: color-mix(in srgb, var(--stage-blue) 16%, transparent);
+}
+
+[data-theme="material"] .worker-stage-cell:has(.stage-hashing-source),
+[data-theme="material"] .worker-stage-cell:has(.stage-hashing-output) {
+  background: color-mix(in srgb, var(--stage-amber) 16%, transparent);
+}
+
+[data-theme="material"] .worker-stage-cell:has(.stage-artwork) {
+  background: color-mix(in srgb, var(--stage-purple) 16%, transparent);
+}
+
+[data-theme="material"] .worker-stage-cell:has(.stage-finalizing) {
+  background: color-mix(in srgb, var(--stage-green) 16%, transparent);
+}
+
+[data-theme="material"] .worker-card .file-name {
+  margin-bottom: 6px;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--md-on-surface);
+}
+
+[data-theme="material"] .worker-panel.idle-card .file-name {
+  color: var(--md-on-surface-variant);
+}
+
+[data-theme="material"] .worker-progress {
+  height: 4px;
+}
+
+[data-theme="material"] .worker-percent {
+  font-size: 12px;
+}
+
+[data-theme="material"] .worker-hash-panel {
+  padding: 6px 0 0;
+  border: 0;
+  border-top: 1px solid var(--md-outline-variant);
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="material"] .hash-row {
+  gap: 8px;
+  font: 400 11px/16px var(--mono);
+}
+
+[data-theme="material"] .hash-label {
+  min-width: 26px;
+  font: 500 11px/16px var(--font);
+  letter-spacing: 0.04em;
+}
+
+/* Results table (wide windows): an M3 data table. */
+[data-theme="material"] .events-table-wrap {
+  border-radius: 16px;
+  background: var(--md-surface-container-low);
+}
+
+[data-theme="material"] table thead th {
+  height: 48px;
+  padding: 0 12px;
+  background: var(--md-surface-container-low);
+  color: var(--md-on-surface-variant);
+  font: 500 12px/16px var(--font);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+
+[data-theme="material"] .events-table td {
+  height: 40px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+
+[data-theme="material"] .events-table-footer {
+  padding: 8px 4px 0;
+  color: var(--md-on-surface-variant);
+  font-size: 12px;
+}
+
+[data-theme="material"] .bad-folders-panel {
+  margin-bottom: 8px;
+  padding: 8px 16px;
+  background: var(--md-error-container);
+  color: var(--md-on-error-container);
+}
+
+[data-theme="material"] .bad-folders-panel .queue-section-label,
+[data-theme="material"] .bad-folder-count,
+[data-theme="material"] .bad-files-kicker {
+  color: inherit;
+}
+
+[data-theme="material"] .bad-files-kicker {
+  color: var(--md-error);
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs (settings, log): M3 basic dialog                            */
+/* ------------------------------------------------------------------ */
+
+[data-theme="material"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+[data-theme="material"] .modal {
+  border: 0;
+  border-radius: 28px;
+  background: var(--md-surface-container-high);
+  box-shadow: none;
+}
+
+[data-theme="material"] .modal .title-bar {
+  min-height: 64px;
+  padding: 8px 8px 0 24px;
+  border: 0;
+  background: transparent;
+}
+
+[data-theme="material"] .modal .title-bar-text {
+  font: 400 24px/32px var(--font);
+  letter-spacing: 0;
+}
+
+[data-theme="material"] .title-bar-controls {
+  gap: 0;
+}
+
+[data-theme="material"] .title-bar-controls button {
+  --md-icon: var(--md-icon-close);
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--md-on-surface-variant);
+}
+
+[data-theme="material"] .title-bar-controls button::before {
+  width: 24px;
+  height: 24px;
+  font-size: 0;
+}
+
+[data-theme="material"] .title-bar-controls button[aria-label="Maximize"] {
+  --md-icon: var(--md-icon-fullscreen);
+}
+
+[data-theme="material"] .title-bar-controls button[aria-label="Restore"] {
+  --md-icon: var(--md-icon-fullscreen-exit);
+}
+
+[data-theme="material"] .modal-body {
+  padding: 8px 24px 24px;
+}
+
+[data-theme="material"] .settings-scroll {
+  gap: 8px;
+  padding-right: 0;
+}
+
+[data-theme="material"] .settings-group {
+  gap: 4px;
+  padding: 12px 0;
+}
+
+[data-theme="material"] .settings-group + .settings-group {
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--md-outline-variant);
+  box-shadow: none;
+}
+
+[data-theme="material"] .settings-group > label,
+[data-theme="material"] .settings-slider-head {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+[data-theme="material"] .settings-value {
+  color: var(--md-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Switch rows: label on the left, switch on the right. */
+[data-theme="material"] .settings-check .field-row {
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+}
+
+[data-theme="material"] .settings-check .field-row label {
+  flex: 1;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+[data-theme="material"] .settings-check .settings-hint {
+  margin-left: 0;
+  padding-right: 68px;
+}
+
+[data-theme="material"] .settings-hint {
+  color: var(--md-on-surface-variant);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+[data-theme="material"] .settings-footer {
+  gap: 12px;
+}
+
+[data-theme="material"] .settings-path {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+[data-theme="material"] .settings-actions {
+  gap: 8px;
+}
+
+[data-theme="material"] .settings-actions > button:not(.default) {
+  padding: 0 12px;
+  border-color: transparent;
+}
+
+[data-theme="material"] .settings-version {
+  color: var(--md-on-surface-variant);
+  font-size: 12px;
+}
+
+[data-theme="material"] .log-viewer-shell {
+  padding: 0;
+  border-radius: 12px;
+  background: var(--md-surface-container-lowest, var(--md-surface));
+}
+
+[data-theme="material"] .log-viewer-text {
+  padding: 12px;
+  background: transparent;
+  color: var(--md-on-surface);
+  font: 400 12px/18px var(--mono);
+}
+
+/* ------------------------------------------------------------------ */
+/* Wide windows: content column, roomier padding                       */
+/* ------------------------------------------------------------------ */
+
+@media (min-width: 721px) and (min-height: 521px) {
+  [data-theme="material"] .app-title-bar {
+    padding-left: 24px;
+  }
+
+  [data-theme="material"] .app-toolbar {
+    padding: 0 24px 12px;
+  }
+
+  [data-theme="material"] .app-toolbar-actions > button:last-child {
+    right: 12px;
+  }
+
+  [data-theme="material"] .content {
+    padding: 0 24px 24px;
+  }
+
+  [data-theme="material"] .start-fieldset {
+    width: 100%;
+    max-width: 760px;
+  }
+
+  [data-theme="material"] .run-status-main {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "label pct actions"
+      "bar bar bar";
+    align-items: center;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Phones (and short landscape windows): one scrolling page            */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 720px), (max-height: 520px) {
+  /* The page scrolls as a whole instead of squeezing fixed panes. */
+  [data-theme="material"] .content {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 0;
+  }
+
+  [data-theme="material"] .app-stack {
+    flex: none;
+    min-height: 100%;
+  }
+
+  [data-theme="material"] .app-summary-bar {
+    flex-wrap: nowrap;
+    margin: 0 -16px;
+    padding: 4px 16px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  [data-theme="material"] .app-summary-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  [data-theme="material"] .start-fieldset {
+    flex: 1 0 auto;
+  }
+
+  [data-theme="material"] .intake-footer {
+    flex: 1 0 auto;
+  }
+
+  [data-theme="material"] .queue-list-panel,
+  [data-theme="material"] .bad-folders-panel {
+    max-height: none;
+    overflow: visible;
+  }
+
+  [data-theme="material"] .start-footer-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: auto -16px 0;
+    padding: 12px 16px 16px;
+    background: var(--md-surface);
+  }
+
+  [data-theme="material"] .start-next-button {
+    flex: 1;
+  }
+
+  /* Dashboard: natural heights in the page scroll, no drag handle. */
+  [data-theme="material"] .processing-section {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    gap: 16px;
+    container-type: normal;
+  }
+
+  [data-theme="material"] .resize-handle {
+    display: none;
+  }
+
+  [data-theme="material"] .workers-pane.is-auto,
+  [data-theme="material"] .workers-pane {
+    max-height: none;
+    flex: none;
+  }
+
+  [data-theme="material"] .worker-body,
+  [data-theme="material"] .events-table-wrap {
+    overflow: visible;
+  }
+
+  [data-theme="material"] .worker-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-theme="material"] .files-pane {
+    flex: none;
+    padding-bottom: 16px;
+  }
+
+  [data-theme="material"] .events-table-shell {
+    flex: none;
+  }
+
+  /* Results become two-line list rows; the header becomes sort chips. */
+  [data-theme="material"] .events-table-wrap {
+    background: transparent;
+    border-radius: 0;
+  }
+
+  [data-theme="material"] .events-table,
+  [data-theme="material"] .events-table thead,
+  [data-theme="material"] .events-table tbody {
+    display: block;
+    white-space: normal;
+  }
+
+  [data-theme="material"] .events-table thead tr {
+    display: flex;
+    gap: 8px;
+    margin: 0 -16px;
+    padding: 0 16px 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  [data-theme="material"] .events-table thead th {
+    position: static;
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--md-on-surface-variant);
+    font: 500 14px/20px var(--font);
+  }
+
+  [data-theme="material"] .events-table thead th.sort-active {
+    border-color: transparent;
+    background: var(--md-secondary-container);
+    color: var(--md-on-secondary-container);
+  }
+
+  [data-theme="material"] .events-table thead th .sort-arrow {
+    color: inherit;
+  }
+
+  [data-theme="material"] .events-table tbody tr {
+    display: grid;
+    grid-template-columns: auto auto auto auto minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 2px 12px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    margin-bottom: 4px;
+    background: var(--md-surface-container-low);
+  }
+
+  [data-theme="material"] .events-table tbody tr.row-fail {
+    background: var(--md-error-container);
+    color: var(--md-on-error-container);
+  }
+
+  [data-theme="material"] .events-table td {
+    height: auto;
+    padding: 0;
+    border: 0;
+    background: transparent !important;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--md-on-surface-variant);
+    white-space: nowrap;
+  }
+
+  /* Row 1: file name, saved %. */
+  [data-theme="material"] .events-table td:nth-child(3) {
+    grid-row: 1;
+    grid-column: 1 / -2;
+    max-width: none !important;
+    font-size: 15px;
+    line-height: 22px;
+    color: var(--md-on-surface);
+  }
+
+  [data-theme="material"] .events-table td:nth-child(6) {
+    grid-row: 1;
+    grid-column: -2 / -1;
+    font-size: 15px;
+    font-weight: 500;
+    text-align: right;
+  }
+
+  /* Row 2: status, time, audio saved, art saved, verification. */
+  [data-theme="material"] .events-table td:nth-child(2) { grid-row: 2; grid-column: 1; }
+  [data-theme="material"] .events-table td:nth-child(1) { grid-row: 2; grid-column: 2; }
+  [data-theme="material"] .events-table td:nth-child(4) { grid-row: 2; grid-column: 3; }
+  [data-theme="material"] .events-table td:nth-child(5) { grid-row: 2; grid-column: 4; }
+
+  [data-theme="material"] .events-table td:nth-child(7) {
+    grid-row: 2;
+    grid-column: 5 / -1;
+    max-width: none !important;
+    text-align: right;
+  }
+
+  [data-theme="material"] .events-table tr.row-fail td {
+    color: inherit;
+  }
+
+  [data-theme="material"] .events-table .placeholder-row {
+    display: block;
+  }
+
+  /* Dialogs go full-screen. */
+  [data-theme="material"] .modal-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  [data-theme="material"] .modal,
+  [data-theme="material"] .log-viewer-window,
+  [data-theme="material"] .log-viewer-window.is-maximized {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    background: var(--md-surface);
+  }
+
+  /* Full-screen dialog app bar: close on the left, then the title. */
+  [data-theme="material"] .modal .title-bar {
+    flex: none;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+    gap: 4px;
+    height: 64px;
+    padding: 0 16px 0 4px;
+  }
+
+  [data-theme="material"] .modal .title-bar-text {
+    font-size: 22px;
+    line-height: 28px;
+  }
+
+  [data-theme="material"] .title-bar-controls button[aria-label="Maximize"],
+  [data-theme="material"] .title-bar-controls button[aria-label="Restore"] {
+    display: none;
+  }
+
+  [data-theme="material"] .modal-body {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    padding: 0 16px;
+  }
+
+  [data-theme="material"] .settings-scroll {
+    flex: 1;
+  }
+
+  [data-theme="material"] .settings-footer,
+  [data-theme="material"] .log-viewer-body > .settings-actions {
+    margin: 0 -16px;
+    padding: 12px 16px 16px;
+    border-top: 1px solid var(--md-outline-variant);
+  }
+
+  [data-theme="material"] .log-viewer-body {
+    padding-top: 0;
+  }
+}

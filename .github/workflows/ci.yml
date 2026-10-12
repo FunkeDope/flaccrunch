@@ -73,8 +73,8 @@ jobs:
           "$BIN" --version
           mkdir -p /tmp/smoke && cp ../Tests/un-optimized.flac /tmp/smoke/track.flac
           "$BIN" --dry-run /tmp/smoke
-          "$BIN" --threads 2 --mark --log /tmp/smoke/run.log /tmp/smoke
-          "$BIN" --skip-crunched /tmp/smoke
+          "$BIN" --threads 2 --tag --log /tmp/smoke/run.log /tmp/smoke
+          "$BIN" --skip-tagged /tmp/smoke
           cat /tmp/smoke/run.log | head -20
 
   check-gui:
