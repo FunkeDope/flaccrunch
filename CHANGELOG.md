@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.4.1 — 2026-10-11
+
+### Changed: display settings are saved with the other settings
+
+- The display theme is now saved in `settings.json` with every other setting, instead of in the app's web view storage.
+- New **Settings → Show quick switch menu** checkbox (off by default). The floating theme menu in the bottom-left corner and its Ctrl+Shift+T shortcut only work when it is on.
+
+---
+
 ## v1.4.0 — 2026-10-11
 
 ### New: display themes
